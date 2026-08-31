@@ -6,11 +6,14 @@ import {
   Clock3,
   FileText,
   Filter,
+  Inbox,
+  Bot,
   Loader2,
   MessageSquare,
   Plus,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   UserRound,
   X,
   XCircle,
@@ -29,13 +32,13 @@ const Tickets = () => {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [priority, setPriority] = useState("all");
+  const [category, setCategory] = useState("all");
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const [error, setError] = useState("");
-
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   const [newTicket, setNewTicket] = useState({
@@ -81,12 +84,25 @@ const Tickets = () => {
     },
   };
 
+  // =========================================================
+  // PRIORITY CONFIG
+  // =========================================================
+
   const priorityConfig = {
-    high: "text-red-400 bg-red-500/10 border-red-500/20",
+    high: {
+      label: "High",
+      className: "text-red-400 bg-red-500/10 border-red-500/20",
+    },
 
-    medium: "text-orange-400 bg-orange-500/10 border-orange-500/20",
+    medium: {
+      label: "Medium",
+      className: "text-orange-400 bg-orange-500/10 border-orange-500/20",
+    },
 
-    low: "text-slate-400 bg-slate-800 border-slate-700",
+    low: {
+      label: "Low",
+      className: "text-slate-400 bg-slate-800 border-slate-700",
+    },
   };
 
   // =========================================================
@@ -97,13 +113,22 @@ const Tickets = () => {
     loadTickets();
   }, []);
 
+  const formatDate = (date) => {
+    if (!date) return "—";
+
+    try {
+      return new Date(date).toLocaleString();
+    } catch {
+      return "—";
+    }
+  };
+
   const normalizeTicket = (ticket) => {
     if (!ticket) return null;
 
     return {
       ...ticket,
 
-      // MongoDB ID
       id: ticket.id || ticket._id || `ticket-${Date.now()}`,
 
       subject: ticket.subject || "Untitled ticket",
@@ -126,19 +151,13 @@ const Tickets = () => {
         ? formatDate(ticket.updatedAt)
         : ticket.updated || "—",
 
+      created: ticket.createdAt
+        ? formatDate(ticket.createdAt)
+        : ticket.created || "—",
+
       replies:
         ticket.replies?.length || ticket.replyCount || ticket.repliesCount || 0,
     };
-  };
-
-  const formatDate = (date) => {
-    if (!date) return "—";
-
-    try {
-      return new Date(date).toLocaleString();
-    } catch {
-      return "—";
-    }
   };
 
   const loadTickets = async () => {
@@ -177,13 +196,12 @@ const Tickets = () => {
   };
 
   // =========================================================
-  // REFRESH TICKETS
+  // REFRESH
   // =========================================================
 
   const handleRefresh = async () => {
     try {
       setRefreshing(true);
-
       await loadTickets();
     } finally {
       setRefreshing(false);
@@ -214,11 +232,8 @@ const Tickets = () => {
 
       const payload = {
         subject: newTicket.subject.trim(),
-
         description: newTicket.description.trim(),
-
         category: newTicket.category,
-
         priority: newTicket.priority,
       };
 
@@ -231,21 +246,15 @@ const Tickets = () => {
       if (response?.ticket) {
         const createdTicket = normalizeTicket(response.ticket);
 
-        setTickets((previousTickets) => [createdTicket, ...previousTickets]);
+        if (createdTicket) {
+          setTickets((previousTickets) => [createdTicket, ...previousTickets]);
+        }
       }
 
-      // Reset form
-      setNewTicket({
-        subject: "",
-        description: "",
-        category: "General",
-        priority: "medium",
-      });
+      resetTicketForm();
 
-      // Close modal
       setShowCreateModal(false);
 
-      // Reload from database
       await loadTickets();
     } catch (err) {
       console.error("CREATE TICKET ERROR:", err);
@@ -261,38 +270,86 @@ const Tickets = () => {
   };
 
   // =========================================================
+  // RESET FORM
+  // =========================================================
+
+  const resetTicketForm = () => {
+    setNewTicket({
+      subject: "",
+      description: "",
+      category: "General",
+      priority: "medium",
+    });
+  };
+
+  // =========================================================
+  // CLOSE MODAL
+  // =========================================================
+
+  const closeModal = () => {
+    if (creating) return;
+
+    setShowCreateModal(false);
+    setError("");
+    resetTicketForm();
+  };
+
+  // =========================================================
+  // CLEAR FILTERS
+  // =========================================================
+
+  const clearFilters = () => {
+    setSearch("");
+    setStatus("all");
+    setPriority("all");
+    setCategory("all");
+  };
+
+  const hasActiveFilters =
+    search.trim() ||
+    status !== "all" ||
+    priority !== "all" ||
+    category !== "all";
+
+  // =========================================================
   // FILTER TICKETS
   // =========================================================
 
   const filteredTickets = useMemo(() => {
+    const searchValue = search.toLowerCase().trim();
+
     return tickets.filter((ticket) => {
       const ticketId = String(ticket.id || ticket._id || "").toLowerCase();
 
       const subject = String(ticket.subject || "").toLowerCase();
 
-      const category = String(ticket.category || "").toLowerCase();
+      const ticketCategory = String(ticket.category || "").toLowerCase();
 
       const ticketStatus = String(ticket.status || "").toLowerCase();
 
       const ticketPriority = String(ticket.priority || "").toLowerCase();
 
-      const searchValue = search.toLowerCase().trim();
-
       const matchesSearch =
+        !searchValue ||
         ticketId.includes(searchValue) ||
         subject.includes(searchValue) ||
-        category.includes(searchValue);
+        ticketCategory.includes(searchValue);
 
       const matchesStatus = status === "all" || ticketStatus === status;
 
       const matchesPriority = priority === "all" || ticketPriority === priority;
 
-      return matchesSearch && matchesStatus && matchesPriority;
+      const matchesCategory =
+        category === "all" || ticketCategory === category.toLowerCase();
+
+      return (
+        matchesSearch && matchesStatus && matchesPriority && matchesCategory
+      );
     });
-  }, [tickets, search, status, priority]);
+  }, [tickets, search, status, priority, category]);
 
   // =========================================================
-  // STATS
+  // STATISTICS
   // =========================================================
 
   const totalTickets = tickets.length;
@@ -305,28 +362,25 @@ const Tickets = () => {
     (ticket) => ticket.status === "in-progress",
   ).length;
 
+  const pendingTickets = tickets.filter(
+    (ticket) => ticket.status === "pending",
+  ).length;
+
   const resolvedTickets = tickets.filter(
     (ticket) => ticket.status === "resolved" || ticket.status === "closed",
   ).length;
 
   // =========================================================
-  // MODAL CLOSE
+  // CATEGORY LIST
   // =========================================================
 
-  const closeModal = () => {
-    if (creating) return;
-
-    setShowCreateModal(false);
-
-    setError("");
-
-    setNewTicket({
-      subject: "",
-      description: "",
-      category: "General",
-      priority: "medium",
-    });
-  };
+  const categories = [
+    "General",
+    "Billing",
+    "Technical",
+    "Account",
+    "Subscription",
+  ];
 
   // =========================================================
   // RENDER
@@ -351,26 +405,18 @@ const Tickets = () => {
             <div>
               <h1 className="font-bold">SupportAI</h1>
 
-              <p className="text-xs text-slate-600">Support tickets</p>
+              <p className="text-xs text-slate-600">Customer support center</p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Refresh */}
-
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={loading || refreshing}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-400 transition hover:bg-slate-800 hover:text-white disabled:opacity-50"
-              title="Refresh tickets"
+            <Link
+              to="/support/tickets/create-ai"
+              className="flex items-center gap-2 rounded-xl border border-blue-500/20 bg-blue-500/10 px-4 py-2.5 text-sm font-semibold text-blue-400 transition hover:bg-blue-500/20"
             >
-              <RefreshCw
-                className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
-              />
-            </button>
-
-            {/* Create */}
+              <Bot className="h-4 w-4" />
+              Create with AI
+            </Link>
 
             <button
               type="button"
@@ -395,18 +441,38 @@ const Tickets = () => {
         {/* Heading */}
 
         <div className="mb-8">
-          <h2 className="text-3xl font-bold">Support Tickets</h2>
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-blue-400">
+                Customer support
+              </p>
 
-          <p className="mt-2 text-slate-500">
-            Track your support requests and communicate with our support team.
-          </p>
+              <h2 className="text-3xl font-bold">My Support Tickets</h2>
+
+              <p className="mt-2 max-w-2xl text-slate-500">
+                Create, track, and manage your support requests from one place.
+              </p>
+            </div>
+
+            <Link
+              to="/support/conversations"
+              className="flex items-center gap-2 self-start rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm font-medium text-slate-400 transition hover:bg-slate-800 hover:text-white sm:self-auto"
+            >
+              <MessageSquare className="h-4 w-4" />
+              Conversations
+            </Link>
+          </div>
         </div>
 
         {/* Error */}
 
         {error && !showCreateModal && (
           <div className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3">
-            <p className="text-sm text-red-400">{error}</p>
+            <div className="flex items-center gap-3">
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
+
+              <p className="text-sm text-red-400">{error}</p>
+            </div>
 
             <button
               type="button"
@@ -419,10 +485,10 @@ const Tickets = () => {
         )}
 
         {/* =================================================
-            STATS
+            STATISTICS
         ================================================== */}
 
-        <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <TicketStat
             icon={FileText}
             label="Total tickets"
@@ -437,6 +503,8 @@ const Tickets = () => {
             value={inProgressTickets}
           />
 
+          <TicketStat icon={Clock3} label="Pending" value={pendingTickets} />
+
           <TicketStat
             icon={CheckCircle2}
             label="Resolved"
@@ -445,13 +513,31 @@ const Tickets = () => {
         </div>
 
         {/* =================================================
-            TICKETS CARD
+            TICKET CARD
         ================================================== */}
 
         <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
           {/* Filters */}
 
           <div className="border-b border-slate-800 p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="h-4 w-4 text-slate-500" />
+
+                <span className="text-sm font-medium">Find a ticket</span>
+              </div>
+
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="text-xs text-blue-400 transition hover:text-blue-300"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+
             <div className="flex flex-col gap-3 xl:flex-row">
               {/* Search */}
 
@@ -467,7 +553,7 @@ const Tickets = () => {
                 />
               </div>
 
-              <div className="flex gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {/* Status */}
 
                 <div className="relative">
@@ -476,7 +562,7 @@ const Tickets = () => {
                   <select
                     value={status}
                     onChange={(e) => setStatus(e.target.value)}
-                    className="appearance-none rounded-xl border border-slate-800 bg-slate-950 py-3 pl-10 pr-8 text-xs text-slate-400 outline-none focus:border-blue-500"
+                    className="w-full appearance-none rounded-xl border border-slate-800 bg-slate-950 py-3 pl-10 pr-8 text-xs text-slate-400 outline-none focus:border-blue-500"
                   >
                     <option value="all">All statuses</option>
 
@@ -507,6 +593,22 @@ const Tickets = () => {
 
                   <option value="low">Low</option>
                 </select>
+
+                {/* Category */}
+
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-xs text-slate-400 outline-none focus:border-blue-500"
+                >
+                  <option value="all">All categories</option>
+
+                  {categories.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>
@@ -526,7 +628,7 @@ const Tickets = () => {
           ) : (
             <>
               {/* =================================================
-                  DESKTOP TABLE
+                  DESKTOP
               ================================================== */}
 
               <div className="hidden overflow-x-auto md:block">
@@ -564,6 +666,10 @@ const Tickets = () => {
 
                       const StatusIcon = ticketStatus.icon;
 
+                      const ticketPriority =
+                        priorityConfig[ticket.priority] ||
+                        priorityConfig.medium;
+
                       return (
                         <tr
                           key={ticket.id}
@@ -577,17 +683,19 @@ const Tickets = () => {
                               className="group block"
                             >
                               <div className="flex items-center gap-3">
-                                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400">
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
                                   <FileText className="h-4 w-4" />
                                 </div>
 
-                                <div>
-                                  <p className="text-xs font-semibold group-hover:text-blue-400">
+                                <div className="min-w-0">
+                                  <p className="max-w-sm truncate text-xs font-semibold group-hover:text-blue-400">
                                     {ticket.subject}
                                   </p>
 
                                   <p className="mt-1 text-[10px] text-slate-700">
-                                    {ticket.id} · {ticket.category}
+                                    {ticket.id}
+                                    {" · "}
+                                    {ticket.category}
                                   </p>
                                 </div>
                               </div>
@@ -610,12 +718,9 @@ const Tickets = () => {
 
                           <td className="px-5 py-5">
                             <span
-                              className={`rounded-full border px-2.5 py-1 text-[10px] font-medium capitalize ${
-                                priorityConfig[ticket.priority] ||
-                                priorityConfig.medium
-                              }`}
+                              className={`rounded-full border px-2.5 py-1 text-[10px] font-medium ${ticketPriority.className}`}
                             >
-                              {ticket.priority}
+                              {ticketPriority.label}
                             </span>
                           </td>
 
@@ -642,7 +747,8 @@ const Tickets = () => {
                               </p>
 
                               <p className="mt-1 text-[10px] text-slate-700">
-                                {ticket.replies} replies
+                                {ticket.replies}{" "}
+                                {ticket.replies === 1 ? "reply" : "replies"}
                               </p>
                             </div>
                           </td>
@@ -653,6 +759,7 @@ const Tickets = () => {
                             <Link
                               to={`/support/tickets/${ticket.id}`}
                               className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-800 hover:text-white"
+                              title="View ticket"
                             >
                               <ChevronRight className="h-4 w-4" />
                             </Link>
@@ -675,6 +782,9 @@ const Tickets = () => {
 
                   const StatusIcon = ticketStatus.icon;
 
+                  const ticketPriority =
+                    priorityConfig[ticket.priority] || priorityConfig.medium;
+
                   return (
                     <Link
                       key={ticket.id}
@@ -682,18 +792,20 @@ const Tickets = () => {
                       className="block p-5 transition hover:bg-slate-800/30"
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <div className="flex gap-3">
+                        <div className="flex min-w-0 gap-3">
                           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
                             <FileText className="h-4 w-4" />
                           </div>
 
-                          <div>
-                            <p className="text-sm font-semibold">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold">
                               {ticket.subject}
                             </p>
 
                             <p className="mt-1 text-[10px] text-slate-700">
-                              {ticket.id} · {ticket.category}
+                              {ticket.id}
+                              {" · "}
+                              {ticket.category}
                             </p>
                           </div>
                         </div>
@@ -711,20 +823,25 @@ const Tickets = () => {
                         </span>
 
                         <span
-                          className={`rounded-full border px-2 py-1 text-[10px] capitalize ${
-                            priorityConfig[ticket.priority] ||
-                            priorityConfig.medium
-                          }`}
+                          className={`rounded-full border px-2 py-1 text-[10px] ${ticketPriority.className}`}
                         >
-                          {ticket.priority}
+                          {ticketPriority.label}
                         </span>
                       </div>
 
-                      <div className="mt-4 flex justify-between text-[10px] text-slate-700">
-                        <span>Assigned to {ticket.agent}</span>
+                      <div className="mt-4 flex items-center justify-between gap-3 text-[10px] text-slate-700">
+                        <span className="truncate">
+                          Assigned to {ticket.agent}
+                        </span>
 
-                        <span>{ticket.updated}</span>
+                        <span className="shrink-0">
+                          {ticket.replies} replies
+                        </span>
                       </div>
+
+                      <p className="mt-2 text-[10px] text-slate-700">
+                        Updated {ticket.updated}
+                      </p>
                     </Link>
                   );
                 })}
@@ -737,9 +854,13 @@ const Tickets = () => {
           ================================================== */}
 
           {!loading && filteredTickets.length === 0 && (
-            <div className="flex min-h-[300px] flex-col items-center justify-center p-8 text-center">
+            <div className="flex min-h-[320px] flex-col items-center justify-center p-8 text-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-800 text-slate-600">
-                <FileText className="h-6 w-6" />
+                {hasActiveFilters ? (
+                  <Search className="h-6 w-6" />
+                ) : (
+                  <Inbox className="h-6 w-6" />
+                )}
               </div>
 
               <h3 className="mt-5 font-semibold">
@@ -749,10 +870,10 @@ const Tickets = () => {
               <p className="mt-2 max-w-sm text-sm text-slate-600">
                 {tickets.length === 0
                   ? "Create your first support ticket and our team will help you."
-                  : "Try changing your search or filters."}
+                  : "No tickets match your current search or filters."}
               </p>
 
-              {tickets.length === 0 && (
+              {tickets.length === 0 ? (
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(true)}
@@ -761,9 +882,45 @@ const Tickets = () => {
                   <Plus className="h-4 w-4" />
                   Create your first ticket
                 </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="mt-5 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm font-medium text-slate-400 transition hover:bg-slate-800 hover:text-white"
+                >
+                  Clear filters
+                </button>
               )}
             </div>
           )}
+        </div>
+
+        {/* =================================================
+            SUPPORT TIP
+        ================================================== */}
+
+        <div className="mt-6 flex flex-col gap-4 rounded-2xl border border-blue-500/10 bg-blue-500/[0.03] p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
+              <MessageSquare className="h-4 w-4" />
+            </div>
+
+            <div>
+              <p className="text-sm font-medium">Need quick help?</p>
+
+              <p className="mt-1 text-xs text-slate-600">
+                Start a conversation with SupportAI before creating a ticket.
+              </p>
+            </div>
+          </div>
+
+          <Link
+            to="/support/chat"
+            className="flex items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-xs font-semibold text-slate-400 transition hover:bg-slate-800 hover:text-white"
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            Start conversation
+          </Link>
         </div>
       </main>
 
@@ -781,10 +938,20 @@ const Tickets = () => {
           }}
         >
           <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
-            {/* Modal Header */}
+            {/* Header */}
 
             <div className="mb-6 flex items-center justify-between">
               <div>
+                <div className="mb-2 flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400">
+                    <FileText className="h-4 w-4" />
+                  </div>
+
+                  <span className="text-xs font-semibold uppercase tracking-wider text-blue-400">
+                    New request
+                  </span>
+                </div>
+
                 <h3 className="text-lg font-semibold">Create Support Ticket</h3>
 
                 <p className="mt-1 text-sm text-slate-500">
@@ -823,15 +990,20 @@ const Tickets = () => {
                   }
                   placeholder="What do you need help with?"
                   disabled={creating}
+                  maxLength={150}
                   className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-700 focus:border-blue-500 disabled:opacity-50"
                 />
+
+                <p className="mt-1 text-right text-[10px] text-slate-700">
+                  {newTicket.subject.length}/150
+                </p>
               </div>
 
               {/* Description */}
 
               <div>
                 <label className="mb-2 block text-sm font-medium">
-                  Description
+                  Describe your issue
                 </label>
 
                 <textarea
@@ -842,11 +1014,16 @@ const Tickets = () => {
                       description: e.target.value,
                     }))
                   }
-                  rows={5}
-                  placeholder="Describe your issue in detail..."
+                  rows={6}
+                  maxLength={3000}
+                  placeholder="Describe what happened, what you expected, and any relevant details..."
                   disabled={creating}
                   className="w-full resize-none rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-700 focus:border-blue-500 disabled:opacity-50"
                 />
+
+                <p className="mt-1 text-right text-[10px] text-slate-700">
+                  {newTicket.description.length}/3000
+                </p>
               </div>
 
               {/* Category + Priority */}
@@ -870,15 +1047,11 @@ const Tickets = () => {
                     disabled={creating}
                     className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-400 outline-none focus:border-blue-500 disabled:opacity-50"
                   >
-                    <option value="General">General</option>
-
-                    <option value="Billing">Billing</option>
-
-                    <option value="Technical">Technical</option>
-
-                    <option value="Account">Account</option>
-
-                    <option value="Subscription">Subscription</option>
+                    {categories.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -909,17 +1082,19 @@ const Tickets = () => {
                 </div>
               </div>
 
-              {/* Modal Error */}
+              {/* Error */}
 
               {error && (
-                <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
-                  {error}
+                <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+
+                  <p className="text-sm text-red-400">{error}</p>
                 </div>
               )}
 
               {/* Actions */}
 
-              <div className="flex justify-end gap-3">
+              <div className="flex justify-end gap-3 border-t border-slate-800 pt-5">
                 <button
                   type="button"
                   onClick={closeModal}

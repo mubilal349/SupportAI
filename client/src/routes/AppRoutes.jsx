@@ -16,6 +16,8 @@ import CustomerProfile from "../pages/customer/Profile";
 import Conversations from "../pages/customer/Conversations";
 import Tickets from "../pages/customer/Tickets";
 import SupportLayout from "../pages/customer/SupportLayout";
+import TicketDetails from "../pages/customer/TicketDetails";
+import AITicketCreation from "../pages/customer/AITicketCreation";
 
 // Route Protection
 import ProtectedRoute from "./ProtectedRoute";
@@ -75,6 +77,13 @@ const AppRoutes = () => {
 
           {/* /support/tickets */}
           <Route path="tickets" element={<Tickets />} />
+
+          <Route
+            path="/support/tickets/create-ai"
+            element={<AITicketCreation />}
+          />
+
+          <Route path="/support/tickets/:id" element={<TicketDetails />} />
 
           {/* /support/profile */}
           <Route path="profile" element={<CustomerProfile />} />

@@ -3,11 +3,15 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import path from "path";
 
+// ==========
+//   ROUTES
+// ==========
 import authRoutes from "./routes/authRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
 import ticketRoutes from "./routes/ticketRoutes.js";
 import customerRoutes from "./routes/customerRoutes.js";
+import aiTicketRoutes from "./routes/aiTicketRoutes.js";
 
 const app = express();
 
@@ -36,5 +40,6 @@ app.use("/api/conversations", conversationRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/tickets", ticketRoutes);
 app.use("/api/customer", customerRoutes);
+app.use("/api/ai-tickets", aiTicketRoutes);
 
 export default app;

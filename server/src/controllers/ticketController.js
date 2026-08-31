@@ -124,3 +124,66 @@ export const getCustomerTicket = async (req, res) => {
     });
   }
 };
+
+export const uploadTicketAttachments = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No files were uploaded.",
+      });
+    }
+
+    const ticket = await Ticket.findById(id);
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found.",
+      });
+    }
+
+    const userId = req.user?.id;
+
+    if (ticket.customer && ticket.customer.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to access this ticket.",
+      });
+    }
+
+    const attachments = req.files.map((file) => ({
+      originalName: file.originalname,
+
+      fileName: file.filename,
+
+      fileUrl: `/uploads/tickets/${file.filename}`,
+
+      mimeType: file.mimetype,
+
+      size: file.size,
+
+      uploadedAt: new Date(),
+    }));
+
+    ticket.attachments.push(...attachments);
+
+    await ticket.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Attachments uploaded successfully.",
+      attachments,
+      ticket,
+    });
+  } catch (error) {
+    console.error("UPLOAD TICKET ATTACHMENTS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to upload attachments.",
+    });
+  }
+};

@@ -21,6 +21,24 @@ const ticketSchema = new mongoose.Schema(
       default: null,
     },
 
+    attachments: [
+      {
+        filename: String,
+        originalName: String,
+        mimetype: String,
+        size: Number,
+        path: String,
+        uploadedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+        uploadedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+
     subject: {
       type: String,
       required: true,

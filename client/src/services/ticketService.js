@@ -17,3 +17,29 @@ export const createTicket = async (ticketData) => {
 
   return response.data;
 };
+
+export const generateTicketSummary = async (id) => {
+  const response = await api.post(`/ai-tickets/${id}/summary`);
+
+  return response.data;
+};
+
+export const uploadTicketAttachments = async (ticketId, files) => {
+  const formData = new FormData();
+
+  files.forEach((file) => {
+    formData.append("attachments", file);
+  });
+
+  const response = await api.post(
+    `/tickets/${ticketId}/attachments`,
+    formData,
+    {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    },
+  );
+
+  return response.data;
+};
