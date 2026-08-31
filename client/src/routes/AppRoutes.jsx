@@ -14,10 +14,10 @@ import CustomerDashboard from "../pages/customer/Dashboard";
 import CustomerChat from "../pages/customer/Chat";
 import CustomerProfile from "../pages/customer/Profile";
 import Conversations from "../pages/customer/Conversations";
-import Tickets from "../pages/customer/Tickets";
+import Tickets from "../pages/customer/tickets/Tickets";
 import SupportLayout from "../pages/customer/SupportLayout";
-import TicketDetails from "../pages/customer/TicketDetails";
-import AITicketCreation from "../pages/customer/AITicketCreation";
+import TicketDetails from "../pages/customer/tickets/TicketDetails";
+import AITicketCreation from "../pages/customer/tickets/AITicketCreation";
 
 // Route Protection
 import ProtectedRoute from "./ProtectedRoute";

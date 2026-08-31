@@ -24,7 +24,7 @@ import {
   getTicketById,
   generateTicketSummary,
   uploadTicketAttachments,
-} from "../../services/ticketService";
+} from "../../../services/ticketService";
 
 const TicketDetails = () => {
   const { id } = useParams();

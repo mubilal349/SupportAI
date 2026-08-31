@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { createTicket } from "../../services/ticketService";
+import { createTicket } from "../../../services/ticketService";
 
 const AITicketCreation = () => {
   const navigate = useNavigate();

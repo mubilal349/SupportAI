@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import { createTicket, getTickets } from "../../services/ticketService";
+import { createTicket, getTickets } from "../../../services/ticketService";
 
 const Tickets = () => {
   // =========================================================

@@ -122,13 +122,16 @@ const Footer = () => {
           </p>
 
           <div className="flex items-center gap-5 text-sm text-slate-600">
-            <a href="#" className="transition hover:text-slate-300">
+            <Link
+              to="/privacy-policy"
+              className="transition hover:text-slate-300"
+            >
               Privacy
-            </a>
+            </Link>
 
-            <a href="#" className="transition hover:text-slate-300">
+            <Link to="/terms" className="transition hover:text-slate-300">
               Terms
-            </a>
+            </Link>
 
             <a
               href="#"
