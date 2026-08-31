@@ -60,6 +60,18 @@ const userSchema = new mongoose.Schema(
       maxlength: 150,
     },
 
+    timezone: {
+      type: String,
+      default: "Asia/Karachi",
+      trim: true,
+    },
+
+    language: {
+      type: String,
+      default: "English",
+      trim: true,
+    },
+
     // ==========================================
     // ACCOUNT STATUS
     // ==========================================

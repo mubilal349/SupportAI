@@ -1,7 +1,16 @@
 import bcrypt from "bcryptjs";
+import mongoose from "mongoose";
 import User from "../models/User.js";
 import Conversation from "../models/Conversation.js";
 import Ticket from "../models/Ticket.js";
+
+// ==========================================
+// HELPER: VALIDATE USER ID
+// ==========================================
+
+const isValidUserId = (id) => {
+  return mongoose.Types.ObjectId.isValid(id);
+};
 
 // ==========================================
 // GET CUSTOMER DASHBOARD
@@ -9,7 +18,14 @@ import Ticket from "../models/Ticket.js";
 
 export const getCustomerDashboard = async (req, res) => {
   try {
-    const customerId = req.user._id;
+    const customerId = req.user?.id;
+
+    if (!customerId || !isValidUserId(customerId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid authentication",
+      });
+    }
 
     const [
       totalConversations,
@@ -20,19 +36,23 @@ export const getCustomerDashboard = async (req, res) => {
       recentConversations,
       recentTickets,
     ] = await Promise.all([
+      // Total conversations
       Conversation.countDocuments({
         customer: customerId,
       }),
 
+      // Active conversations
       Conversation.countDocuments({
         customer: customerId,
         status: "active",
       }),
 
+      // Total tickets
       Ticket.countDocuments({
         customer: customerId,
       }),
 
+      // Open + in-progress tickets
       Ticket.countDocuments({
         customer: customerId,
         status: {
@@ -40,6 +60,7 @@ export const getCustomerDashboard = async (req, res) => {
         },
       }),
 
+      // Resolved + closed tickets
       Ticket.countDocuments({
         customer: customerId,
         status: {
@@ -47,6 +68,7 @@ export const getCustomerDashboard = async (req, res) => {
         },
       }),
 
+      // Recent conversations
       Conversation.find({
         customer: customerId,
         status: {
@@ -54,16 +76,19 @@ export const getCustomerDashboard = async (req, res) => {
         },
       })
         .sort({ updatedAt: -1 })
-        .limit(5),
+        .limit(5)
+        .lean(),
 
+      // Recent tickets
       Ticket.find({
         customer: customerId,
       })
         .sort({ updatedAt: -1 })
-        .limit(5),
+        .limit(5)
+        .lean(),
     ]);
 
-    res.json({
+    return res.status(200).json({
       success: true,
 
       stats: {
@@ -80,7 +105,7 @@ export const getCustomerDashboard = async (req, res) => {
   } catch (error) {
     console.error("Customer dashboard error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to load customer dashboard",
     });
@@ -88,12 +113,21 @@ export const getCustomerDashboard = async (req, res) => {
 };
 
 // ==========================================
-// GET PROFILE
+// GET CUSTOMER PROFILE
 // ==========================================
 
 export const getCustomerProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("-password");
+    const customerId = req.user?.id;
+
+    if (!customerId || !isValidUserId(customerId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid authentication",
+      });
+    }
+
+    const user = await User.findById(customerId).select("-password").lean();
 
     if (!user) {
       return res.status(404).json({
@@ -102,14 +136,14 @@ export const getCustomerProfile = async (req, res) => {
       });
     }
 
-    res.json({
+    return res.status(200).json({
       success: true,
       user,
     });
   } catch (error) {
-    console.error("Get profile error:", error);
+    console.error("Get customer profile error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to load profile",
     });
@@ -117,14 +151,23 @@ export const getCustomerProfile = async (req, res) => {
 };
 
 // ==========================================
-// UPDATE PROFILE
+// UPDATE CUSTOMER PROFILE
 // ==========================================
 
 export const updateCustomerProfile = async (req, res) => {
   try {
-    const { name, phone, company, avatar } = req.body;
+    const customerId = req.user?.id;
 
-    const user = await User.findById(req.user._id);
+    if (!customerId || !isValidUserId(customerId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid authentication",
+      });
+    }
+
+    const { name, email, phone, company, timezone, language } = req.body || {};
+
+    const user = await User.findById(customerId);
 
     if (!user) {
       return res.status(404).json({
@@ -133,48 +176,142 @@ export const updateCustomerProfile = async (req, res) => {
       });
     }
 
+    // ==========================================
+    // NAME
+    // ==========================================
+
     if (name !== undefined) {
-      user.name = name.trim();
+      const trimmedName = String(name).trim();
+
+      if (!trimmedName) {
+        return res.status(400).json({
+          success: false,
+          message: "Name cannot be empty",
+        });
+      }
+
+      user.name = trimmedName;
     }
+
+    // ==========================================
+    // EMAIL
+    // ==========================================
+
+    if (email !== undefined) {
+      const trimmedEmail = String(email).trim().toLowerCase();
+
+      if (!trimmedEmail) {
+        return res.status(400).json({
+          success: false,
+          message: "Email cannot be empty",
+        });
+      }
+
+      // Check whether another user already has this email
+      const existingUser = await User.findOne({
+        email: trimmedEmail,
+        _id: { $ne: customerId },
+      });
+
+      if (existingUser) {
+        return res.status(409).json({
+          success: false,
+          message: "This email address is already in use.",
+        });
+      }
+
+      user.email = trimmedEmail;
+    }
+
+    // ==========================================
+    // PHONE
+    // ==========================================
 
     if (phone !== undefined) {
-      user.phone = phone.trim();
+      user.phone = String(phone).trim();
     }
+
+    // ==========================================
+    // COMPANY
+    // ==========================================
 
     if (company !== undefined) {
-      user.company = company.trim();
+      user.company = String(company).trim();
     }
 
-    if (avatar !== undefined) {
-      user.avatar = avatar;
+    // ==========================================
+    // TIMEZONE
+    // ==========================================
+
+    if (timezone !== undefined) {
+      user.timezone = String(timezone).trim();
     }
+
+    // ==========================================
+    // LANGUAGE
+    // ==========================================
+
+    if (language !== undefined) {
+      user.language = String(language).trim();
+    }
+
+    // ==========================================
+    // AVATAR
+    // ==========================================
+
+    if (req.file) {
+      user.avatar = `/uploads/avatars/${req.file.filename}`;
+    }
+
+    // ==========================================
+    // SAVE
+    // ==========================================
 
     await user.save();
 
-    const safeUser = await User.findById(user._id).select("-password");
+    // ==========================================
+    // SAFE RESPONSE
+    // ==========================================
 
-    res.json({
+    const safeUser = user.toObject();
+
+    delete safeUser.password;
+
+    return res.status(200).json({
       success: true,
       message: "Profile updated successfully",
       user: safeUser,
     });
   } catch (error) {
-    console.error("Update profile error:", error);
+    console.error("Update customer profile error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: "Failed to update profile",
+      message: error.message || "Failed to update profile",
     });
   }
 };
 
 // ==========================================
-// CHANGE PASSWORD
+// CHANGE CUSTOMER PASSWORD
 // ==========================================
 
 export const changeCustomerPassword = async (req, res) => {
   try {
+    const customerId = req.user?.id;
+
+    if (!customerId || !isValidUserId(customerId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid authentication",
+      });
+    }
+
     const { currentPassword, newPassword } = req.body;
+
+    // ------------------------------
+    // REQUIRED FIELDS
+    // ------------------------------
 
     if (!currentPassword || !newPassword) {
       return res.status(400).json({
@@ -183,6 +320,10 @@ export const changeCustomerPassword = async (req, res) => {
       });
     }
 
+    // ------------------------------
+    // PASSWORD LENGTH
+    // ------------------------------
+
     if (newPassword.length < 8) {
       return res.status(400).json({
         success: false,
@@ -190,7 +331,22 @@ export const changeCustomerPassword = async (req, res) => {
       });
     }
 
-    const user = await User.findById(req.user._id);
+    // ------------------------------
+    // PREVENT SAME PASSWORD
+    // ------------------------------
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be different from your current password",
+      });
+    }
+
+    // ------------------------------
+    // FIND USER
+    // ------------------------------
+
+    const user = await User.findById(customerId);
 
     if (!user) {
       return res.status(404).json({
@@ -198,6 +354,10 @@ export const changeCustomerPassword = async (req, res) => {
         message: "User not found",
       });
     }
+
+    // ------------------------------
+    // VERIFY CURRENT PASSWORD
+    // ------------------------------
 
     const isMatch = await bcrypt.compare(currentPassword, user.password);
 
@@ -208,18 +368,22 @@ export const changeCustomerPassword = async (req, res) => {
       });
     }
 
+    // ------------------------------
+    // HASH NEW PASSWORD
+    // ------------------------------
+
     user.password = await bcrypt.hash(newPassword, 12);
 
     await user.save();
 
-    res.json({
+    return res.status(200).json({
       success: true,
       message: "Password changed successfully",
     });
   } catch (error) {
-    console.error("Change password error:", error);
+    console.error("Change customer password error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to change password",
     });

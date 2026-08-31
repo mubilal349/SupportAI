@@ -20,6 +20,7 @@ import SupportLayout from "../pages/customer/SupportLayout";
 // Route Protection
 import ProtectedRoute from "./ProtectedRoute";
 import Help from "../pages/customer/Help";
+import CustomerAnalytics from "../pages/customer/CustomerAnalytics";
 
 const AppRoutes = () => {
   return (
@@ -80,6 +81,9 @@ const AppRoutes = () => {
 
           {/* /support/help */}
           <Route path="/support/help" element={<Help />} />
+
+          {/* /support/analytics */}
+          <Route path="/support/analytics" element={<CustomerAnalytics />} />
         </Route>
       </Route>
 

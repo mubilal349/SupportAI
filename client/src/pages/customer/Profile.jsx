@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import axios from "axios";
-
+import api from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
 
 const API_URL = "http://localhost:8000/api";
@@ -37,7 +37,11 @@ const Profile = () => {
 
   const [activeSection, setActiveSection] = useState("profile");
   const [isEditing, setIsEditing] = useState(false);
+
+  // IMPORTANT:
+  // This is the loading state used by the JSX below.
   const [loadingProfile, setLoadingProfile] = useState(true);
+
   const [savingProfile, setSavingProfile] = useState(false);
 
   const [profile, setProfile] = useState({
@@ -48,6 +52,7 @@ const Profile = () => {
     timezone: "Asia/Karachi",
     language: "English",
     avatar: "",
+    avatarFile: undefined,
   });
 
   const [passwords, setPasswords] = useState({
@@ -78,22 +83,6 @@ const Profile = () => {
 
   /*
    * ============================================================
-   * AUTH HEADER
-   * ============================================================
-   */
-
-  const getAuthConfig = () => {
-    const token = localStorage.getItem("token");
-
-    return {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    };
-  };
-
-  /*
-   * ============================================================
    * AVATAR URL
    * ============================================================
    */
@@ -101,14 +90,17 @@ const Profile = () => {
   const getAvatarUrl = (avatar) => {
     if (!avatar) return "";
 
-    // Already a complete URL
+    if (avatar.startsWith("blob:") || avatar.startsWith("data:")) {
+      return avatar;
+    }
+
     if (avatar.startsWith("http://") || avatar.startsWith("https://")) {
       return avatar;
     }
 
-    // Backend stores something like:
-    // /avatars/filename.jpg
-    return `http://localhost:8000${avatar.startsWith("/") ? avatar : `/${avatar}`}`;
+    const normalizedPath = avatar.startsWith("/") ? avatar : `/${avatar}`;
+
+    return `http://localhost:8000${normalizedPath}`;
   };
 
   /*
@@ -122,34 +114,13 @@ const Profile = () => {
       setLoadingProfile(true);
       setError("");
 
-      const response = await axios.get(
-        `${API_URL}/auth/profile`,
-        getAuthConfig(),
-      );
+      const response = await api.get("/customer/profile");
 
-      const data = response.data;
+      console.log("PROFILE RESPONSE:", response.data);
 
-      const currentUser = data.user || data;
+      if (response.data?.success && response.data?.user) {
+        const user = response.data.user;
 
-      setProfile({
-        name: currentUser.name || "",
-        email: currentUser.email || "",
-        phone: currentUser.phone || "",
-        company: currentUser.company || "",
-        timezone: currentUser.timezone || "Asia/Karachi",
-        language: currentUser.language || "English",
-        avatar: currentUser.avatar || "",
-      });
-    } catch (err) {
-      console.error("Load profile error:", err);
-
-      setError(
-        err.response?.data?.message ||
-          "Unable to load your profile information.",
-      );
-
-      // Fallback to AuthContext user
-      if (user) {
         setProfile({
           name: user.name || "",
           email: user.email || "",
@@ -158,8 +129,13 @@ const Profile = () => {
           timezone: user.timezone || "Asia/Karachi",
           language: user.language || "English",
           avatar: user.avatar || "",
+          avatarFile: undefined,
         });
       }
+    } catch (err) {
+      console.error("Load profile error:", err.response?.data || err.message);
+
+      setError(err.response?.data?.message || "Failed to load profile");
     } finally {
       setLoadingProfile(false);
     }
@@ -198,57 +174,48 @@ const Profile = () => {
 
       const formData = new FormData();
 
-      formData.append("name", profile.name);
-      formData.append("email", profile.email);
-      formData.append("phone", profile.phone);
-      formData.append("company", profile.company);
-      formData.append("timezone", profile.timezone);
-      formData.append("language", profile.language);
+      formData.append("name", profile.name || "");
+      formData.append("email", profile.email || "");
+      formData.append("phone", profile.phone || "");
+      formData.append("company", profile.company || "");
+      formData.append("timezone", profile.timezone || "Asia/Karachi");
+      formData.append("language", profile.language || "English");
 
-      // Only append a file if the user selected one.
       if (profile.avatarFile) {
         formData.append("avatar", profile.avatarFile);
       }
 
-      const token = localStorage.getItem("token");
-
-      const response = await axios.put(
-        `${API_URL}/customer/profile`,
-        formData,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "multipart/form-data",
-          },
+      const response = await api.put("/customer/profile", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
         },
-      );
-
-      const updatedUser = response.data.user;
-
-      setProfile({
-        name: updatedUser.name || "",
-        email: updatedUser.email || "",
-        phone: updatedUser.phone || "",
-        company: updatedUser.company || "",
-        timezone: updatedUser.timezone || "Asia/Karachi",
-        language: updatedUser.language || "English",
-        avatar: updatedUser.avatar || "",
       });
 
-      setIsEditing(false);
-      setSaveMessage("Profile updated successfully.");
+      console.log("UPDATED PROFILE:", response.data);
 
-      // Remove temporary File object after successful upload
-      setProfile((prev) => ({
-        ...prev,
-        avatarFile: undefined,
-      }));
+      if (response.data?.success && response.data?.user) {
+        const updatedUser = response.data.user;
 
-      setTimeout(() => {
-        setSaveMessage("");
-      }, 3000);
+        setProfile({
+          name: updatedUser.name || "",
+          email: updatedUser.email || "",
+          phone: updatedUser.phone || "",
+          company: updatedUser.company || "",
+          timezone: updatedUser.timezone || "Asia/Karachi",
+          language: updatedUser.language || "English",
+          avatar: updatedUser.avatar || "",
+          avatarFile: undefined,
+        });
+
+        setIsEditing(false);
+        setSaveMessage("Profile updated successfully.");
+
+        setTimeout(() => {
+          setSaveMessage("");
+        }, 3000);
+      }
     } catch (err) {
-      console.error("Save profile error:", err);
+      console.error("Save profile error:", err.response?.data || err.message);
 
       setError(
         err.response?.data?.message ||
@@ -288,10 +255,7 @@ const Profile = () => {
     }
 
     /*
-     * Create a temporary preview.
-     *
-     * This preview is only used until the image is uploaded.
-     * The permanent image will come from MongoDB after saving.
+     * Create temporary preview.
      */
     const previewUrl = URL.createObjectURL(file);
 
@@ -341,6 +305,11 @@ const Profile = () => {
     try {
       const token = localStorage.getItem("token");
 
+      if (!token) {
+        setError("Authentication required. Please log in again.");
+        return;
+      }
+
       await axios.put(
         `${API_URL}/customer/password`,
         {
@@ -366,7 +335,10 @@ const Profile = () => {
         setSaveMessage("");
       }, 3000);
     } catch (err) {
-      console.error("Change password error:", err);
+      console.error(
+        "Change password error:",
+        err.response?.data || err.message,
+      );
 
       setError(
         err.response?.data?.message || "Unable to change your password.",
@@ -433,7 +405,10 @@ const Profile = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      {/* Header */}
+      {/* ========================================================
+          HEADER
+      ======================================================== */}
+
       <header className="border-b border-slate-800 bg-slate-950">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
           <div className="flex items-center gap-3">
@@ -470,6 +445,10 @@ const Profile = () => {
           </div>
         </div>
       </header>
+
+      {/* ========================================================
+          MAIN
+      ======================================================== */}
 
       <main className="mx-auto max-w-7xl px-6 py-8">
         {/* Heading */}
@@ -518,13 +497,24 @@ const Profile = () => {
           </div>
         )}
 
+        {/* ======================================================
+            PROFILE LOADING
+        ====================================================== */}
+
         {loadingProfile ? (
           <div className="flex min-h-[400px] items-center justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-700 border-t-blue-500" />
+            <div className="flex flex-col items-center gap-4">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-700 border-t-blue-500" />
+
+              <p className="text-sm text-slate-500">Loading your profile...</p>
+            </div>
           </div>
         ) : (
           <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
-            {/* Sidebar */}
+            {/* ==================================================
+                SIDEBAR
+            ================================================== */}
+
             <aside>
               <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
                 {/* User mini profile */}
@@ -534,9 +524,13 @@ const Profile = () => {
                       {profile.avatar ? (
                         <img
                           src={getAvatarUrl(profile.avatar)}
-                          alt={profile.name}
-                          className="h-14 w-14 rounded-2xl object-cover"
+                          alt={profile.name || "Profile"}
+                          className="h-full w-full object-cover"
                           onError={(e) => {
+                            console.error(
+                              "Avatar failed to load:",
+                              e.currentTarget.src,
+                            );
                             e.currentTarget.style.display = "none";
                           }}
                         />
@@ -551,11 +545,11 @@ const Profile = () => {
 
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold">
-                        {profile.name}
+                        {profile.name || "Customer"}
                       </p>
 
                       <p className="truncate text-xs text-slate-600">
-                        {profile.email}
+                        {profile.email || "No email available"}
                       </p>
                     </div>
                   </div>
@@ -572,8 +566,12 @@ const Profile = () => {
                       <button
                         key={item.id}
                         type="button"
-                        onClick={() => setActiveSection(item.id)}
-                        className={`mb-1 flex w-full items-center gap-3 rounded-xl p-3 text-left transition ${
+                        onClick={() => {
+                          setActiveSection(item.id);
+                          setError("");
+                          setSaveMessage("");
+                        }}
+                        className={`mb-1 flex w-full items-center gap-3 rounded-xl p-3 text-left transition cursor-pointer ${
                           active
                             ? "bg-blue-500/10 text-blue-400"
                             : "text-slate-500 hover:bg-slate-800 hover:text-slate-300"
@@ -604,7 +602,7 @@ const Profile = () => {
                   <button
                     type="button"
                     onClick={logout}
-                    className="flex w-full items-center gap-3 rounded-xl p-3 text-left text-slate-500 transition hover:bg-red-500/5 hover:text-red-400"
+                    className="flex w-full items-center gap-3 rounded-xl p-3 text-left text-slate-500 transition hover:bg-red-500/5 hover:text-red-400 cursor-pointer"
                   >
                     <LogOut className="h-4 w-4" />
 
@@ -631,14 +629,18 @@ const Profile = () => {
               </div>
             </aside>
 
-            {/* Content */}
+            {/* ==================================================
+                CONTENT
+            ================================================== */}
+
             <section className="min-w-0">
-              {/* ====================================================
-                  PROFILE
-              ==================================================== */}
+              {/* ==================================================
+                  PROFILE INFORMATION
+              ================================================== */}
 
               {activeSection === "profile" && (
                 <div className="space-y-6">
+                  {/* Profile card */}
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/60">
                     <div className="flex flex-col justify-between gap-5 border-b border-slate-800 p-6 sm:flex-row sm:items-center">
                       <div>
@@ -652,8 +654,12 @@ const Profile = () => {
                       {!isEditing ? (
                         <button
                           type="button"
-                          onClick={() => setIsEditing(true)}
-                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-800"
+                          onClick={() => {
+                            setIsEditing(true);
+                            setError("");
+                            setSaveMessage("");
+                          }}
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-800 cursor-pointer"
                         >
                           <Edit3 className="h-4 w-4" />
                           Edit profile
@@ -664,9 +670,11 @@ const Profile = () => {
                             type="button"
                             onClick={() => {
                               setIsEditing(false);
+                              setError("");
                               loadProfile();
                             }}
-                            className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm text-slate-400 hover:bg-slate-800"
+                            disabled={savingProfile}
+                            className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm text-slate-400 hover:bg-slate-800 disabled:opacity-50"
                           >
                             Cancel
                           </button>
@@ -760,6 +768,7 @@ const Profile = () => {
 
                       {/* Form */}
                       <div className="grid gap-5 md:grid-cols-2">
+                        {/* Name */}
                         <div>
                           <label className="mb-2 block text-xs font-medium text-slate-400">
                             Full name
@@ -779,6 +788,7 @@ const Profile = () => {
                           </div>
                         </div>
 
+                        {/* Email */}
                         <div>
                           <label className="mb-2 block text-xs font-medium text-slate-400">
                             Email address
@@ -798,6 +808,7 @@ const Profile = () => {
                           </div>
                         </div>
 
+                        {/* Phone */}
                         <div>
                           <label className="mb-2 block text-xs font-medium text-slate-400">
                             Phone number
@@ -817,6 +828,7 @@ const Profile = () => {
                           </div>
                         </div>
 
+                        {/* Company */}
                         <div>
                           <label className="mb-2 block text-xs font-medium text-slate-400">
                             Company
@@ -836,6 +848,7 @@ const Profile = () => {
                           </div>
                         </div>
 
+                        {/* Language */}
                         <div>
                           <label className="mb-2 block text-xs font-medium text-slate-400">
                             Language
@@ -856,6 +869,7 @@ const Profile = () => {
                           </select>
                         </div>
 
+                        {/* Timezone */}
                         <div>
                           <label className="mb-2 block text-xs font-medium text-slate-400">
                             Timezone
@@ -904,6 +918,7 @@ const Profile = () => {
                     </div>
 
                     <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-3">
+                      {/* Member since */}
                       <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
                         <div className="flex items-center gap-3">
                           <CalendarDays className="h-5 w-5 text-blue-400" />
@@ -928,6 +943,7 @@ const Profile = () => {
                         </div>
                       </div>
 
+                      {/* Last login */}
                       <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
                         <div className="flex items-center gap-3">
                           <Clock3 className="h-5 w-5 text-purple-400" />
@@ -942,6 +958,7 @@ const Profile = () => {
                         </div>
                       </div>
 
+                      {/* Status */}
                       <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
                         <div className="flex items-center gap-3">
                           <ShieldCheck className="h-5 w-5 text-emerald-400" />
@@ -962,9 +979,9 @@ const Profile = () => {
                 </div>
               )}
 
-              {/* ====================================================
+              {/* ==================================================
                   SECURITY
-              ==================================================== */}
+              ================================================== */}
 
               {activeSection === "security" && (
                 <div className="space-y-6">
@@ -989,6 +1006,7 @@ const Profile = () => {
                       onSubmit={handleChangePassword}
                       className="space-y-5 p-6"
                     >
+                      {/* Current password */}
                       <div>
                         <label className="mb-2 block text-xs font-medium text-slate-400">
                           Current password
@@ -1022,6 +1040,7 @@ const Profile = () => {
                         </div>
                       </div>
 
+                      {/* New password */}
                       <div>
                         <label className="mb-2 block text-xs font-medium text-slate-400">
                           New password
@@ -1053,6 +1072,7 @@ const Profile = () => {
                         </div>
                       </div>
 
+                      {/* Confirm password */}
                       <div>
                         <label className="mb-2 block text-xs font-medium text-slate-400">
                           Confirm new password
@@ -1086,6 +1106,7 @@ const Profile = () => {
                         </div>
                       </div>
 
+                      {/* Requirements */}
                       <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
                         <p className="text-xs font-medium text-slate-400">
                           Password requirements
@@ -1110,10 +1131,11 @@ const Profile = () => {
                         </div>
                       </div>
 
+                      {/* Submit */}
                       <div className="flex justify-end">
                         <button
                           type="submit"
-                          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold hover:bg-blue-700"
+                          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold hover:bg-blue-700 cursor-pointer"
                         >
                           <Save className="h-4 w-4" />
                           Update password
@@ -1122,6 +1144,7 @@ const Profile = () => {
                     </form>
                   </div>
 
+                  {/* Security information */}
                   <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-6">
                     <div className="flex gap-4">
                       <ShieldCheck className="h-6 w-6 shrink-0 text-emerald-400" />
@@ -1141,9 +1164,9 @@ const Profile = () => {
                 </div>
               )}
 
-              {/* ====================================================
+              {/* ==================================================
                   NOTIFICATIONS
-              ==================================================== */}
+              ================================================== */}
 
               {activeSection === "notifications" && (
                 <div className="rounded-2xl border border-slate-800 bg-slate-900/60">
@@ -1217,12 +1240,13 @@ const Profile = () => {
                 </div>
               )}
 
-              {/* ====================================================
+              {/* ==================================================
                   SUPPORT PREFERENCES
-              ==================================================== */}
+              ================================================== */}
 
               {activeSection === "preferences" && (
                 <div className="space-y-6">
+                  {/* Preferences */}
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/60">
                     <div className="border-b border-slate-800 p-6">
                       <div className="flex items-center gap-3">
@@ -1338,7 +1362,7 @@ const Profile = () => {
 
                       <button
                         type="button"
-                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-red-500/20 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:bg-red-500/10"
+                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-red-500/20 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:bg-red-500/10 cursor-pointer"
                       >
                         <Trash2 className="h-4 w-4" />
                         Delete account
@@ -1354,6 +1378,12 @@ const Profile = () => {
     </div>
   );
 };
+
+/*
+ * ================================================================
+ * PREFERENCE TOGGLE
+ * ================================================================
+ */
 
 const PreferenceToggle = ({ title, description, checked, onChange }) => {
   return (
@@ -1383,6 +1413,12 @@ const PreferenceToggle = ({ title, description, checked, onChange }) => {
     </div>
   );
 };
+
+/*
+ * ================================================================
+ * ACTIVITY CARD
+ * ================================================================
+ */
 
 const ActivityCard = ({ icon: Icon, value, label }) => {
   return (

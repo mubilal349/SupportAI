@@ -65,6 +65,19 @@ const SupportLayout = () => {
     },
   ];
 
+  // Get avtar URL function
+  const getAvatarUrl = (avatar) => {
+    if (!avatar) return "";
+
+    if (avatar.startsWith("http://") || avatar.startsWith("https://")) {
+      return avatar;
+    }
+
+    return `http://localhost:8000${
+      avatar.startsWith("/") ? avatar : `/${avatar}`
+    }`;
+  };
+
   return (
     <div className="min-h-screen bg-[#050b18] text-white">
       {/* =====================================================
@@ -228,10 +241,21 @@ const SupportLayout = () => {
         <div className="border-t border-slate-800/80 p-4">
           <div className="flex items-center gap-3 rounded-xl bg-slate-900/50 p-3">
             {/* User Avatar */}
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600/20 text-blue-400">
-              <span className="text-sm font-bold">
-                {user?.name?.charAt(0)?.toUpperCase() || "U"}
-              </span>
+            <div className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-600/20 text-blue-400">
+              {user?.avatar ? (
+                <img
+                  src={getAvatarUrl(user.avatar)}
+                  alt={user?.name || "User"}
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                  }}
+                />
+              ) : (
+                <span className="text-sm font-bold">
+                  {user?.name?.charAt(0)?.toUpperCase() || "U"}
+                </span>
+              )}
             </div>
 
             {/* User Information */}

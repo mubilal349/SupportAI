@@ -141,18 +141,30 @@ export const login = async (req, res) => {
 
 export const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("-password");
+    console.log("========== PROFILE DEBUG ==========");
+    console.log("Authenticated user:", req.user);
+    console.log("User ID:", req.user?.id);
+
+    const user = await User.findById(req.user.id);
+
+    console.log("MongoDB user:", user);
 
     if (!user) {
       return res.status(404).json({
         success: false,
         message: "User not found.",
+        debugId: req.user.id,
       });
     }
 
     return res.status(200).json({
       success: true,
-      user,
+      user: user.toObject({
+        transform: (_, ret) => {
+          delete ret.password;
+          return ret;
+        },
+      }),
     });
   } catch (error) {
     console.error("Profile error:", error);

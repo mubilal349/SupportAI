@@ -8,18 +8,33 @@ import {
 } from "../controllers/customerController.js";
 
 import { authenticateToken } from "../middleware/authMiddleware.js";
+import upload from "../middleware/uploadMiddleware.js";
 
 const router = express.Router();
 
-// Dashboard
+// ==========================================
+// DASHBOARD
+// ==========================================
+
 router.get("/dashboard", authenticateToken, getCustomerDashboard);
 
-// Profile
+// ==========================================
+// PROFILE
+// ==========================================
+
 router.get("/profile", authenticateToken, getCustomerProfile);
 
-router.put("/profile", authenticateToken, updateCustomerProfile);
+router.put(
+  "/profile",
+  authenticateToken,
+  upload.single("avatar"),
+  updateCustomerProfile,
+);
 
-// Password
+// ==========================================
+// PASSWORD
+// ==========================================
+
 router.put("/password", authenticateToken, changeCustomerPassword);
 
 export default router;
