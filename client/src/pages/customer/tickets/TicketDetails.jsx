@@ -367,19 +367,79 @@ const TicketDetails = () => {
 
       const response = await generateTicketSummary(ticket.id);
 
-      console.log("AI TICKET SUMMARY:", response);
+      console.log("AI TICKET SUMMARY RAW RESPONSE:", response);
 
-      const summary =
+      const rawSummary =
         response?.summary ||
         response?.data?.summary ||
         response?.aiSummary ||
+        response?.data?.aiSummary ||
+        response?.result ||
+        response?.data?.result ||
         null;
 
-      if (!summary) {
+      if (!rawSummary) {
         throw new Error("AI summary was not returned.");
       }
 
-      setAiSummary(summary);
+      /*
+      Normalize different possible backend formats
+      into one structure for the UI.
+    */
+
+      let normalizedSummary;
+
+      if (typeof rawSummary === "string") {
+        normalizedSummary = {
+          summary: rawSummary,
+          keyPoints: [],
+          suggestedResolution: "",
+          recommendation: "",
+        };
+      } else {
+        normalizedSummary = {
+          summary:
+            rawSummary.summary ||
+            rawSummary.mainIssue ||
+            rawSummary.overview ||
+            rawSummary.description ||
+            "",
+
+          keyPoints: Array.isArray(rawSummary.keyPoints)
+            ? rawSummary.keyPoints
+            : Array.isArray(rawSummary.importantDetails)
+              ? rawSummary.importantDetails
+              : Array.isArray(rawSummary.details)
+                ? rawSummary.details
+                : [],
+
+          suggestedResolution:
+            rawSummary.suggestedResolution ||
+            rawSummary.suggested_solution ||
+            rawSummary.solution ||
+            rawSummary.nextSteps ||
+            "",
+
+          recommendation:
+            rawSummary.recommendation ||
+            rawSummary.aiRecommendation ||
+            rawSummary.recommendedAction ||
+            "",
+        };
+      }
+
+      console.log("NORMALIZED AI SUMMARY:", normalizedSummary);
+
+      if (
+        !normalizedSummary.summary &&
+        normalizedSummary.keyPoints.length === 0 &&
+        !normalizedSummary.suggestedResolution &&
+        !normalizedSummary.recommendation
+      ) {
+        throw new Error("AI returned an empty summary.");
+      }
+
+      setAiSummary(normalizedSummary);
     } catch (err) {
       console.error("AI SUMMARY ERROR:", err);
 
@@ -809,7 +869,7 @@ const TicketDetails = () => {
                 onClick={loadTicket}
                 className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold transition hover:bg-blue-700"
               >
-                <RefreshCw className="h-4 w-4" />
+                <RefreshCw className="h-4 w-4v cursor-pointer" />
                 Try again
               </button>
 
@@ -859,7 +919,7 @@ const TicketDetails = () => {
               type="button"
               onClick={handleRefresh}
               disabled={refreshing}
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-400 transition hover:bg-slate-800 hover:text-white disabled:opacity-50"
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-400 transition hover:bg-slate-800 hover:text-white disabled:opacity-50 cursor-pointer"
               title="Refresh ticket"
             >
               <RefreshCw
@@ -996,7 +1056,7 @@ const TicketDetails = () => {
               type="button"
               onClick={handleGenerateSummary}
               disabled={generatingSummary}
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2.5 text-[11px] font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2.5 text-[11px] font-semibold text-white transition hover:bg-blue-700 cursor-pointer disabled:opacity-50"
             >
               {generatingSummary ? (
                 <>
@@ -1033,105 +1093,147 @@ const TicketDetails = () => {
             </div>
           )}
 
-          {aiSummary && (
-            <div className="mt-5 space-y-4">
-              {aiSummary.summary && (
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-600">
-                    Summary
-                  </p>
+          <div className="mt-5">
+            {aiSummary && (
+              <div className="space-y-6">
+                {/* What happened */}
+                {aiSummary.summary && (
+                  <section>
+                    <h3 className="text-xs font-semibold text-white">
+                      Ai Summary
+                    </h3>
 
-                  <p className="mt-2 text-xs leading-5 text-slate-400">
-                    {aiSummary.summary}
-                  </p>
-                </div>
-              )}
-
-              {Array.isArray(aiSummary.keyPoints) &&
-                aiSummary.keyPoints.length > 0 && (
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-600">
-                      Key points
+                    <p className="mt-2 text-[12px] leading-6 text-slate-400">
+                      {aiSummary.summary}
                     </p>
-
-                    <ul className="mt-2 space-y-2">
-                      {aiSummary.keyPoints.map((point, index) => (
-                        <li
-                          key={index}
-                          className="flex gap-2 text-[11px] leading-5 text-slate-400"
-                        >
-                          <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-blue-400" />
-
-                          <span>{point}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                  </section>
                 )}
 
-              {aiSummary.suggestedResolution && (
-                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
-                  <div className="flex items-start gap-2">
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                {/* Important information */}
+                {Array.isArray(aiSummary.keyPoints) &&
+                  aiSummary.keyPoints.length > 0 && (
+                    <section>
+                      <h3 className="text-xs font-semibold text-white">
+                        Important information
+                      </h3>
 
-                    <div>
-                      <p className="text-[10px] font-semibold text-emerald-400">
-                        Suggested resolution
-                      </p>
+                      <ul className="mt-2 space-y-2 pl-5">
+                        {aiSummary.keyPoints.map((point, index) => (
+                          <li
+                            key={index}
+                            className="list-disc pl-1 text-[12px] leading-6 text-slate-400 marker:text-slate-500"
+                          >
+                            {point}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
 
-                      <p className="mt-2 text-[11px] leading-5 text-slate-400">
-                        {aiSummary.suggestedResolution}
-                      </p>
-                    </div>
-                  </div>
+                {/* What you can do */}
+                {aiSummary.suggestedResolution && (
+                  <section>
+                    <h3 className="text-xs font-semibold text-white">
+                      What you can do
+                    </h3>
+
+                    <p className="mt-2 text-[12px] leading-6 text-slate-400">
+                      {aiSummary.suggestedResolution}
+                    </p>
+                  </section>
+                )}
+
+                {/* Recommendation */}
+                {aiSummary.recommendation && (
+                  <section>
+                    <h3 className="text-xs font-semibold text-white">
+                      Next step
+                    </h3>
+
+                    <p className="mt-2 text-[12px] leading-6 text-slate-400">
+                      {aiSummary.recommendation}
+                    </p>
+                  </section>
+                )}
+
+                {/* Actions */}
+                <div className="flex flex-wrap gap-2 border-t border-slate-800 pt-4">
+                  <button
+                    type="button"
+                    onClick={handleGenerateSummary}
+                    disabled={generatingSummary}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-[10px] font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white disabled:opacity-50 cursor-pointer"
+                  >
+                    {generatingSummary ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )}
+
+                    {generatingSummary ? "Analyzing..." : "Regenerate"}
+                  </button>
+
+                  {!isClosed && (
+                    <button
+                      type="button"
+                      onClick={handleEscalate}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-[10px] font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white"
+                    >
+                      <UserRoundCheck className="h-3.5 w-3.5" />
+                      Talk to a person
+                    </button>
+                  )}
                 </div>
-              )}
 
-              {aiSummary.recommendation && (
-                <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-3">
-                  <p className="text-[10px] font-semibold text-orange-400">
-                    AI recommendation
-                  </p>
+                <p className="text-[9px] leading-4 text-slate-600">
+                  AI-generated information may not always be accurate. If you're
+                  unsure, a support agent can help.
+                </p>
+              </div>
+            )}
 
-                  <p className="mt-2 text-[11px] leading-5 text-slate-400">
-                    {aiSummary.recommendation}
-                  </p>
-                </div>
-              )}
+            {/* No AI response */}
+            {!aiSummary && !generatingSummary && (
+              <div className="py-6">
+                <p className="text-xs font-medium text-slate-300">
+                  Need help with this ticket?
+                </p>
 
-              <div className="flex gap-2">
+                <p className="mt-2 text-[10px] leading-5 text-slate-500">
+                  Ask SupportAI to explain your issue and suggest what you can
+                  do next.
+                </p>
+
                 <button
                   type="button"
                   onClick={handleGenerateSummary}
-                  disabled={generatingSummary}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 py-2.5 text-[10px] font-semibold text-blue-400 transition hover:bg-blue-500/20 disabled:opacity-50"
+                  className="mt-4 inline-flex items-center gap-2 rounded-lg bg-blue-500/10 px-3 py-2 text-[10px] font-semibold text-blue-400 hover:bg-blue-500/20"
                 >
-                  {generatingSummary ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  )}
-                  Regenerate
+                  <Bot className="h-3.5 w-3.5" />
+                  Get AI help
                 </button>
-
-                {!isClosed && (
-                  <button
-                    type="button"
-                    onClick={handleEscalate}
-                    className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-[10px] font-semibold text-slate-400 transition hover:bg-slate-800 hover:text-white"
-                  >
-                    <UserRoundCheck className="h-3.5 w-3.5" />
-                    Human
-                  </button>
-                )}
               </div>
+            )}
 
-              <p className="text-[9px] leading-4 text-slate-700">
-                AI-generated information may be inaccurate. Verify important
-                information with a support agent.
-              </p>
-            </div>
-          )}
+            {/* Loading */}
+            {generatingSummary && !aiSummary && (
+              <div className="py-6">
+                <div className="flex items-center gap-3">
+                  <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+
+                  <div>
+                    <p className="text-xs font-medium text-slate-300">
+                      Understanding your issue...
+                    </p>
+
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      We're preparing a simple explanation for you.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </section>
 
         {/* ===================================================
