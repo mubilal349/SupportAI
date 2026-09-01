@@ -129,7 +129,11 @@ const Tickets = () => {
     return {
       ...ticket,
 
+      // MongoDB ID
       id: ticket.id || ticket._id || `ticket-${Date.now()}`,
+
+      // Human-readable number
+      ticketNumber: ticket.ticketNumber || ticket.id || ticket._id || "—",
 
       subject: ticket.subject || "Untitled ticket",
 
@@ -142,6 +146,7 @@ const Tickets = () => {
       priority: String(ticket.priority || "medium").toLowerCase(),
 
       agent:
+        ticket.assignedAgent?.name ||
         ticket.agent?.name ||
         ticket.assignedTo?.name ||
         ticket.agentName ||
@@ -156,7 +161,12 @@ const Tickets = () => {
         : ticket.created || "—",
 
       replies:
-        ticket.replies?.length || ticket.replyCount || ticket.repliesCount || 0,
+        typeof ticket.replies === "number"
+          ? ticket.replies
+          : ticket.replies?.length ||
+            ticket.replyCount ||
+            ticket.repliesCount ||
+            0,
     };
   };
 
@@ -319,11 +329,15 @@ const Tickets = () => {
     const searchValue = search.toLowerCase().trim();
 
     return tickets.filter((ticket) => {
+      const ticketNumber = String(ticket.ticketNumber || "").toLowerCase();
+
       const ticketId = String(ticket.id || ticket._id || "").toLowerCase();
 
       const subject = String(ticket.subject || "").toLowerCase();
 
-      const ticketCategory = String(ticket.category || "").toLowerCase();
+      const categoryValue = String(ticket.category || "").toLowerCase();
+
+      const description = String(ticket.description || "").toLowerCase();
 
       const ticketStatus = String(ticket.status || "").toLowerCase();
 
@@ -331,16 +345,18 @@ const Tickets = () => {
 
       const matchesSearch =
         !searchValue ||
+        ticketNumber.includes(searchValue) ||
         ticketId.includes(searchValue) ||
         subject.includes(searchValue) ||
-        ticketCategory.includes(searchValue);
+        categoryValue.includes(searchValue) ||
+        description.includes(searchValue);
 
       const matchesStatus = status === "all" || ticketStatus === status;
 
       const matchesPriority = priority === "all" || ticketPriority === priority;
 
       const matchesCategory =
-        category === "all" || ticketCategory === category.toLowerCase();
+        category === "all" || categoryValue === category.toLowerCase();
 
       return (
         matchesSearch && matchesStatus && matchesPriority && matchesCategory
@@ -693,7 +709,7 @@ const Tickets = () => {
                                   </p>
 
                                   <p className="mt-1 text-[10px] text-slate-700">
-                                    {ticket.id}
+                                    {ticket.ticketNumber}
                                     {" · "}
                                     {ticket.category}
                                   </p>

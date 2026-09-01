@@ -9,9 +9,7 @@ import {
   Headphones,
   Image as ImageIcon,
   Menu,
-  MessageSquare,
   Paperclip,
-  Plus,
   Send,
   Smile,
   Sparkles,
@@ -22,44 +20,250 @@ import {
 import { Link } from "react-router-dom";
 
 import { useAuth } from "../../context/AuthContext";
+import api from "../../services/api";
 
 const Chat = () => {
   const { user } = useAuth();
 
+  // ==========================================
+  // STATE
+  // ==========================================
+
+  const [conversationId, setConversationId] = useState(null);
+
+  const [conversation, setConversation] = useState(null);
+
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      sender: "ai",
-      content: "Hi! I'm SupportAI 👋 How can I help you today?",
-      time: "10:32 PM",
-      status: "read",
-    },
-    {
-      id: 2,
-      sender: "ai",
-      content:
-        "You can ask me about your account, billing, subscriptions, technical problems, or anything else related to our service.",
-      time: "10:32 PM",
-      status: "read",
-    },
-  ]);
+
+  const [messages, setMessages] = useState([]);
+
+  const [isLoadingConversation, setIsLoadingConversation] = useState(true);
 
   const [isTyping, setIsTyping] = useState(false);
+
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
   const [showMobileInfo, setShowMobileInfo] = useState(false);
+
   const [isEscalated, setIsEscalated] = useState(false);
+
+  const [error, setError] = useState("");
 
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  // ==========================================
+  // HELPERS
+  // ==========================================
+
+  const formatTime = (date) => {
+    if (!date) {
+      return "";
+    }
+
+    try {
+      return new Date(date).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  };
+
+  const formatDate = (date) => {
+    if (!date) {
+      return "Today";
+    }
+
+    try {
+      const target = new Date(date);
+      const today = new Date();
+
+      const isToday = target.toDateString() === today.toDateString();
+
+      if (isToday) {
+        return "Today";
+      }
+
+      return target.toLocaleDateString([], {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    } catch {
+      return "Today";
+    }
+  };
+
+  const normalizeMessage = (item) => {
+    if (!item) {
+      return null;
+    }
+
+    const senderType = item.senderType || item.sender || "system";
+
+    let sender = "ai";
+
+    if (senderType === "customer") {
+      sender = "user";
+    } else if (senderType === "ai" || senderType === "agent") {
+      sender = "ai";
+    } else if (senderType === "system") {
+      sender = "system";
+    }
+
+    return {
+      id: item._id || item.id || `message-${Date.now()}-${Math.random()}`,
+
+      sender,
+
+      senderType,
+
+      content: item.content || "",
+
+      time: formatTime(item.createdAt || item.updatedAt),
+
+      status: item.isRead || sender !== "user" ? "read" : "sent",
+
+      attachment: item.attachments?.length > 0 ? item.attachments[0] : null,
+    };
+  };
+
+  // ==========================================
+  // SCROLL TO BOTTOM
+  // ==========================================
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
       behavior: "smooth",
     });
   }, [messages, isTyping]);
+
+  // ==========================================
+  // LOAD OR CREATE CONVERSATION
+  // ==========================================
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    initializeConversation();
+  }, [user]);
+
+  const initializeConversation = async () => {
+    try {
+      setIsLoadingConversation(true);
+      setError("");
+
+      console.log("=================================");
+      console.log("INITIALIZING SUPPORT CONVERSATION");
+      console.log("=================================");
+
+      // ----------------------------------------
+      // GET EXISTING CONVERSATIONS
+      // ----------------------------------------
+
+      const response = await api.get("/conversations");
+
+      console.log("CUSTOMER CONVERSATIONS:");
+      console.log(response.data);
+
+      const conversations = response.data?.conversations || [];
+
+      // ----------------------------------------
+      // FIND ACTIVE AI CONVERSATION
+      // ----------------------------------------
+
+      let activeConversation = conversations.find(
+        (item) => item.status === "active" && item.supportType === "AI",
+      );
+
+      // If there isn't an AI conversation,
+      // use any active conversation.
+      if (!activeConversation) {
+        activeConversation = conversations.find(
+          (item) => item.status === "active",
+        );
+      }
+
+      // ----------------------------------------
+      // CREATE NEW CONVERSATION
+      // ----------------------------------------
+
+      if (!activeConversation) {
+        console.log("No active conversation found. Creating one...");
+
+        const createResponse = await api.post("/conversations");
+
+        activeConversation = createResponse.data?.conversation;
+
+        if (!activeConversation?._id) {
+          throw new Error("Conversation was created but no ID was returned.");
+        }
+      }
+
+      // ----------------------------------------
+      // SET CONVERSATION
+      // ----------------------------------------
+
+      setConversation(activeConversation);
+
+      setConversationId(activeConversation._id);
+
+      // ----------------------------------------
+      // LOAD MESSAGES
+      // ----------------------------------------
+
+      await loadMessages(activeConversation._id);
+
+      console.log("Conversation initialized:", activeConversation._id);
+    } catch (error) {
+      console.error("INITIALIZE CONVERSATION ERROR:", error);
+
+      const serverMessage =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Unable to load SupportAI conversation.";
+
+      setError(serverMessage);
+    } finally {
+      setIsLoadingConversation(false);
+    }
+  };
+
+  // ==========================================
+  // LOAD MESSAGES
+  // ==========================================
+
+  const loadMessages = async (id) => {
+    try {
+      const response = await api.get(`/conversations/${id}/messages`);
+
+      console.log("CONVERSATION MESSAGES:");
+      console.log(response.data);
+
+      const backendMessages = response.data?.messages || [];
+
+      const normalizedMessages = backendMessages
+        .map(normalizeMessage)
+        .filter(Boolean);
+
+      setMessages(normalizedMessages);
+    } catch (error) {
+      console.error("LOAD MESSAGES ERROR:", error);
+
+      throw error;
+    }
+  };
+
+  // ==========================================
+  // SEND MESSAGE
+  // ==========================================
 
   const sendMessage = async (e) => {
     e?.preventDefault();
@@ -70,19 +274,36 @@ const Chat = () => {
       return;
     }
 
+    if (!conversationId) {
+      setError("No active conversation is available. Please refresh the page.");
+      return;
+    }
+
+    setError("");
+
+    // ----------------------------------------
+    // OPTIMISTIC CUSTOMER MESSAGE
+    // ----------------------------------------
+
+    const temporaryId = `user-${Date.now()}`;
+
     const userMessage = {
-      id: Date.now(),
+      id: temporaryId,
       sender: "user",
+      senderType: "customer",
       content: trimmedMessage,
-      time: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      time: formatTime(new Date()),
       status: "sent",
     };
 
     setMessages((prev) => [...prev, userMessage]);
+
+    // ----------------------------------------
+    // CLEAR INPUT
+    // ----------------------------------------
+
     setMessage("");
+
     setShowEmojiPicker(false);
     setShowAttachmentMenu(false);
 
@@ -90,74 +311,160 @@ const Chat = () => {
       textareaRef.current.style.height = "auto";
     }
 
-    /*
-     * Temporary AI response.
-     *
-     * Later this will become:
-     *
-     * POST /api/conversations/:conversationId/messages
-     *
-     * and your backend will call your AI service.
-     */
+    // ----------------------------------------
+    // AI TYPING
+    // ----------------------------------------
 
     setIsTyping(true);
 
-    setTimeout(() => {
-      const aiMessage = {
-        id: Date.now() + 1,
-        sender: "ai",
-        content: generateAIResponse(trimmedMessage),
-        time: new Date().toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        status: "read",
+    try {
+      console.log("=================================");
+      console.log("SENDING MESSAGE TO SUPPORTAI");
+      console.log("CONVERSATION ID:", conversationId);
+      console.log("MESSAGE:", trimmedMessage);
+      console.log("=================================");
+
+      // --------------------------------------
+      // REAL BACKEND ENDPOINT
+      //
+      // POST /api/conversations/:id/messages
+      // --------------------------------------
+
+      const response = await api.post(
+        `/conversations/${conversationId}/messages`,
+        {
+          message: trimmedMessage,
+
+          // Send recent frontend history as
+          // additional context.
+          history: messages.slice(-20).map((item) => ({
+            sender: item.sender,
+            content: item.content,
+          })),
+        },
+      );
+
+      console.log("=================================");
+      console.log("SUPPORTAI RESPONSE");
+      console.log(response.data);
+      console.log("=================================");
+
+      // ----------------------------------------
+      // CUSTOMER MESSAGE FROM SERVER
+      // ----------------------------------------
+
+      const serverUserMessage = normalizeMessage(response.data?.userMessage);
+
+      // ----------------------------------------
+      // AI MESSAGE FROM SERVER
+      // ----------------------------------------
+
+      const aiMessage = normalizeMessage(response.data?.aiMessage);
+
+      // ----------------------------------------
+      // REPLACE TEMPORARY USER MESSAGE
+      // ----------------------------------------
+
+      setMessages((prev) => {
+        const withoutTemporary = prev.filter((item) => item.id !== temporaryId);
+
+        const nextMessages = [...withoutTemporary];
+
+        if (serverUserMessage) {
+          nextMessages.push(serverUserMessage);
+        } else {
+          nextMessages.push(userMessage);
+        }
+
+        if (aiMessage) {
+          nextMessages.push(aiMessage);
+        }
+
+        return nextMessages;
+      });
+
+      // ----------------------------------------
+      // UPDATE CONVERSATION INFO
+      // ----------------------------------------
+
+      if (response.data?.conversation) {
+        setConversation((prev) => ({
+          ...(prev || {}),
+          ...response.data.conversation,
+        }));
+      }
+    } catch (error) {
+      console.error("CHAT AI ERROR:", error);
+
+      const serverMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "Unable to get a response from SupportAI.";
+
+      setError(serverMessage);
+
+      // ----------------------------------------
+      // IF BACKEND SAVED THE CUSTOMER MESSAGE
+      // BUT OLLAMA FAILED, USE SERVER MESSAGE
+      // ----------------------------------------
+
+      const savedUserMessage = normalizeMessage(
+        error?.response?.data?.userMessage,
+      );
+
+      if (savedUserMessage) {
+        setMessages((prev) => {
+          const withoutTemporary = prev.filter(
+            (item) => item.id !== temporaryId,
+          );
+
+          return [...withoutTemporary, savedUserMessage];
+        });
+      }
+
+      // ----------------------------------------
+      // SHOW SYSTEM ERROR
+      // ----------------------------------------
+
+      const errorMessage = {
+        id: `error-${Date.now()}`,
+        sender: "system",
+        senderType: "system",
+        content:
+          "Sorry, I couldn't process your message right now. Please try again.",
+        time: formatTime(new Date()),
       };
 
-      setMessages((prev) => [...prev, aiMessage]);
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
       setIsTyping(false);
-    }, 1400);
+    }
   };
 
-  const generateAIResponse = (text) => {
-    const lowerText = text.toLowerCase();
-
-    if (lowerText.includes("password") || lowerText.includes("login")) {
-      return 'I can help with that. You can reset your password from the login page by selecting "Forgot password?". If you\'re still unable to access your account, I can connect you with a support agent.';
-    }
-
-    if (
-      lowerText.includes("payment") ||
-      lowerText.includes("billing") ||
-      lowerText.includes("invoice")
-    ) {
-      return "I can help you with billing and payments. Could you tell me whether you're having trouble with a payment, invoice, or payment method?";
-    }
-
-    if (lowerText.includes("subscription") || lowerText.includes("cancel")) {
-      return "I can help you manage your subscription. If you'd like to cancel, I can guide you through the process or connect you with a support specialist.";
-    }
-
-    if (lowerText.includes("agent") || lowerText.includes("human")) {
-      return "Absolutely. I can connect you with a human support agent. They will be able to take a closer look at your issue.";
-    }
-
-    return "Thanks for explaining that. I'm here to help. Could you provide a little more detail about the problem you're experiencing?";
-  };
+  // ==========================================
+  // TEXTAREA
+  // ==========================================
 
   const handleTextareaChange = (e) => {
     setMessage(e.target.value);
 
     e.target.style.height = "auto";
+
     e.target.style.height = `${Math.min(e.target.scrollHeight, 140)}px`;
   };
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+
       sendMessage();
     }
   };
+
+  // ==========================================
+  // FILE HANDLING
+  // ==========================================
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -167,13 +474,11 @@ const Chat = () => {
     }
 
     const fileMessage = {
-      id: Date.now(),
+      id: `file-${Date.now()}`,
       sender: "user",
+      senderType: "customer",
       content: `📎 ${file.name}`,
-      time: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      time: formatTime(new Date()),
       status: "sent",
       attachment: {
         name: file.name,
@@ -183,6 +488,7 @@ const Chat = () => {
     };
 
     setMessages((prev) => [...prev, fileMessage]);
+
     setShowAttachmentMenu(false);
 
     e.target.value = "";
@@ -194,6 +500,7 @@ const Chat = () => {
     }
 
     const sizes = ["Bytes", "KB", "MB", "GB"];
+
     const index = Math.floor(Math.log(bytes) / Math.log(1024));
 
     return `${parseFloat(
@@ -201,28 +508,64 @@ const Chat = () => {
     )} ${sizes[index]}`;
   };
 
+  // ==========================================
+  // ESCALATE
+  // ==========================================
+
   const handleEscalate = () => {
     setIsEscalated(true);
 
     const escalationMessage = {
-      id: Date.now(),
+      id: `system-${Date.now()}`,
       sender: "system",
+      senderType: "system",
       content:
         "You've requested human support. A support agent will join this conversation shortly.",
-      time: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      time: formatTime(new Date()),
     };
 
     setMessages((prev) => [...prev, escalationMessage]);
   };
 
+  // ==========================================
+  // EMOJI
+  // ==========================================
+
   const addEmoji = (emoji) => {
     setMessage((prev) => `${prev}${emoji}`);
+
     setShowEmojiPicker(false);
+
     textareaRef.current?.focus();
   };
+
+  // ==========================================
+  // LOADING SCREEN
+  // ==========================================
+
+  if (isLoadingConversation) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-950 text-white">
+        <div className="flex flex-col items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600">
+            <Bot className="h-6 w-6 animate-pulse" />
+          </div>
+
+          <div className="text-center">
+            <p className="text-sm font-medium">Connecting to SupportAI</p>
+
+            <p className="mt-1 text-xs text-slate-500">
+              Preparing your conversation...
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // UI
+  // ==========================================
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-950 text-white">
@@ -303,7 +646,9 @@ const Chat = () => {
             <div>
               <p className="text-xs text-slate-600">Conversation</p>
 
-              <p className="text-sm font-medium">General Support</p>
+              <p className="text-sm font-medium">
+                {conversation?.title || "General Support"}
+              </p>
             </div>
 
             <div className="flex items-center gap-2 text-xs text-slate-600">
@@ -318,30 +663,39 @@ const Chat = () => {
               {/* Date */}
               <div className="mb-8 flex items-center justify-center">
                 <div className="rounded-full border border-slate-800 bg-slate-900 px-3 py-1 text-[11px] text-slate-600">
-                  Today
+                  {formatDate(messages[0]?.time || conversation?.createdAt)}
                 </div>
               </div>
 
               {/* Welcome Card */}
-              <div className="mb-8 rounded-2xl border border-blue-500/10 bg-blue-500/5 p-5">
-                <div className="flex gap-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
-                    <Sparkles className="h-5 w-5" />
-                  </div>
+              {messages.length === 0 && (
+                <div className="mb-8 rounded-2xl border border-blue-500/10 bg-blue-500/5 p-5">
+                  <div className="flex gap-4">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
+                      <Sparkles className="h-5 w-5" />
+                    </div>
 
-                  <div>
-                    <h2 className="text-sm font-semibold">
-                      Welcome to SupportAI
-                    </h2>
+                    <div>
+                      <h2 className="text-sm font-semibold">
+                        Welcome to SupportAI
+                      </h2>
 
-                    <p className="mt-1 text-sm leading-6 text-slate-400">
-                      I'm an AI-powered support assistant. I can help answer
-                      questions, troubleshoot problems, and connect you with a
-                      human agent when necessary.
-                    </p>
+                      <p className="mt-1 text-sm leading-6 text-slate-400">
+                        I'm an AI-powered support assistant. I can help answer
+                        questions, troubleshoot problems, and connect you with a
+                        human agent when necessary.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
+
+              {/* API Error */}
+              {error && (
+                <div className="mb-5 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-xs text-red-400">
+                  {error}
+                </div>
+              )}
 
               {/* Message List */}
               <div className="space-y-5">
@@ -367,7 +721,11 @@ const Chat = () => {
                     >
                       {!isUser && (
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600">
-                          <Bot className="h-4 w-4" />
+                          {item.senderType === "agent" ? (
+                            <Headphones className="h-4 w-4" />
+                          ) : (
+                            <Bot className="h-4 w-4" />
+                          )}
                         </div>
                       )}
 
@@ -487,7 +845,7 @@ const Chat = () => {
                   onKeyDown={handleKeyDown}
                   placeholder="Message SupportAI..."
                   rows={1}
-                  disabled={isTyping}
+                  disabled={isTyping || !conversationId}
                   className="block max-h-36 min-h-[52px] w-full resize-none bg-transparent px-4 pb-2 pt-4 pr-14 text-sm text-white outline-none placeholder:text-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
                 />
 
@@ -569,7 +927,7 @@ const Chat = () => {
 
                   <button
                     type="submit"
-                    disabled={!message.trim() || isTyping}
+                    disabled={!message.trim() || isTyping || !conversationId}
                     className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-30"
                     title="Send message"
                   >
@@ -634,11 +992,11 @@ const Chat = () => {
               </p>
 
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-4">
                   <span className="text-xs text-slate-500">ID</span>
 
-                  <span className="font-mono text-xs text-slate-400">
-                    CON-1005
+                  <span className="max-w-[170px] truncate font-mono text-xs text-slate-400">
+                    {conversationId || "Creating..."}
                   </span>
                 </div>
 
@@ -647,14 +1005,33 @@ const Chat = () => {
 
                   <span className="flex items-center gap-1.5 text-xs text-blue-400">
                     <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-                    Active
+
+                    {conversation?.status || "Active"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Type</span>
+
+                  <span className="text-xs text-slate-400">
+                    {conversation?.supportType || "AI"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Messages</span>
+
+                  <span className="text-xs text-slate-400">
+                    {conversation?.messageCount ?? messages.length}
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-slate-500">Created</span>
 
-                  <span className="text-xs text-slate-400">Today</span>
+                  <span className="text-xs text-slate-400">
+                    {formatDate(conversation?.createdAt)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -700,6 +1077,7 @@ const Chat = () => {
                     key={topic}
                     onClick={() => {
                       setMessage(`I need help with ${topic.toLowerCase()}.`);
+
                       textareaRef.current?.focus();
                     }}
                     className="flex w-full items-center justify-between rounded-lg border border-slate-800 px-3 py-2.5 text-left text-xs text-slate-500 transition hover:bg-slate-900 hover:text-slate-300"

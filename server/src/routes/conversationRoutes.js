@@ -4,6 +4,8 @@ import {
   createConversation,
   getCustomerConversations,
   getConversationById,
+  getConversationMessages,
+  sendMessage,
   archiveConversation,
 } from "../controllers/conversationController.js";
 
@@ -11,13 +13,28 @@ import { authenticateToken } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Customer conversations
-router.get("/", authenticateToken, getCustomerConversations);
+// ==========================================
+// CUSTOMER CONVERSATIONS
+// ==========================================
 
-router.post("/", authenticateToken, createConversation);
+router.use(authenticateToken);
 
-router.get("/:id", authenticateToken, getConversationById);
+// Create conversation
+router.post("/", createConversation);
 
-router.put("/:id/archive", authenticateToken, archiveConversation);
+// Get customer's conversations
+router.get("/", getCustomerConversations);
+
+// Get single conversation
+router.get("/:id", getConversationById);
+
+// Get conversation messages
+router.get("/:id/messages", getConversationMessages);
+
+// Send customer message + generate AI response
+router.post("/:id/messages", sendMessage);
+
+// Archive conversation
+router.put("/:id/archive", archiveConversation);
 
 export default router;

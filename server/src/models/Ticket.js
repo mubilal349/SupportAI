@@ -1,16 +1,20 @@
 import mongoose from "mongoose";
 
+// ==========================================
+// TICKET CONVERSATION MESSAGE SCHEMA
+// ==========================================
+
 const ticketReplySchema = new mongoose.Schema(
   {
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      default: null,
     },
 
     senderRole: {
       type: String,
-      enum: ["customer", "agent", "admin", "system"],
+      enum: ["customer", "agent", "admin", "ai", "system"],
       required: true,
     },
 
@@ -18,22 +22,47 @@ const ticketReplySchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      maxlength: 5000,
+      maxlength: 10000,
     },
 
     attachments: [
       {
-        filename: String,
-        originalName: String,
-        mimetype: String,
-        size: Number,
-        path: String,
+        filename: {
+          type: String,
+          default: "",
+        },
+
+        originalName: {
+          type: String,
+          default: "",
+        },
+
+        mimetype: {
+          type: String,
+          default: "",
+        },
+
+        size: {
+          type: Number,
+          default: 0,
+        },
+
+        path: {
+          type: String,
+          default: "",
+        },
+
         uploadedAt: {
           type: Date,
           default: Date.now,
         },
       },
     ],
+
+    isRead: {
+      type: Boolean,
+      default: false,
+    },
 
     createdAt: {
       type: Date,
@@ -45,8 +74,16 @@ const ticketReplySchema = new mongoose.Schema(
   },
 );
 
+// ==========================================
+// TICKET SCHEMA
+// ==========================================
+
 const ticketSchema = new mongoose.Schema(
   {
+    // ==========================================
+    // BASIC INFORMATION
+    // ==========================================
+
     ticketNumber: {
       type: String,
       unique: true,
@@ -66,17 +103,41 @@ const ticketSchema = new mongoose.Schema(
       default: null,
     },
 
+    // ==========================================
+    // ATTACHMENTS
+    // ==========================================
+
     attachments: [
       {
-        filename: String,
-        originalName: String,
-        mimetype: String,
-        size: Number,
-        path: String,
+        filename: {
+          type: String,
+          default: "",
+        },
+
+        originalName: {
+          type: String,
+          default: "",
+        },
+
+        mimetype: {
+          type: String,
+          default: "",
+        },
+
+        size: {
+          type: Number,
+          default: 0,
+        },
+
+        path: {
+          type: String,
+          default: "",
+        },
 
         uploadedBy: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "User",
+          default: null,
         },
 
         uploadedAt: {
@@ -85,6 +146,10 @@ const ticketSchema = new mongoose.Schema(
         },
       },
     ],
+
+    // ==========================================
+    // TICKET DETAILS
+    // ==========================================
 
     subject: {
       type: String,
@@ -123,7 +188,10 @@ const ticketSchema = new mongoose.Schema(
     // CONVERSATION
     // ==========================================
 
-    conversation: [ticketReplySchema],
+    conversation: {
+      type: [ticketReplySchema],
+      default: [],
+    },
 
     replies: {
       type: Number,
@@ -204,6 +272,7 @@ const ticketSchema = new mongoose.Schema(
 
     aiSummary: {
       type: String,
+      trim: true,
       default: "",
     },
 
@@ -216,6 +285,10 @@ const ticketSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+// ==========================================
+// INDEXES
+// ==========================================
 
 ticketSchema.index({
   customer: 1,
@@ -231,6 +304,10 @@ ticketSchema.index({
   status: 1,
   priority: 1,
 });
+
+// ==========================================
+// MODEL
+// ==========================================
 
 const Ticket = mongoose.model("Ticket", ticketSchema);
 

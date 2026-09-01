@@ -1,8 +1,12 @@
+import mongoose from "mongoose";
 import Ticket from "../models/Ticket.js";
+import { generateAIResponse } from "../services/aiService.js";
 
-// ==========================================
-// GENERATE TICKET NUMBER
-// ==========================================
+/*
+ * =========================================================
+ * GENERATE TICKET NUMBER
+ * =========================================================
+ */
 
 const generateTicketNumber = async () => {
   let ticketNumber;
@@ -13,15 +17,29 @@ const generateTicketNumber = async () => {
 
     ticketNumber = `TKT-${randomNumber}`;
 
-    exists = await Ticket.exists({ ticketNumber });
+    exists = await Ticket.exists({
+      ticketNumber,
+    });
   }
 
   return ticketNumber;
 };
 
-// ==========================================
-// CREATE TICKET
-// ==========================================
+/*
+ * =========================================================
+ * GENERATE BASIC SUPPORT AI RESPONSE
+ *
+ * Temporary response system.
+ *
+ * Later this function can be replaced with Ollama.
+ * =========================================================
+ */
+
+/*
+ * =========================================================
+ * CREATE TICKET
+ * =========================================================
+ */
 
 export const createTicket = async (req, res) => {
   try {
@@ -30,37 +48,91 @@ export const createTicket = async (req, res) => {
     if (!subject?.trim()) {
       return res.status(400).json({
         success: false,
-        message: "Ticket subject is required",
+        message: "Ticket subject is required.",
       });
     }
 
     if (!description?.trim()) {
       return res.status(400).json({
         success: false,
-        message: "Ticket description is required",
+        message: "Ticket description is required.",
       });
     }
 
     const ticketNumber = await generateTicketNumber();
 
+    const now = new Date();
+
+    /*
+     * Create the initial customer message.
+     */
+    const initialConversationMessage = {
+      sender: req.user.id,
+      senderRole: "customer",
+      message: description.trim(),
+      isRead: true,
+      createdAt: now,
+    };
+
     const ticket = await Ticket.create({
       ticketNumber,
+
       customer: req.user.id,
+
       subject: subject.trim(),
+
       description: description.trim(),
+
       category: category || "General",
+
       priority: priority || "medium",
+
       status: "open",
+
+      conversation: [initialConversationMessage],
+
+      replies: 1,
+
+      lastReplyAt: now,
     });
 
+    /*
+     * Generate initial AI response.
+     */
+    try {
+      const aiResponse = await generateAIResponse({
+        message: description.trim(),
+        ticket,
+      });
+
+      ticket.conversation.push({
+        sender: null,
+        senderRole: "ai",
+        message: aiResponse,
+        isRead: false,
+        createdAt: new Date(),
+      });
+
+      ticket.replies = ticket.conversation.length;
+
+      ticket.lastReplyAt = new Date();
+
+      await ticket.save();
+    } catch (aiError) {
+      console.error("INITIAL AI RESPONSE ERROR:", aiError);
+    }
+
     const populatedTicket = await Ticket.findById(ticket._id)
-      .populate("customer", "name email avatar")
-      .populate("assignedAgent", "name email avatar")
+      .populate("customer", "name username email avatar role")
+      .populate("assignedAgent", "name username email avatar role")
+      .populate("conversation.sender", "name username email avatar role")
       .lean();
 
     return res.status(201).json({
       success: true,
-      message: "Ticket created successfully",
+
+      message: "Ticket created successfully.",
+
       ticket: populatedTicket,
     });
   } catch (error) {
@@ -68,26 +140,31 @@ export const createTicket = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to create ticket",
+      message: "Failed to create ticket.",
     });
   }
 };
 
-// ==========================================
-// GET CUSTOMER TICKETS
-// ==========================================
+/*
+ * =========================================================
+ * GET CUSTOMER TICKETS
+ * =========================================================
+ */
 
 export const getCustomerTickets = async (req, res) => {
   try {
     const tickets = await Ticket.find({
       customer: req.user.id,
     })
-      .populate("assignedAgent", "name email avatar")
-      .sort({ updatedAt: -1 })
+      .populate("assignedAgent", "name username email avatar role")
+      .sort({
+        updatedAt: -1,
+      })
       .lean();
 
     return res.status(200).json({
       success: true,
+
       tickets: Array.isArray(tickets) ? tickets : [],
     });
   } catch (error) {
@@ -95,31 +172,44 @@ export const getCustomerTickets = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to load tickets",
+
+      message: "Failed to load tickets.",
+
       tickets: [],
     });
   }
 };
 
-// ==========================================
-// GET SINGLE CUSTOMER TICKET
-// ==========================================
+/*
+ * =========================================================
+ * GET SINGLE CUSTOMER TICKET
+ * =========================================================
+ */
 
 export const getCustomerTicket = async (req, res) => {
   try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID.",
+      });
+    }
+
     const ticket = await Ticket.findOne({
-      _id: req.params.id,
+      _id: id,
       customer: req.user.id,
     })
-      .populate("customer", "name email avatar")
-      .populate("assignedAgent", "name email avatar")
-      .populate("conversation.sender", "name email avatar role")
+      .populate("customer", "name username email avatar role")
+      .populate("assignedAgent", "name username email avatar role")
+      .populate("conversation.sender", "name username email avatar role")
       .lean();
 
     if (!ticket) {
       return res.status(404).json({
         success: false,
-        message: "Ticket not found",
+        message: "Ticket not found.",
       });
     }
 
@@ -128,30 +218,76 @@ export const getCustomerTicket = async (req, res) => {
       ticket,
     });
   } catch (error) {
-    console.error("GET TICKET ERROR:", error);
+    console.error("GET CUSTOMER TICKET ERROR:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to load ticket",
+      message: "Failed to load ticket.",
     });
   }
 };
 
-// ==========================================
-// REPLY TO TICKET
-// ==========================================
+/*
+ * =========================================================
+ * ADD CUSTOMER REPLY
+ *
+ * CUSTOMER
+ *     ↓
+ * Save customer message
+ *     ↓
+ * Generate AI response
+ *     ↓
+ * Save AI response
+ *     ↓
+ * Return complete conversation
+ * =========================================================
+ */
 
-export const replyToTicket = async (req, res) => {
+/*
+ * =========================================================
+ * ADD CUSTOMER REPLY + OLLAMA AI RESPONSE
+ * =========================================================
+ */
+
+export const addTicketReply = async (req, res) => {
   try {
     const { id } = req.params;
     const { message } = req.body;
 
+    console.log("==========================================");
+    console.log("ADD REPLY REQUEST");
+    console.log({
+      ticketId: id,
+      userId: req.user?.id,
+      message,
+    });
+    console.log("==========================================");
+
+    // ==========================================
+    // VALIDATE TICKET ID
+    // ==========================================
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID.",
+      });
+    }
+
+    // ==========================================
+    // VALIDATE MESSAGE
+    // ==========================================
+
     if (!message?.trim()) {
       return res.status(400).json({
         success: false,
-        message: "Reply message is required",
+        message: "Message is required.",
       });
     }
+
+    // ==========================================
+    // FIND CUSTOMER TICKET
+    // ==========================================
 
     const ticket = await Ticket.findOne({
       _id: id,
@@ -161,288 +297,267 @@ export const replyToTicket = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({
         success: false,
-        message: "Ticket not found",
+        message: "Ticket not found.",
       });
     }
+
+    // ==========================================
+    // CLOSED TICKET
+    // ==========================================
 
     if (ticket.status === "closed") {
       return res.status(400).json({
         success: false,
-        message:
-          "Closed tickets cannot receive replies. Reopen the ticket first.",
+        message: "This ticket is closed. Please create a new ticket.",
       });
     }
 
-    const reply = {
+    // ==========================================
+    // ENSURE CONVERSATION EXISTS
+    // ==========================================
+
+    if (!Array.isArray(ticket.conversation)) {
+      ticket.conversation = [];
+    }
+
+    const now = new Date();
+
+    // ==========================================
+    // SAVE CUSTOMER MESSAGE
+    // ==========================================
+
+    ticket.conversation.push({
       sender: req.user.id,
+
       senderRole: "customer",
+
       message: message.trim(),
-      createdAt: new Date(),
-    };
 
-    ticket.conversation.push(reply);
+      isRead: true,
 
-    ticket.replies = ticket.conversation.length;
-    ticket.lastReplyAt = new Date();
+      createdAt: now,
+    });
 
-    // Customer response means the ticket is active again.
-    if (ticket.status === "waiting" || ticket.status === "resolved") {
+    // ==========================================
+    // REOPEN RESOLVED TICKET
+    // ==========================================
+
+    if (ticket.status === "resolved") {
       ticket.status = "open";
+
+      ticket.reopenedAt = now;
+
       ticket.resolvedAt = null;
     }
 
+    // ==========================================
+    // CUSTOMER RESPONDED WHILE WAITING
+    // ==========================================
+
+    if (ticket.status === "waiting") {
+      ticket.status = "open";
+    }
+
+    // ==========================================
+    // UPDATE TICKET METADATA
+    // ==========================================
+
+    ticket.replies = ticket.conversation.length;
+
+    ticket.lastReplyAt = now;
+
+    // ==========================================
+    // SAVE CUSTOMER MESSAGE FIRST
+    // ==========================================
+
     await ticket.save();
+
+    console.log("CUSTOMER MESSAGE SAVED:", message.trim());
+
+    // ==========================================
+    // BUILD OLLAMA CONVERSATION
+    // ==========================================
+
+    const ollamaMessages = ticket.conversation
+      .filter((item) => item.message && item.message.trim())
+      .map((item) => {
+        /*
+         * Customer messages become user messages.
+         */
+        if (item.senderRole === "customer") {
+          return {
+            role: "user",
+            content: item.message,
+          };
+        }
+
+        /*
+         * AI messages become assistant messages.
+         */
+        if (item.senderRole === "ai") {
+          return {
+            role: "assistant",
+            content: item.message,
+          };
+        }
+
+        /*
+         * Agent/admin messages are also treated
+         * as assistant context for the AI.
+         */
+        if (item.senderRole === "agent" || item.senderRole === "admin") {
+          return {
+            role: "assistant",
+            content: item.message,
+          };
+        }
+
+        return null;
+      })
+      .filter(Boolean);
+
+    // ==========================================
+    // ADD TICKET CONTEXT
+    // ==========================================
+
+    const ticketContext = `
+Ticket information:
+Ticket Number: ${ticket.ticketNumber || "Unknown"}
+Subject: ${ticket.subject || "Unknown"}
+Category: ${ticket.category || "General"}
+Priority: ${ticket.priority || "medium"}
+Status: ${ticket.status || "open"}
+`;
+
+    /*
+     * Add ticket context before the conversation.
+     *
+     * This gives Ollama useful information about
+     * the ticket without exposing internal data.
+     */
+    const aiMessages = [
+      {
+        role: "user",
+        content: ticketContext,
+      },
+
+      ...ollamaMessages,
+    ];
+
+    // ==========================================
+    // CALL OLLAMA
+    // ==========================================
+
+    let aiResult = null;
+
+    try {
+      console.log("==========================================");
+      console.log("CALLING OLLAMA");
+      console.log("MODEL:", process.env.OLLAMA_MODEL || "llama3.2");
+      console.log("URL:", process.env.OLLAMA_URL || "http://localhost:11434");
+      console.log("==========================================");
+
+      aiResult = await generateAIResponse({
+        messages: aiMessages,
+      });
+
+      console.log("OLLAMA RESPONSE RECEIVED:");
+      console.log(aiResult);
+    } catch (aiError) {
+      console.error("OLLAMA RESPONSE ERROR:", aiError);
+
+      /*
+       * We DO NOT fail the customer's message.
+       *
+       * The customer message has already been saved.
+       */
+      aiResult = null;
+    }
+
+    // ==========================================
+    // SAVE AI RESPONSE
+    // ==========================================
+
+    if (aiResult?.text) {
+      ticket.conversation.push({
+        sender: null,
+
+        senderRole: "ai",
+
+        message: aiResult.text,
+
+        isRead: false,
+
+        createdAt: new Date(),
+      });
+
+      ticket.replies = ticket.conversation.length;
+
+      ticket.lastReplyAt = new Date();
+
+      await ticket.save();
+
+      console.log("AI MESSAGE SAVED:", aiResult.text);
+    } else {
+      console.log("NO AI RESPONSE WAS GENERATED.");
+    }
+
+    // ==========================================
+    // GET UPDATED TICKET
+    // ==========================================
 
     const updatedTicket = await Ticket.findById(ticket._id)
-      .populate("customer", "name email avatar")
-      .populate("assignedAgent", "name email avatar")
-      .populate("conversation.sender", "name email avatar role")
+      .populate("customer", "name username email avatar role")
+      .populate("assignedAgent", "name username email avatar role")
+      .populate("conversation.sender", "name username email avatar role")
       .lean();
 
-    return res.status(201).json({
+    // ==========================================
+    // RESPONSE
+    // ==========================================
+
+    return res.status(200).json({
       success: true,
-      message: "Reply sent successfully",
+
+      message: aiResult?.text
+        ? "Reply sent and AI response generated successfully."
+        : "Reply sent successfully, but AI response could not be generated.",
+
       ticket: updatedTicket,
-      reply: updatedTicket.conversation[updatedTicket.conversation.length - 1],
+
+      conversation: updatedTicket?.conversation || [],
+
+      aiResponse: aiResult?.text || null,
+
+      aiModel: aiResult?.model || null,
     });
   } catch (error) {
-    console.error("REPLY TO TICKET ERROR:", error);
+    console.error("ADD TICKET REPLY ERROR:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to send reply",
+
+      message: error.message || "Failed to send reply.",
     });
   }
 };
 
-// ==========================================
-// REOPEN TICKET
-// ==========================================
-
-export const reopenTicket = async (req, res) => {
-  try {
-    const ticket = await Ticket.findOne({
-      _id: req.params.id,
-      customer: req.user.id,
-    });
-
-    if (!ticket) {
-      return res.status(404).json({
-        success: false,
-        message: "Ticket not found",
-      });
-    }
-
-    if (ticket.status !== "resolved" && ticket.status !== "closed") {
-      return res.status(400).json({
-        success: false,
-        message: "Only resolved or closed tickets can be reopened",
-      });
-    }
-
-    ticket.status = "open";
-    ticket.reopenedAt = new Date();
-    ticket.resolvedAt = null;
-    ticket.closedAt = null;
-
-    await ticket.save();
-
-    return res.status(200).json({
-      success: true,
-      message: "Ticket reopened successfully",
-      ticket,
-    });
-  } catch (error) {
-    console.error("REOPEN TICKET ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to reopen ticket",
-    });
-  }
-};
-
-// ==========================================
-// CLOSE TICKET
-// ==========================================
-
-export const closeTicket = async (req, res) => {
-  try {
-    const ticket = await Ticket.findOne({
-      _id: req.params.id,
-      customer: req.user.id,
-    });
-
-    if (!ticket) {
-      return res.status(404).json({
-        success: false,
-        message: "Ticket not found",
-      });
-    }
-
-    if (ticket.status === "closed") {
-      return res.status(400).json({
-        success: false,
-        message: "Ticket is already closed",
-      });
-    }
-
-    ticket.status = "closed";
-    ticket.closedAt = new Date();
-
-    if (!ticket.resolvedAt) {
-      ticket.resolvedAt = new Date();
-    }
-
-    await ticket.save();
-
-    return res.status(200).json({
-      success: true,
-      message: "Ticket closed successfully",
-      ticket,
-    });
-  } catch (error) {
-    console.error("CLOSE TICKET ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to close ticket",
-    });
-  }
-};
-
-// ==========================================
-// ESCALATE TICKET
-// ==========================================
-
-export const escalateTicket = async (req, res) => {
-  try {
-    const { reason } = req.body;
-
-    const ticket = await Ticket.findOne({
-      _id: req.params.id,
-      customer: req.user.id,
-    });
-
-    if (!ticket) {
-      return res.status(404).json({
-        success: false,
-        message: "Ticket not found",
-      });
-    }
-
-    if (ticket.status === "closed") {
-      return res.status(400).json({
-        success: false,
-        message: "Closed tickets cannot be escalated",
-      });
-    }
-
-    if (ticket.isEscalated) {
-      return res.status(400).json({
-        success: false,
-        message: "Ticket is already escalated",
-      });
-    }
-
-    ticket.isEscalated = true;
-    ticket.escalatedAt = new Date();
-    ticket.escalationReason = reason?.trim() || "Customer requested escalation";
-
-    ticket.status = "in-progress";
-
-    await ticket.save();
-
-    return res.status(200).json({
-      success: true,
-      message: "Ticket escalated successfully",
-      ticket,
-    });
-  } catch (error) {
-    console.error("ESCALATE TICKET ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to escalate ticket",
-    });
-  }
-};
-
-// ==========================================
-// CUSTOMER RATING
-// ==========================================
-
-export const submitTicketRating = async (req, res) => {
-  try {
-    const { rating, feedback } = req.body;
-
-    const numericRating = Number(rating);
-
-    if (
-      !Number.isInteger(numericRating) ||
-      numericRating < 1 ||
-      numericRating > 5
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Rating must be between 1 and 5",
-      });
-    }
-
-    const ticket = await Ticket.findOne({
-      _id: req.params.id,
-      customer: req.user.id,
-    });
-
-    if (!ticket) {
-      return res.status(404).json({
-        success: false,
-        message: "Ticket not found",
-      });
-    }
-
-    if (ticket.status !== "resolved" && ticket.status !== "closed") {
-      return res.status(400).json({
-        success: false,
-        message: "You can rate a ticket only after it is resolved",
-      });
-    }
-
-    if (ticket.customerRating) {
-      return res.status(400).json({
-        success: false,
-        message: "You have already rated this ticket",
-      });
-    }
-
-    ticket.customerRating = numericRating;
-    ticket.customerFeedback = feedback?.trim() || "";
-    ticket.ratedAt = new Date();
-
-    await ticket.save();
-
-    return res.status(200).json({
-      success: true,
-      message: "Thank you for your feedback",
-      ticket,
-    });
-  } catch (error) {
-    console.error("SUBMIT TICKET RATING ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to submit rating",
-    });
-  }
-};
-
-// ==========================================
-// UPLOAD TICKET ATTACHMENTS
-// ==========================================
+/*
+ * =========================================================
+ * UPLOAD TICKET ATTACHMENTS
+ * =========================================================
+ */
 
 export const uploadTicketAttachments = async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID.",
+      });
+    }
 
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({
@@ -463,22 +578,26 @@ export const uploadTicketAttachments = async (req, res) => {
       });
     }
 
-    const MAX_ATTACHMENTS = 5;
-
-    if (ticket.attachments.length + req.files.length > MAX_ATTACHMENTS) {
+    if (ticket.status === "closed") {
       return res.status(400).json({
         success: false,
-        message: `A ticket can have a maximum of ${MAX_ATTACHMENTS} attachments.`,
+        message: "Attachments cannot be added to a closed ticket.",
       });
     }
 
     const attachments = req.files.map((file) => ({
       filename: file.filename,
+
       originalName: file.originalname,
+
       mimetype: file.mimetype,
+
       size: file.size,
+
       path: `/uploads/tickets/${file.filename}`,
+
       uploadedBy: req.user.id,
+
       uploadedAt: new Date(),
     }));
 
@@ -488,8 +607,11 @@ export const uploadTicketAttachments = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+
       message: "Attachments uploaded successfully.",
-      attachments,
+
+      attachments: ticket.attachments,
+
       ticket,
     });
   } catch (error) {
@@ -497,6 +619,7 @@ export const uploadTicketAttachments = async (req, res) => {
 
     return res.status(500).json({
       success: false,
+
       message: error.message || "Failed to upload attachments.",
     });
   }

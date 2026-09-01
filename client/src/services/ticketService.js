@@ -1,8 +1,10 @@
 import api from "./api";
 
-// ==========================================
-// GET CUSTOMER TICKETS
-// ==========================================
+/*
+ * =========================================================
+ * GET ALL CUSTOMER TICKETS
+ * =========================================================
+ */
 
 export const getTickets = async () => {
   const response = await api.get("/tickets");
@@ -10,9 +12,11 @@ export const getTickets = async () => {
   return response.data;
 };
 
-// ==========================================
-// GET SINGLE TICKET
-// ==========================================
+/*
+ * =========================================================
+ * GET SINGLE TICKET
+ * =========================================================
+ */
 
 export const getTicketById = async (id) => {
   const response = await api.get(`/tickets/${id}`);
@@ -20,9 +24,11 @@ export const getTicketById = async (id) => {
   return response.data;
 };
 
-// ==========================================
-// CREATE TICKET
-// ==========================================
+/*
+ * =========================================================
+ * CREATE TICKET
+ * =========================================================
+ */
 
 export const createTicket = async (ticketData) => {
   const response = await api.post("/tickets", ticketData);
@@ -30,9 +36,11 @@ export const createTicket = async (ticketData) => {
   return response.data;
 };
 
-// ==========================================
-// REPLY
-// ==========================================
+/*
+ * =========================================================
+ * SEND CUSTOMER REPLY
+ * =========================================================
+ */
 
 export const replyToTicket = async (ticketId, message) => {
   const response = await api.post(`/tickets/${ticketId}/replies`, {
@@ -42,54 +50,23 @@ export const replyToTicket = async (ticketId, message) => {
   return response.data;
 };
 
-// ==========================================
-// REOPEN
-// ==========================================
+/*
+ * =========================================================
+ * AI TICKET SUMMARY
+ * =========================================================
+ */
 
-export const reopenTicket = async (ticketId) => {
-  const response = await api.patch(`/tickets/${ticketId}/reopen`);
-
-  return response.data;
-};
-
-// ==========================================
-// CLOSE
-// ==========================================
-
-export const closeTicket = async (ticketId) => {
-  const response = await api.patch(`/tickets/${ticketId}/close`);
+export const generateTicketSummary = async (id) => {
+  const response = await api.post(`/ai-tickets/${id}/summary`);
 
   return response.data;
 };
 
-// ==========================================
-// ESCALATE
-// ==========================================
-
-export const escalateTicket = async (ticketId, reason = "") => {
-  const response = await api.patch(`/tickets/${ticketId}/escalate`, {
-    reason,
-  });
-
-  return response.data;
-};
-
-// ==========================================
-// RATING
-// ==========================================
-
-export const submitTicketRating = async (ticketId, rating, feedback = "") => {
-  const response = await api.post(`/tickets/${ticketId}/rating`, {
-    rating,
-    feedback,
-  });
-
-  return response.data;
-};
-
-// ==========================================
-// ATTACHMENTS
-// ==========================================
+/*
+ * =========================================================
+ * UPLOAD TICKET ATTACHMENTS
+ * =========================================================
+ */
 
 export const uploadTicketAttachments = async (ticketId, files) => {
   const formData = new FormData();
@@ -107,16 +84,6 @@ export const uploadTicketAttachments = async (ticketId, files) => {
       },
     },
   );
-
-  return response.data;
-};
-
-// ==========================================
-// AI SUMMARY
-// ==========================================
-
-export const generateTicketSummary = async (id) => {
-  const response = await api.post(`/ai-tickets/${id}/summary`);
 
   return response.data;
 };

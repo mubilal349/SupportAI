@@ -4,11 +4,7 @@ import {
   createTicket,
   getCustomerTickets,
   getCustomerTicket,
-  replyToTicket,
-  reopenTicket,
-  closeTicket,
-  escalateTicket,
-  submitTicketRating,
+  addTicketReply,
   uploadTicketAttachments,
 } from "../controllers/ticketController.js";
 
@@ -18,63 +14,48 @@ import uploadTicket from "../middleware/ticketUploadMiddleware.js";
 
 const router = express.Router();
 
-// ==========================================
-// CUSTOMER AUTHENTICATION
-// ==========================================
+/*
+ * =========================================================
+ * ALL TICKET ROUTES REQUIRE AUTHENTICATION
+ * =========================================================
+ */
 
 router.use(authenticateToken);
 
-// ==========================================
-// TICKETS
-// ==========================================
+/*
+ * =========================================================
+ * CUSTOMER TICKETS
+ * =========================================================
+ */
 
-// Get customer's tickets
+// GET /api/tickets
 router.get("/", getCustomerTickets);
 
-// Create ticket
+// POST /api/tickets
 router.post("/", createTicket);
 
-// Get single customer ticket
-router.get("/:id", getCustomerTicket);
+/*
+ * =========================================================
+ * IMPORTANT
+ *
+ * These specific routes must come BEFORE:
+ *
+ * /:id
+ *
+ * =========================================================
+ */
 
-// ==========================================
-// CONVERSATION
-// ==========================================
+// POST /api/tickets/:id/replies
+router.post("/:id/replies", addTicketReply);
 
-// Customer reply
-router.post("/:id/replies", replyToTicket);
-
-// ==========================================
-// TICKET STATUS
-// ==========================================
-
-// Reopen
-router.patch("/:id/reopen", reopenTicket);
-
-// Close
-router.patch("/:id/close", closeTicket);
-
-// ==========================================
-// ESCALATION
-// ==========================================
-
-// Escalate
-router.patch("/:id/escalate", escalateTicket);
-
-// ==========================================
-// CUSTOMER FEEDBACK
-// ==========================================
-
-router.post("/:id/rating", submitTicketRating);
-
-// ==========================================
-// ATTACHMENTS
-// ==========================================
-
+// POST /api/tickets/:id/attachments
 router.post(
   "/:id/attachments",
   uploadTicket.array("attachments", 5),
   uploadTicketAttachments,
 );
+
+// GET /api/tickets/:id
+router.get("/:id", getCustomerTicket);
 
 export default router;

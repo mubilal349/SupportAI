@@ -1,10 +1,6 @@
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2";
-
-// ==========================================
-// SUPPORTAI SYSTEM PROMPT
-// ==========================================
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gemma4:31b-cloud";
 
 const SYSTEM_PROMPT = `
 You are SupportAI, an intelligent customer
@@ -34,10 +30,6 @@ called SupportAI.
 
 Always maintain a professional and helpful tone.
 `;
-
-// ==========================================
-// GENERATE AI RESPONSE
-// ==========================================
 
 export const generateAIResponse = async ({ messages = [] }) => {
   try {
@@ -95,7 +87,6 @@ export const generateAIResponse = async ({ messages = [] }) => {
 
     return {
       text,
-
       model: OLLAMA_MODEL,
     };
   } catch (error) {
