@@ -18,6 +18,7 @@ import Tickets from "../pages/customer/tickets/Tickets";
 import SupportLayout from "../pages/customer/SupportLayout";
 import TicketDetails from "../pages/customer/tickets/TicketDetails";
 import AITicketCreation from "../pages/customer/tickets/AITicketCreation";
+import Notifications from "../pages/customer/notification/Notifications";
 
 // Route Protection
 import ProtectedRoute from "./ProtectedRoute";
@@ -93,6 +94,9 @@ const AppRoutes = () => {
 
           {/* /support/analytics */}
           <Route path="/support/analytics" element={<CustomerAnalytics />} />
+
+          {/* notifications */}
+          <Route path="notifications" element={<Notifications />} />
         </Route>
       </Route>
 

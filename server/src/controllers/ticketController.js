@@ -1,7 +1,10 @@
 import mongoose from "mongoose";
 import Ticket from "../models/Ticket.js";
 import { generateAIResponse } from "../services/aiService.js";
-import { notifyAIReply } from "../services/notificationService.js";
+import {
+  notifyAIReply,
+  notifyTicketCreated,
+} from "../services/notificationService.js";
 
 /*
  * =========================================================
@@ -180,6 +183,11 @@ export const createTicket = async (req, res) => {
       replies: 1,
 
       lastReplyAt: now,
+    });
+
+    await notifyTicketCreated({
+      req,
+      ticket,
     });
 
     /*
