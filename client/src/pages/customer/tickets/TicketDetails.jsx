@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import {
   AlertCircle,
   ArrowLeft,
@@ -18,7 +19,10 @@ import {
   ShieldCheck,
   AlertTriangle,
   Paperclip,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
+
 import { Link, useParams } from "react-router-dom";
 
 import {
@@ -27,6 +31,8 @@ import {
   uploadTicketAttachments,
   replyToTicket,
 } from "../../../services/ticketService";
+
+import socket from "../../../socket/socket";
 
 const API_BASE_URL = "http://localhost:8000";
 
@@ -57,6 +63,22 @@ const TicketDetails = () => {
 
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [uploadingFiles, setUploadingFiles] = useState(false);
+
+  // =========================================================
+  // REAL-TIME SOCKET STATE
+  // =========================================================
+
+  const [socketConnected, setSocketConnected] = useState(socket.connected);
+
+  const [typingUser, setTypingUser] = useState(null);
+
+  const [onlineUsers, setOnlineUsers] = useState([]);
+
+  const conversationEndRef = useRef(null);
+
+  const typingTimeoutRef = useRef(null);
+
+  const currentTicketIdRef = useRef(id);
 
   // =========================================================
   // STATUS CONFIG
@@ -121,13 +143,7 @@ const TicketDetails = () => {
   // LOAD TICKET
   // =========================================================
 
-  useEffect(() => {
-    if (id) {
-      loadTicket();
-    }
-  }, [id]);
-
-  const loadTicket = async () => {
+  const loadTicket = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
@@ -162,7 +178,14 @@ const TicketDetails = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    if (id) {
+      currentTicketIdRef.current = id;
+      loadTicket();
+    }
+  }, [id, loadTicket]);
 
   // =========================================================
   // NORMALIZE TICKET
@@ -174,14 +197,6 @@ const TicketDetails = () => {
     const conversation = Array.isArray(data.conversation)
       ? data.conversation
       : [];
-
-    /*
-      Backward compatibility:
-
-      Older tickets may not have conversation[].
-      In that case we create a virtual first message
-      from the original ticket description.
-    */
 
     const normalizedConversation =
       conversation.length > 0
@@ -242,9 +257,6 @@ const TicketDetails = () => {
 
       conversation: normalizedConversation,
 
-      /*
-        Backend replies is now a number.
-      */
       replyCount:
         typeof data.replies === "number"
           ? data.replies
@@ -273,7 +285,7 @@ const TicketDetails = () => {
       message?.senderName;
 
     if (!senderName) {
-      if (senderRole === "customer") {
+      if (senderRole === "customer" || senderRole === "user") {
         senderName = "You";
       } else if (senderRole === "ai") {
         senderName = "SupportAI";
@@ -287,7 +299,7 @@ const TicketDetails = () => {
     }
 
     return {
-      id: message?.id || message?._id || `reply-${index}`,
+      id: message?.id || message?._id || `reply-${index}-${Date.now()}`,
 
       message: message?.message || message?.content || message?.text || "",
 
@@ -306,6 +318,354 @@ const TicketDetails = () => {
       isRead: message?.isRead ?? false,
     };
   };
+
+  // =========================================================
+  // REAL-TIME SOCKET CONNECTION
+  // =========================================================
+
+  useEffect(() => {
+    if (!id) return;
+
+    const token = localStorage.getItem("supportai_token");
+
+    if (!token) {
+      console.warn("No authentication token found for Socket.IO.");
+      return;
+    }
+
+    currentTicketIdRef.current = id;
+
+    const joinTicket = () => {
+      console.log(`Joining real-time ticket room: ticket:${id}`);
+
+      socket.emit("ticket:join", {
+        ticketId: id,
+      });
+    };
+
+    const handleConnect = () => {
+      console.log("Ticket Socket.IO connected:", socket.id);
+
+      setSocketConnected(true);
+
+      joinTicket();
+    };
+
+    const handleDisconnect = (reason) => {
+      console.log("Ticket Socket.IO disconnected:", reason);
+
+      setSocketConnected(false);
+    };
+
+    const handleConnectError = (socketError) => {
+      console.error(
+        "Ticket Socket.IO connection error:",
+        socketError?.message || socketError,
+      );
+
+      setSocketConnected(false);
+    };
+
+    const handleJoined = (data) => {
+      console.log("Joined ticket room successfully:", data);
+
+      setSocketConnected(true);
+    };
+
+    const handleSocketError = (data) => {
+      console.error("Ticket Socket.IO error:", data);
+
+      if (data?.message) {
+        setError(data.message);
+      }
+    };
+
+    // ---------------------------------------------------------
+    // NEW REAL-TIME MESSAGE
+    // ---------------------------------------------------------
+
+    const handleNewMessage = (data) => {
+      if (!data) return;
+
+      const incomingTicketId = String(data.ticketId || "");
+
+      const currentTicketId = String(id);
+
+      if (incomingTicketId && incomingTicketId !== currentTicketId) {
+        return;
+      }
+
+      const incomingMessage = data.message || data.conversationMessage;
+
+      if (!incomingMessage) {
+        return;
+      }
+
+      const normalizedMessage = normalizeReply(incomingMessage, Date.now());
+
+      console.log("REAL-TIME TICKET MESSAGE:", normalizedMessage);
+
+      setTicket((previous) => {
+        if (!previous) {
+          return previous;
+        }
+
+        const existingConversation = Array.isArray(previous.conversation)
+          ? previous.conversation
+          : [];
+
+        // -----------------------------------------------------
+        // IMPORTANT:
+        // Prevent duplicate messages.
+        // The REST response and Socket.IO event can arrive
+        // almost at the same time.
+        // -----------------------------------------------------
+
+        const messageExists = existingConversation.some(
+          (message) =>
+            String(message.id) === String(normalizedMessage.id) ||
+            (message.message === normalizedMessage.message &&
+              message.senderRole === normalizedMessage.senderRole &&
+              message.createdAt &&
+              normalizedMessage.createdAt &&
+              Math.abs(
+                new Date(message.createdAt).getTime() -
+                  new Date(normalizedMessage.createdAt).getTime(),
+              ) < 5000),
+        );
+
+        if (messageExists) {
+          return previous;
+        }
+
+        return {
+          ...previous,
+
+          conversation: [...existingConversation, normalizedMessage],
+
+          replyCount: existingConversation.length + 1,
+
+          lastReplyAt: normalizedMessage.createdAt || new Date().toISOString(),
+
+          updatedAt: normalizedMessage.createdAt || new Date().toISOString(),
+        };
+      });
+
+      // -------------------------------------------------------
+      // Mark received message as read.
+      // -------------------------------------------------------
+
+      if (normalizedMessage.senderRole !== "customer" && normalizedMessage.id) {
+        socket.emit("ticket:message:read", {
+          ticketId: id,
+          messageId: normalizedMessage.id,
+        });
+      }
+    };
+
+    // ---------------------------------------------------------
+    // REAL-TIME TICKET UPDATE
+    // ---------------------------------------------------------
+
+    const handleTicketUpdate = (data) => {
+      if (!data) return;
+
+      if (data.ticketId && String(data.ticketId) !== String(id)) {
+        return;
+      }
+
+      console.log("REAL-TIME TICKET UPDATE:", data);
+
+      setTicket((previous) => {
+        if (!previous) {
+          return previous;
+        }
+
+        return {
+          ...previous,
+
+          status:
+            data.status !== undefined
+              ? String(data.status).toLowerCase()
+              : previous.status,
+
+          replyCount:
+            typeof data.replies === "number"
+              ? data.replies
+              : previous.replyCount,
+
+          lastReplyAt: data.lastReplyAt || previous.lastReplyAt,
+
+          updatedAt: data.updatedAt || data.lastReplyAt || previous.updatedAt,
+
+          reopenedAt: data.reopenedAt || previous.reopenedAt,
+
+          resolvedAt:
+            data.resolvedAt !== undefined
+              ? data.resolvedAt
+              : previous.resolvedAt,
+
+          closedAt:
+            data.closedAt !== undefined ? data.closedAt : previous.closedAt,
+        };
+      });
+    };
+
+    // ---------------------------------------------------------
+    // TYPING
+    // ---------------------------------------------------------
+
+    const handleTyping = (data) => {
+      if (!data) return;
+
+      if (data.ticketId && String(data.ticketId) !== String(id)) {
+        return;
+      }
+
+      if (data.isTyping) {
+        setTypingUser({
+          userId: data.userId,
+          role: data.role,
+        });
+      } else {
+        setTypingUser(null);
+      }
+    };
+
+    // ---------------------------------------------------------
+    // USER ONLINE
+    // ---------------------------------------------------------
+
+    const handleUserOnline = (data) => {
+      if (!data) return;
+
+      if (data.ticketId && String(data.ticketId) !== String(id)) {
+        return;
+      }
+
+      setOnlineUsers((previous) => {
+        const userExists = previous.some(
+          (user) => String(user.userId) === String(data.userId),
+        );
+
+        if (userExists) {
+          return previous;
+        }
+
+        return [
+          ...previous,
+          {
+            userId: data.userId,
+            role: data.role,
+          },
+        ];
+      });
+    };
+
+    // ---------------------------------------------------------
+    // USER OFFLINE
+    // ---------------------------------------------------------
+
+    const handleUserOffline = (data) => {
+      if (!data) return;
+
+      if (data.ticketId && String(data.ticketId) !== String(id)) {
+        return;
+      }
+
+      setOnlineUsers((previous) =>
+        previous.filter((user) => String(user.userId) !== String(data.userId)),
+      );
+    };
+
+    // ---------------------------------------------------------
+    // REGISTER LISTENERS BEFORE CONNECTING
+    // ---------------------------------------------------------
+
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleConnectError);
+
+    socket.on("ticket:joined", handleJoined);
+
+    socket.on("ticket:error", handleSocketError);
+
+    socket.on("ticket:new-message", handleNewMessage);
+
+    socket.on("ticket:updated", handleTicketUpdate);
+
+    socket.on("ticket:typing", handleTyping);
+
+    socket.on("ticket:user-online", handleUserOnline);
+
+    socket.on("ticket:user-offline", handleUserOffline);
+
+    // ---------------------------------------------------------
+    // AUTHENTICATE SOCKET
+    // ---------------------------------------------------------
+
+    socket.auth = {
+      token,
+    };
+
+    if (socket.connected) {
+      joinTicket();
+    } else {
+      socket.connect();
+    }
+
+    // ---------------------------------------------------------
+    // CLEANUP
+    // ---------------------------------------------------------
+
+    return () => {
+      console.log(`Leaving real-time ticket room: ticket:${id}`);
+
+      socket.emit("ticket:leave", {
+        ticketId: id,
+      });
+
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleConnectError);
+
+      socket.off("ticket:joined", handleJoined);
+
+      socket.off("ticket:error", handleSocketError);
+
+      socket.off("ticket:new-message", handleNewMessage);
+
+      socket.off("ticket:updated", handleTicketUpdate);
+
+      socket.off("ticket:typing", handleTyping);
+
+      socket.off("ticket:user-online", handleUserOnline);
+
+      socket.off("ticket:user-offline", handleUserOffline);
+
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+
+      setTypingUser(null);
+      setOnlineUsers([]);
+    };
+  }, [id]);
+
+  // =========================================================
+  // AUTO SCROLL CONVERSATION
+  // =========================================================
+
+  useEffect(() => {
+    if (!conversationEndRef.current) {
+      return;
+    }
+
+    conversationEndRef.current.scrollIntoView({
+      behavior: "smooth",
+      block: "end",
+    });
+  }, [ticket?.conversation?.length, typingUser]);
 
   // =========================================================
   // REFRESH
@@ -339,6 +699,10 @@ const TicketDetails = () => {
       return "—";
     }
   };
+
+  // =========================================================
+  // FORMAT FILE SIZE
+  // =========================================================
 
   const formatFileSize = (bytes) => {
     if (!bytes) return "0 KB";
@@ -381,11 +745,6 @@ const TicketDetails = () => {
       if (!rawSummary) {
         throw new Error("AI summary was not returned.");
       }
-
-      /*
-      Normalize different possible backend formats
-      into one structure for the UI.
-    */
 
       let normalizedSummary;
 
@@ -487,9 +846,6 @@ const TicketDetails = () => {
       setSelectedFiles(validFiles);
     }
 
-    /*
-      Allow selecting the same file again later.
-    */
     e.target.value = "";
   };
 
@@ -540,6 +896,50 @@ const TicketDetails = () => {
   };
 
   // =========================================================
+  // START TYPING
+  // =========================================================
+
+  const handleTypingStart = () => {
+    if (!id || !socket.connected || ticket?.status === "closed") {
+      return;
+    }
+
+    socket.emit("ticket:typing:start", {
+      ticketId: id,
+    });
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      socket.emit("ticket:typing:stop", {
+        ticketId: id,
+      });
+    }, 1500);
+  };
+
+  // =========================================================
+  // STOP TYPING
+  // =========================================================
+
+  const handleTypingStop = () => {
+    if (!id || !socket.connected) {
+      return;
+    }
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+
+      typingTimeoutRef.current = null;
+    }
+
+    socket.emit("ticket:typing:stop", {
+      ticketId: id,
+    });
+  };
+
+  // =========================================================
   // SEND REPLY
   // =========================================================
 
@@ -558,7 +958,7 @@ const TicketDetails = () => {
     }
 
     if (ticket.status === "closed") {
-      setError("This ticket is closed. Please create a new ticket.");
+      setError("This ticket is closed. Please reopen it before continuing.");
       return;
     }
 
@@ -566,43 +966,45 @@ const TicketDetails = () => {
       setSending(true);
       setError("");
 
+      handleTypingStop();
+
       /*
-        IMPORTANT:
-
-        This is now a REAL backend request.
-
-        Backend:
-        POST /api/tickets/:id/replies
-
-        Body:
-        {
-          message: "..."
-        }
-      */
+       * IMPORTANT:
+       *
+       * We do NOT manually add the message here.
+       *
+       * Backend saves the message and emits:
+       *
+       * ticket:new-message
+       *
+       * Socket.IO then updates the conversation instantly.
+       */
 
       const response = await replyToTicket(ticket.id, message);
 
       console.log("REPLY RESPONSE:", response);
 
-      const updatedTicket = response?.ticket;
-
       /*
-        Best case:
-        Backend returns the complete updated ticket.
-      */
+       * Fallback:
+       *
+       * If Socket.IO is disconnected, use the REST
+       * response so the message still appears.
+       */
 
-      if (updatedTicket) {
-        setTicket(normalizeTicket(updatedTicket));
-      } else if (response?.conversation) {
-        setTicket((previous) => ({
-          ...previous,
-          conversation: response.conversation.map(normalizeReply),
-          replyCount: response.conversation.length,
-          status:
-            previous.status === "resolved" || previous.status === "waiting"
-              ? "open"
-              : previous.status,
-        }));
+      if (!socket.connected) {
+        const updatedTicket = response?.ticket;
+
+        if (updatedTicket) {
+          setTicket(normalizeTicket(updatedTicket));
+        } else if (response?.conversation) {
+          setTicket((previous) => ({
+            ...previous,
+
+            conversation: response.conversation.map(normalizeReply),
+
+            replyCount: response.conversation.length,
+          }));
+        }
       }
 
       setReply("");
@@ -638,21 +1040,24 @@ const TicketDetails = () => {
   // =========================================================
 
   /*
-    NOTE:
+   * Your current backend does not yet have a dedicated
+   * reopen endpoint.
+   *
+   * The backend automatically reopens a resolved ticket
+   * when the customer sends a new reply.
+   */
 
-    This currently updates local state only.
-
-    Later add:
-
-    PATCH /api/tickets/:id/reopen
-  */
-
-  const handleReopenTicket = async () => {
+  const handleReopenTicket = () => {
     setTicket((previous) => ({
       ...previous,
+
       status: "open",
+
       resolvedAt: null,
+
       closedAt: null,
+
+      reopenedAt: new Date().toISOString(),
     }));
   };
 
@@ -661,18 +1066,17 @@ const TicketDetails = () => {
   // =========================================================
 
   /*
-    NOTE:
-
-    This currently updates local state only.
-
-    Later add:
-
-    PATCH /api/tickets/:id/escalate
-  */
+   * Currently local UI behavior.
+   *
+   * Later this can call:
+   *
+   * PATCH /api/tickets/:id/escalate
+   */
 
   const handleEscalate = async () => {
     setTicket((previous) => ({
       ...previous,
+
       status: "in-progress",
     }));
   };
@@ -682,14 +1086,12 @@ const TicketDetails = () => {
   // =========================================================
 
   /*
-    NOTE:
-
-    This currently updates local state only.
-
-    Later add:
-
-    POST /api/tickets/:id/rating
-  */
+   * Currently local UI behavior.
+   *
+   * Later this can call:
+   *
+   * POST /api/tickets/:id/rating
+   */
 
   const handleSubmitRating = async (e) => {
     e.preventDefault();
@@ -704,7 +1106,9 @@ const TicketDetails = () => {
 
       setTicket((previous) => ({
         ...previous,
+
         customerRating: rating,
+
         customerFeedback: feedback.trim(),
       }));
     } catch (err) {
@@ -806,7 +1210,15 @@ const TicketDetails = () => {
 
   const StatusIcon = currentStatus.icon;
 
-  const isClosed = ticket?.status === "resolved" || ticket?.status === "closed";
+  /*
+   * CLOSED is actually closed.
+   *
+   * RESOLVED is allowed to receive another customer
+   * reply because your backend automatically reopens it.
+   */
+  const isClosed = ticket?.status === "closed";
+
+  const isResolved = ticket?.status === "resolved";
 
   const isAssigned = ticket?.agent && ticket.agent !== "Unassigned";
 
@@ -869,7 +1281,7 @@ const TicketDetails = () => {
                 onClick={loadTicket}
                 className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold transition hover:bg-blue-700"
               >
-                <RefreshCw className="h-4 w-4v cursor-pointer" />
+                <RefreshCw className="h-4 w-4 cursor-pointer" />
                 Try again
               </button>
 
@@ -914,12 +1326,39 @@ const TicketDetails = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {/* REAL-TIME CONNECTION STATUS */}
+
+            <div
+              className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] sm:flex ${
+                socketConnected
+                  ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
+                  : "border-slate-800 bg-slate-900 text-slate-600"
+              }`}
+              title={
+                socketConnected
+                  ? "Real-time connection active"
+                  : "Real-time connection disconnected"
+              }
+            >
+              {socketConnected ? (
+                <>
+                  <Wifi className="h-3 w-3" />
+                  Live
+                </>
+              ) : (
+                <>
+                  <WifiOff className="h-3 w-3" />
+                  Offline
+                </>
+              )}
+            </div>
+
             <button
               type="button"
               onClick={handleRefresh}
               disabled={refreshing}
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-400 transition hover:bg-slate-800 hover:text-white disabled:opacity-50 cursor-pointer"
+              className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-400 transition hover:bg-slate-800 hover:text-white disabled:opacity-50"
               title="Refresh ticket"
             >
               <RefreshCw
@@ -974,6 +1413,7 @@ const TicketDetails = () => {
                   className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-medium ${currentStatus.className}`}
                 >
                   <StatusIcon className="h-3.5 w-3.5" />
+
                   {currentStatus.label}
                 </span>
 
@@ -986,6 +1426,13 @@ const TicketDetails = () => {
                 <span className="rounded-full border border-slate-800 bg-slate-950 px-2.5 py-1 text-[10px] text-slate-500">
                   {ticket.category}
                 </span>
+
+                {socketConnected && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] text-emerald-400">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+                    Real-time
+                  </span>
+                )}
               </div>
 
               <h2 className="mt-4 text-xl font-semibold tracking-tight text-white">
@@ -1056,7 +1503,7 @@ const TicketDetails = () => {
               type="button"
               onClick={handleGenerateSummary}
               disabled={generatingSummary}
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2.5 text-[11px] font-semibold text-white transition hover:bg-blue-700 cursor-pointer disabled:opacity-50"
+              className="mt-5 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2.5 text-[11px] font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
             >
               {generatingSummary ? (
                 <>
@@ -1096,11 +1543,10 @@ const TicketDetails = () => {
           <div className="mt-5">
             {aiSummary && (
               <div className="space-y-6">
-                {/* What happened */}
                 {aiSummary.summary && (
                   <section>
                     <h3 className="text-xs font-semibold text-white">
-                      Ai Summary
+                      AI Summary
                     </h3>
 
                     <p className="mt-2 text-[12px] leading-6 text-slate-400">
@@ -1109,7 +1555,6 @@ const TicketDetails = () => {
                   </section>
                 )}
 
-                {/* Important information */}
                 {Array.isArray(aiSummary.keyPoints) &&
                   aiSummary.keyPoints.length > 0 && (
                     <section>
@@ -1130,7 +1575,6 @@ const TicketDetails = () => {
                     </section>
                   )}
 
-                {/* What you can do */}
                 {aiSummary.suggestedResolution && (
                   <section>
                     <h3 className="text-xs font-semibold text-white">
@@ -1143,7 +1587,6 @@ const TicketDetails = () => {
                   </section>
                 )}
 
-                {/* Recommendation */}
                 {aiSummary.recommendation && (
                   <section>
                     <h3 className="text-xs font-semibold text-white">
@@ -1156,13 +1599,12 @@ const TicketDetails = () => {
                   </section>
                 )}
 
-                {/* Actions */}
                 <div className="flex flex-wrap gap-2 border-t border-slate-800 pt-4">
                   <button
                     type="button"
                     onClick={handleGenerateSummary}
                     disabled={generatingSummary}
-                    className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-[10px] font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white disabled:opacity-50 cursor-pointer"
+                    className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-[10px] font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white disabled:opacity-50"
                   >
                     {generatingSummary ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1192,7 +1634,6 @@ const TicketDetails = () => {
               </div>
             )}
 
-            {/* No AI response */}
             {!aiSummary && !generatingSummary && (
               <div className="py-6">
                 <p className="text-xs font-medium text-slate-300">
@@ -1215,7 +1656,6 @@ const TicketDetails = () => {
               </div>
             )}
 
-            {/* Loading */}
             {generatingSummary && !aiSummary && (
               <div className="py-6">
                 <div className="flex items-center gap-3">
@@ -1278,11 +1718,37 @@ const TicketDetails = () => {
                   <h3 className="text-sm font-semibold">Conversation</h3>
                 </div>
 
-                <span className="text-[10px] text-slate-600">
-                  {conversation.length}{" "}
-                  {conversation.length === 1 ? "message" : "messages"}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-slate-600">
+                    {conversation.length}{" "}
+                    {conversation.length === 1 ? "message" : "messages"}
+                  </span>
+                </div>
               </div>
+
+              {/* =================================================
+                  TYPING INDICATOR
+              ================================================== */}
+
+              {typingUser && (
+                <div className="border-b border-slate-800 bg-slate-950/50 px-6 py-3">
+                  <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                    <span className="flex gap-1">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-400 [animation-delay:-0.3s]" />
+
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-400 [animation-delay:-0.15s]" />
+
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-400" />
+                    </span>
+
+                    {typingUser.role === "ai"
+                      ? "SupportAI is typing..."
+                      : typingUser.role === "admin"
+                        ? "Support Admin is typing..."
+                        : "Support Agent is typing..."}
+                  </div>
+                </div>
+              )}
 
               <div className="divide-y divide-slate-800">
                 {conversation.length > 0 ? (
@@ -1307,18 +1773,32 @@ const TicketDetails = () => {
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div>
-                                <p className="text-xs font-semibold">
-                                  {message.senderName}
-                                </p>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-xs font-semibold">
+                                    {message.senderName}
+                                  </p>
+
+                                  {isCustomer && socketConnected && (
+                                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
+                                  )}
+                                </div>
 
                                 <p className="mt-0.5 text-[10px] text-slate-700">
                                   {config.label}
                                 </p>
                               </div>
 
-                              <span className="text-[10px] text-slate-700">
-                                {formatDate(message.createdAt)}
-                              </span>
+                              <div className="text-right">
+                                <span className="text-[10px] text-slate-700">
+                                  {formatDate(message.createdAt)}
+                                </span>
+
+                                {!isCustomer && message.isRead && (
+                                  <p className="mt-0.5 text-[9px] text-emerald-500/70">
+                                    Read
+                                  </p>
+                                )}
+                              </div>
                             </div>
 
                             <div
@@ -1328,7 +1808,7 @@ const TicketDetails = () => {
                                 {message.message}
                               </p>
 
-                              {/* Message attachments */}
+                              {/* MESSAGE ATTACHMENTS */}
 
                               {message.attachments?.length > 0 && (
                                 <div className="mt-4 space-y-2 border-t border-slate-800/70 pt-3">
@@ -1376,6 +1856,10 @@ const TicketDetails = () => {
                     </p>
                   </div>
                 )}
+
+                {/* AUTO-SCROLL TARGET */}
+
+                <div ref={conversationEndRef} />
               </div>
 
               {/* =================================================
@@ -1384,6 +1868,25 @@ const TicketDetails = () => {
 
               {!isClosed && (
                 <div className="border-t border-slate-800 p-6">
+                  {isResolved && (
+                    <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                      <div className="flex items-start gap-2">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+
+                        <div>
+                          <p className="text-xs font-medium text-emerald-400">
+                            This ticket is resolved
+                          </p>
+
+                          <p className="mt-1 text-[10px] leading-5 text-slate-500">
+                            You can still send a reply. Sending a new message
+                            will reopen the ticket.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <form onSubmit={handleSendReply} className="space-y-3">
                     <label className="block text-xs font-medium text-slate-400">
                       Add a reply
@@ -1391,8 +1894,13 @@ const TicketDetails = () => {
 
                     <textarea
                       value={reply}
-                      onChange={(e) => setReply(e.target.value)}
+                      onChange={(e) => {
+                        setReply(e.target.value);
+
+                        handleTypingStart();
+                      }}
                       onKeyDown={handleReplyKeyDown}
+                      onBlur={handleTypingStop}
                       rows={4}
                       placeholder="Write a message to the support team..."
                       disabled={sending}
@@ -1400,14 +1908,28 @@ const TicketDetails = () => {
                     />
 
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <p className="text-[10px] text-slate-700">
-                        Press Enter to send. Use Shift + Enter for a new line.
-                      </p>
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-slate-700">
+                          Press Enter to send. Use Shift + Enter for a new line.
+                        </p>
+
+                        <p
+                          className={`text-[10px] ${
+                            socketConnected
+                              ? "text-emerald-500/60"
+                              : "text-yellow-500/60"
+                          }`}
+                        >
+                          {socketConnected
+                            ? "● Real-time messaging active"
+                            : "● Sending through standard connection"}
+                        </p>
+                      </div>
 
                       <button
                         type="submit"
                         disabled={sending || !reply.trim()}
-                        className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {sending ? (
                           <>
@@ -1433,7 +1955,7 @@ const TicketDetails = () => {
 
                     <div>
                       <p className="text-xs font-semibold">
-                        This ticket is {ticket.status}.
+                        This ticket is closed.
                       </p>
 
                       <p className="mt-1 text-[11px] leading-5 text-slate-600">
@@ -1699,11 +2221,15 @@ const TicketDetails = () => {
               </div>
 
               <div className="mt-5 flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-800">
+                <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-slate-800">
                   {isAssigned ? (
                     <UserRound className="h-4 w-4 text-slate-400" />
                   ) : (
                     <Bot className="h-4 w-4 text-blue-400" />
+                  )}
+
+                  {isAssigned && socketConnected && (
+                    <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-slate-900 bg-emerald-400" />
                   )}
                 </div>
 
@@ -1713,7 +2239,11 @@ const TicketDetails = () => {
                   </p>
 
                   <p className="mt-1 text-[10px] text-slate-600">
-                    {isAssigned ? "Support agent" : "Waiting for assignment"}
+                    {isAssigned
+                      ? socketConnected
+                        ? "Support agent • Online"
+                        : "Support agent"
+                      : "Waiting for assignment"}
                   </p>
                 </div>
               </div>
@@ -1780,6 +2310,54 @@ const TicketDetails = () => {
                 <InfoRow label="Created" value={formatDate(ticket.createdAt)} />
 
                 <InfoRow label="Updated" value={formatDate(ticket.updatedAt)} />
+              </div>
+            </section>
+
+            {/* Real-time status */}
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="flex items-center gap-2">
+                {socketConnected ? (
+                  <Wifi className="h-4 w-4 text-emerald-400" />
+                ) : (
+                  <WifiOff className="h-4 w-4 text-slate-600" />
+                )}
+
+                <h3 className="text-sm font-semibold">Live connection</h3>
+              </div>
+
+              <div className="mt-4">
+                <div
+                  className={`rounded-xl border p-3 ${
+                    socketConnected
+                      ? "border-emerald-500/20 bg-emerald-500/5"
+                      : "border-slate-800 bg-slate-950/50"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        socketConnected
+                          ? "animate-pulse bg-emerald-400"
+                          : "bg-slate-700"
+                      }`}
+                    />
+
+                    <p
+                      className={`text-xs font-medium ${
+                        socketConnected ? "text-emerald-400" : "text-slate-500"
+                      }`}
+                    >
+                      {socketConnected ? "Connected" : "Disconnected"}
+                    </p>
+                  </div>
+
+                  <p className="mt-2 text-[10px] leading-5 text-slate-600">
+                    {socketConnected
+                      ? "New replies and ticket updates appear automatically."
+                      : "The page will continue using standard API requests."}
+                  </p>
+                </div>
               </div>
             </section>
 

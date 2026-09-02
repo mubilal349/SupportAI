@@ -2,6 +2,7 @@ import {
   Activity,
   ArrowRight,
   BarChart3,
+  Zap,
   Bell,
   Bot,
   BookOpen,
@@ -20,16 +21,25 @@ import {
   Ticket,
   User,
   Workflow,
-  Zap,
+  X,
+  CheckCheck,
 } from "lucide-react";
 
 import { Link } from "react-router-dom";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAuth } from "../../context/AuthContext";
 
 import { getCustomerDashboard } from "../../services/customerService";
 import { getTickets } from "../../services/ticketService";
+
+import {
+  getNotifications,
+  markAllNotificationsAsRead,
+  markNotificationAsRead,
+} from "../../services/notificationService";
+
+import socket from "../../socket/socket";
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -54,6 +64,17 @@ const Dashboard = () => {
   const [error, setError] = useState("");
 
   // =========================================================
+  // NOTIFICATION STATE
+  // =========================================================
+
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [notificationLoading, setNotificationLoading] = useState(false);
+
+  const notificationRef = useRef(null);
+
+  // =========================================================
   // LOAD DASHBOARD
   // =========================================================
 
@@ -68,6 +89,7 @@ const Dashboard = () => {
       ]);
 
       console.log("CUSTOMER DASHBOARD RESPONSE:", dashboardResponse);
+
       console.log("CUSTOMER TICKETS RESPONSE:", ticketsResponse);
 
       const conversations = Array.isArray(dashboardResponse?.conversations)
@@ -141,12 +163,240 @@ const Dashboard = () => {
   }, []);
 
   // =========================================================
+  // LOAD NOTIFICATIONS
+  // =========================================================
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      setNotificationLoading(true);
+
+      const response = await getNotifications(20);
+
+      const serverNotifications = Array.isArray(response?.notifications)
+        ? response.notifications
+        : [];
+
+      setNotifications(serverNotifications);
+
+      setUnreadCount(Number(response?.unreadCount || 0));
+    } catch (err) {
+      console.error("CUSTOMER NOTIFICATIONS ERROR:", err);
+    } finally {
+      setNotificationLoading(false);
+    }
+  }, []);
+
+  // =========================================================
   // INITIAL LOAD
   // =========================================================
 
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
+
+  useEffect(() => {
+    loadNotifications();
+  }, [loadNotifications]);
+
+  // =========================================================
+  // SOCKET NOTIFICATIONS
+  // =========================================================
+
+  useEffect(() => {
+    const token = localStorage.getItem("supportai_token");
+
+    if (!token) {
+      return;
+    }
+
+    if (!socket.connected) {
+      socket.auth = {
+        token,
+      };
+
+      socket.connect();
+    }
+
+    const handleNewNotification = (payload) => {
+      const newNotification = payload?.notification;
+
+      if (!newNotification?._id) {
+        return;
+      }
+
+      setNotifications((current) => {
+        const alreadyExists = current.some(
+          (notification) =>
+            String(notification._id) === String(newNotification._id),
+        );
+
+        if (alreadyExists) {
+          return current;
+        }
+
+        return [newNotification, ...current].slice(0, 20);
+      });
+
+      if (!newNotification.isRead) {
+        setUnreadCount((current) => current + 1);
+      }
+    };
+
+    const handleNotificationRead = (payload) => {
+      const notificationId = payload?.notificationId;
+
+      if (!notificationId) {
+        return;
+      }
+
+      setNotifications((current) =>
+        current.map((notification) =>
+          String(notification._id) === String(notificationId)
+            ? {
+                ...notification,
+                isRead: true,
+                readAt: notification.readAt || new Date().toISOString(),
+              }
+            : notification,
+        ),
+      );
+
+      setUnreadCount((current) => Math.max(0, current - 1));
+    };
+
+    const handleNotificationReadAll = () => {
+      setNotifications((current) =>
+        current.map((notification) => ({
+          ...notification,
+          isRead: true,
+          readAt: notification.readAt || new Date().toISOString(),
+        })),
+      );
+
+      setUnreadCount(0);
+    };
+
+    const handleNotificationDeleted = (payload) => {
+      const notificationId = payload?.notificationId;
+
+      if (!notificationId) {
+        return;
+      }
+
+      setNotifications((current) => {
+        const notification = current.find(
+          (item) => String(item._id) === String(notificationId),
+        );
+
+        if (notification && !notification.isRead) {
+          setUnreadCount((count) => Math.max(0, count - 1));
+        }
+
+        return current.filter(
+          (item) => String(item._id) !== String(notificationId),
+        );
+      });
+    };
+
+    socket.on("notification:new", handleNewNotification);
+
+    socket.on("notification:read", handleNotificationRead);
+
+    socket.on("notification:read-all", handleNotificationReadAll);
+
+    socket.on("notification:deleted", handleNotificationDeleted);
+
+    return () => {
+      socket.off("notification:new", handleNewNotification);
+
+      socket.off("notification:read", handleNotificationRead);
+
+      socket.off("notification:read-all", handleNotificationReadAll);
+
+      socket.off("notification:deleted", handleNotificationDeleted);
+    };
+  }, []);
+
+  // =========================================================
+  // CLOSE NOTIFICATION DROPDOWN OUTSIDE CLICK
+  // =========================================================
+
+  useEffect(() => {
+    const handleOutsideClick = (event) => {
+      if (
+        notificationRef.current &&
+        !notificationRef.current.contains(event.target)
+      ) {
+        setNotificationOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, []);
+
+  // =========================================================
+  // MARK ONE NOTIFICATION AS READ
+  // =========================================================
+
+  const handleNotificationClick = async (notification) => {
+    if (!notification?._id) {
+      return;
+    }
+
+    if (!notification.isRead) {
+      try {
+        await markNotificationAsRead(notification._id);
+
+        setNotifications((current) =>
+          current.map((item) =>
+            String(item._id) === String(notification._id)
+              ? {
+                  ...item,
+                  isRead: true,
+                  readAt: new Date().toISOString(),
+                }
+              : item,
+          ),
+        );
+
+        setUnreadCount((count) => Math.max(0, count - 1));
+      } catch (err) {
+        console.error("MARK NOTIFICATION READ ERROR:", err);
+      }
+    }
+
+    setNotificationOpen(false);
+  };
+
+  // =========================================================
+  // MARK ALL NOTIFICATIONS AS READ
+  // =========================================================
+
+  const handleMarkAllAsRead = async () => {
+    if (!unreadCount) {
+      return;
+    }
+
+    try {
+      await markAllNotificationsAsRead();
+
+      setNotifications((current) =>
+        current.map((notification) => ({
+          ...notification,
+          isRead: true,
+          readAt: notification.readAt || new Date().toISOString(),
+        })),
+      );
+
+      setUnreadCount(0);
+    } catch (err) {
+      console.error("MARK ALL NOTIFICATIONS ERROR:", err);
+    }
+  };
 
   // =========================================================
   // SAFE DATA
@@ -193,7 +443,9 @@ const Dashboard = () => {
   const aiResolutionRate = useMemo(() => {
     const total = stats.totalTickets + stats.totalConversations;
 
-    if (!total) return "94.2%";
+    if (!total) {
+      return "94.2%";
+    }
 
     const resolved = stats.resolvedTickets;
 
@@ -246,7 +498,9 @@ const Dashboard = () => {
   };
 
   const formatDate = (date) => {
-    if (!date) return "";
+    if (!date) {
+      return "";
+    }
 
     const parsedDate = new Date(date);
 
@@ -258,7 +512,9 @@ const Dashboard = () => {
   };
 
   const formatTime = (date) => {
-    if (!date) return "";
+    if (!date) {
+      return "";
+    }
 
     const parsedDate = new Date(date);
 
@@ -270,6 +526,114 @@ const Dashboard = () => {
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  const formatNotificationTime = (date) => {
+    if (!date) {
+      return "";
+    }
+
+    const parsedDate = new Date(date);
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      return "";
+    }
+
+    const now = new Date();
+
+    const difference = now.getTime() - parsedDate.getTime();
+
+    const seconds = Math.floor(difference / 1000);
+
+    if (seconds < 60) {
+      return "Just now";
+    }
+
+    const minutes = Math.floor(seconds / 60);
+
+    if (minutes < 60) {
+      return `${minutes}m ago`;
+    }
+
+    const hours = Math.floor(minutes / 60);
+
+    if (hours < 24) {
+      return `${hours}h ago`;
+    }
+
+    const days = Math.floor(hours / 24);
+
+    if (days < 7) {
+      return `${days}d ago`;
+    }
+
+    return parsedDate.toLocaleDateString();
+  };
+
+  const getNotificationIcon = (type) => {
+    switch (type) {
+      case "ticket_created":
+        return <Ticket className="h-4 w-4" />;
+
+      case "ticket_reply":
+      case "new_reply":
+        return <MessageSquare className="h-4 w-4" />;
+
+      case "ai_reply":
+        return <Bot className="h-4 w-4" />;
+
+      case "ticket_status":
+      case "status_changed":
+        return <Activity className="h-4 w-4" />;
+
+      case "ticket_resolved":
+        return <CheckCircle2 className="h-4 w-4" />;
+
+      case "ticket_reopened":
+        return <ArrowRight className="h-4 w-4" />;
+
+      case "ticket_escalated":
+        return <Headphones className="h-4 w-4" />;
+
+      case "agent_assigned":
+        return <User className="h-4 w-4" />;
+
+      default:
+        return <Bell className="h-4 w-4" />;
+    }
+  };
+
+  const getNotificationIconStyle = (type) => {
+    switch (type) {
+      case "ticket_reply":
+      case "new_reply":
+        return "bg-blue-500/10 text-blue-400";
+
+      case "ai_reply":
+        return "bg-purple-500/10 text-purple-400";
+
+      case "ticket_created":
+        return "bg-blue-500/10 text-blue-400";
+
+      case "ticket_resolved":
+        return "bg-emerald-500/10 text-emerald-400";
+
+      case "ticket_escalated":
+        return "bg-purple-500/10 text-purple-400";
+
+      case "ticket_reopened":
+        return "bg-amber-500/10 text-amber-400";
+
+      case "ticket_status":
+      case "status_changed":
+        return "bg-amber-500/10 text-amber-400";
+
+      case "agent_assigned":
+        return "bg-cyan-500/10 text-cyan-400";
+
+      default:
+        return "bg-slate-800 text-slate-400";
+    }
   };
 
   // =========================================================
@@ -398,18 +762,205 @@ const Dashboard = () => {
               Search help
             </Link>
 
-            {/* Notification */}
+            {/* =================================================
+                NOTIFICATIONS
+            ================================================= */}
 
-            <button
-              type="button"
-              className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-500 transition hover:text-white"
-            >
-              <Bell className="h-4 w-4" />
+            <div ref={notificationRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setNotificationOpen((current) => !current)}
+                className={`relative flex h-10 w-10 items-center justify-center rounded-xl border bg-slate-900 transition ${
+                  notificationOpen
+                    ? "border-blue-500/30 text-white"
+                    : "border-slate-800 text-slate-500 hover:border-slate-700 hover:text-white"
+                }`}
+                aria-label="Notifications"
+              >
+                <Bell className="h-4 w-4" />
 
-              {(stats.openTickets > 0 || stats.activeChats > 0) && (
-                <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-blue-500" />
+                {unreadCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[8px] font-bold text-white shadow-lg shadow-blue-600/20">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {/* =================================================
+                  NOTIFICATION DROPDOWN
+              ================================================= */}
+
+              {notificationOpen && (
+                <div className="absolute right-0 top-12 z-50 w-[380px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-800 bg-[#0a1323] shadow-2xl shadow-black/40">
+                  {/* Header */}
+
+                  <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-white">
+                          Notifications
+                        </h3>
+
+                        {unreadCount > 0 && (
+                          <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[9px] font-medium text-blue-400">
+                            {unreadCount} new
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="mt-0.5 text-[10px] text-slate-600">
+                        Updates about your support requests
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setNotificationOpen(false)}
+                      className="rounded-lg p-1.5 text-slate-600 transition hover:bg-slate-800 hover:text-white"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {/* Notification List */}
+
+                  <div className="max-h-[390px] overflow-y-auto">
+                    {notificationLoading ? (
+                      <div className="px-5 py-10 text-center">
+                        <Bell className="mx-auto h-6 w-6 animate-pulse text-blue-400" />
+
+                        <p className="mt-3 text-xs text-slate-600">
+                          Loading notifications...
+                        </p>
+                      </div>
+                    ) : notifications.length === 0 ? (
+                      <div className="px-5 py-10 text-center">
+                        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-slate-800 text-slate-600">
+                          <Bell className="h-5 w-5" />
+                        </div>
+
+                        <p className="mt-3 text-xs font-medium text-slate-400">
+                          You're all caught up
+                        </p>
+
+                        <p className="mt-1 text-[10px] text-slate-700">
+                          New support updates will appear here.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-slate-800">
+                        {notifications.map((notification) => {
+                          const ticketId =
+                            notification?.ticket?._id || notification?.ticket;
+
+                          return (
+                            <div
+                              key={notification._id}
+                              className={`px-4 py-3 transition hover:bg-slate-900/70 ${
+                                !notification.isRead
+                                  ? "bg-blue-500/[0.025]"
+                                  : ""
+                              }`}
+                            >
+                              <div className="flex gap-3">
+                                {/* Icon */}
+
+                                <div
+                                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${getNotificationIconStyle(
+                                    notification.type,
+                                  )}`}
+                                >
+                                  {getNotificationIcon(notification.type)}
+                                </div>
+
+                                {/* Content */}
+
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-start gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleNotificationClick(notification)
+                                      }
+                                      className="min-w-0 flex-1 text-left"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <p
+                                          className={`truncate text-xs ${
+                                            notification.isRead
+                                              ? "font-medium text-slate-300"
+                                              : "font-semibold text-white"
+                                          }`}
+                                        >
+                                          {notification.title}
+                                        </p>
+
+                                        {!notification.isRead && (
+                                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                                        )}
+                                      </div>
+
+                                      <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-600">
+                                        {notification.message}
+                                      </p>
+                                    </button>
+                                  </div>
+
+                                  <div className="mt-2 flex items-center justify-between gap-2">
+                                    <span className="text-[9px] text-slate-700">
+                                      {formatNotificationTime(
+                                        notification.createdAt,
+                                      )}
+                                    </span>
+
+                                    {ticketId && (
+                                      <Link
+                                        to={`/support/tickets/${ticketId}`}
+                                        onClick={() =>
+                                          handleNotificationClick(notification)
+                                        }
+                                        className="text-[9px] font-medium text-blue-400 transition hover:text-blue-300"
+                                      >
+                                        View ticket
+                                      </Link>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer */}
+
+                  {notifications.length > 0 && (
+                    <div className="flex items-center justify-between border-t border-slate-800 px-4 py-3">
+                      <Link
+                        to="/support/notifications"
+                        onClick={() => setNotificationOpen(false)}
+                        className="text-[10px] font-medium text-blue-400 transition hover:text-blue-300"
+                      >
+                        View all
+                      </Link>
+
+                      {unreadCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleMarkAllAsRead}
+                          className="flex items-center gap-1.5 text-[10px] font-medium text-slate-500 transition hover:text-white"
+                        >
+                          <CheckCheck className="h-3.5 w-3.5" />
+                          Mark all as read
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
-            </button>
+            </div>
 
             {/* New Ticket */}
 
@@ -429,9 +980,7 @@ const Dashboard = () => {
       =================================================== */}
 
       <main className="mx-auto w-full max-w-[1800px] px-5 py-6 sm:px-8 sm:py-8">
-        {/* =================================================
-            PAGE TITLE
-        ================================================= */}
+        {/* PAGE TITLE */}
 
         <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
@@ -511,7 +1060,9 @@ const Dashboard = () => {
             <div className="mt-3 h-1 overflow-hidden rounded-full bg-slate-800">
               <div
                 className="h-full rounded-full bg-purple-500"
-                style={{ width: aiResolutionRate }}
+                style={{
+                  width: aiResolutionRate,
+                }}
               />
             </div>
           </div>
@@ -900,7 +1451,9 @@ const Dashboard = () => {
               <div className="divide-y divide-slate-800">
                 {tickets.slice(0, 5).map((ticket) => {
                   const ticketId = getId(ticket);
+
                   const status = getTicketStatus(ticket);
+
                   const priority = getTicketPriority(ticket);
 
                   return (
