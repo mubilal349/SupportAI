@@ -6,6 +6,7 @@ import {
   getCustomerTicket,
   addTicketReply,
   uploadTicketAttachments,
+  getTicketStatusHistory,
 } from "../controllers/ticketController.js";
 
 import { authenticateToken } from "../middleware/authMiddleware.js";
@@ -54,6 +55,8 @@ router.post(
   uploadTicket.array("attachments", 5),
   uploadTicketAttachments,
 );
+
+router.get("/:id/status-history", authenticateToken, getTicketStatusHistory);
 
 // GET /api/tickets/:id
 router.get("/:id", getCustomerTicket);

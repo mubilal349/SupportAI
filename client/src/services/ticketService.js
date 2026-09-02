@@ -87,3 +87,15 @@ export const uploadTicketAttachments = async (ticketId, files) => {
 
   return response.data;
 };
+
+/*
+ * =========================================================
+ * TICKET STATUS HISTORY
+ * =========================================================
+ */
+
+export const getTicketStatusHistory = async (ticketId) => {
+  const response = await api.get(`/tickets/${ticketId}/status-history`);
+
+  return response.data;
+};

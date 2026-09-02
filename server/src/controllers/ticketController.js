@@ -51,6 +51,62 @@ const getTicketRoom = (ticketId) => {
 
 /*
  * =========================================================
+ * STATUS HISTORY HELPERS
+ * =========================================================
+ */
+
+const addStatusHistory = ({
+  ticket,
+  status,
+  changedBy = null,
+  changedByRole = "system",
+  note = "",
+  createdAt = new Date(),
+}) => {
+  if (!ticket) {
+    return;
+  }
+
+  if (!Array.isArray(ticket.statusHistory)) {
+    ticket.statusHistory = [];
+  }
+
+  ticket.statusHistory.push({
+    status,
+    changedBy,
+    changedByRole,
+    note,
+    createdAt,
+  });
+};
+
+const recordStatusChange = ({
+  ticket,
+  previousStatus,
+  newStatus,
+  changedBy,
+  changedByRole,
+  note = "",
+  createdAt = new Date(),
+}) => {
+  if (!ticket || previousStatus === newStatus) {
+    return false;
+  }
+
+  addStatusHistory({
+    ticket,
+    status: newStatus,
+    changedBy,
+    changedByRole,
+    note,
+    createdAt,
+  });
+
+  return true;
+};
+
+/*
+ * =========================================================
  * BROADCAST NEW MESSAGE
  * =========================================================
  */
@@ -177,6 +233,16 @@ export const createTicket = async (req, res) => {
       priority: priority || "medium",
 
       status: "open",
+
+      statusHistory: [
+        {
+          status: "open",
+          changedBy: req.user.id,
+          changedByRole: "customer",
+          note: "Ticket created by customer.",
+          createdAt: now,
+        },
+      ],
 
       conversation: [initialConversationMessage],
 
@@ -385,21 +451,15 @@ export const getCustomerTicket = async (req, res) => {
 export const addTicketReply = async (req, res) => {
   try {
     const { id } = req.params;
-
     const { message } = req.body;
 
     console.log("==========================================");
-
     console.log("ADD REPLY REQUEST");
-
     console.log({
       ticketId: id,
-
       userId: req.user?.id,
-
       message,
     });
-
     console.log("==========================================");
 
     /*
@@ -419,7 +479,6 @@ export const addTicketReply = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-
         message: "Invalid ticket ID.",
       });
     }
@@ -433,7 +492,6 @@ export const addTicketReply = async (req, res) => {
     if (!message?.trim()) {
       return res.status(400).json({
         success: false,
-
         message: "Message is required.",
       });
     }
@@ -446,14 +504,12 @@ export const addTicketReply = async (req, res) => {
 
     const ticket = await Ticket.findOne({
       _id: id,
-
       customer: req.user.id,
     });
 
     if (!ticket) {
       return res.status(404).json({
         success: false,
-
         message: "Ticket not found.",
       });
     }
@@ -467,7 +523,6 @@ export const addTicketReply = async (req, res) => {
     if (ticket.status === "closed") {
       return res.status(400).json({
         success: false,
-
         message: "This ticket is closed. Please create a new ticket.",
       });
     }
@@ -480,6 +535,16 @@ export const addTicketReply = async (req, res) => {
 
     if (!Array.isArray(ticket.conversation)) {
       ticket.conversation = [];
+    }
+
+    /*
+     * =====================================================
+     * ENSURE STATUS HISTORY EXISTS
+     * =====================================================
+     */
+
+    if (!Array.isArray(ticket.statusHistory)) {
+      ticket.statusHistory = [];
     }
 
     const now = new Date();
@@ -503,15 +568,25 @@ export const addTicketReply = async (req, res) => {
     });
 
     /*
-     * Keep an exact reference to the message
-     * before AI adds another conversation item.
+     * Keep an exact reference to the customer message.
      */
 
     const customerMessage = ticket.conversation[ticket.conversation.length - 1];
 
     /*
      * =====================================================
-     * REOPEN RESOLVED TICKET
+     * STATUS CHANGE TRACKING
+     * =====================================================
+     */
+
+    const previousStatus = ticket.status;
+
+    /*
+     * =====================================================
+     * RESOLVED → OPEN
+     *
+     * Customer replies to a resolved ticket.
+     * This automatically reopens the ticket.
      * =====================================================
      */
 
@@ -521,16 +596,44 @@ export const addTicketReply = async (req, res) => {
       ticket.reopenedAt = now;
 
       ticket.resolvedAt = null;
-    }
+
+      ticket.statusHistory.push({
+        status: "open",
+
+        changedBy: req.user.id,
+
+        changedByRole: "customer",
+
+        note: "Ticket reopened because the customer replied.",
+
+        createdAt: now,
+      });
+
+      console.log(`TICKET STATUS CHANGED: ${previousStatus} → open`);
+    } else if (ticket.status === "waiting") {
 
     /*
      * =====================================================
-     * CUSTOMER RESPONDED WHILE WAITING
+     * WAITING → OPEN
+     *
+     * Customer has responded with the requested information.
      * =====================================================
      */
-
-    if (ticket.status === "waiting") {
       ticket.status = "open";
+
+      ticket.statusHistory.push({
+        status: "open",
+
+        changedBy: req.user.id,
+
+        changedByRole: "customer",
+
+        note: "Ticket moved back to open because the customer replied.",
+
+        createdAt: now,
+      });
+
+      console.log(`TICKET STATUS CHANGED: ${previousStatus} → open`);
     }
 
     /*
@@ -545,7 +648,7 @@ export const addTicketReply = async (req, res) => {
 
     /*
      * =====================================================
-     * SAVE CUSTOMER MESSAGE
+     * SAVE CUSTOMER MESSAGE + STATUS HISTORY
      * =====================================================
      */
 
@@ -556,29 +659,44 @@ export const addTicketReply = async (req, res) => {
     /*
      * =====================================================
      * BROADCAST CUSTOMER MESSAGE
-     *
-     * IMPORTANT:
-     *
-     * This happens BEFORE Ollama.
-     *
-     * Therefore the customer message appears
-     * immediately even if Ollama takes several
-     * seconds or fails.
      * =====================================================
      */
 
     broadcastNewMessage(req, ticket._id, customerMessage);
 
     /*
-     * Broadcast status/count update.
+     * =====================================================
+     * BROADCAST TICKET UPDATE
+     * =====================================================
      */
 
     broadcastTicketUpdate(req, ticket);
 
-    await notifyAIReply({
-      req,
-      ticket,
-    });
+    /*
+     * =====================================================
+     * BROADCAST STATUS HISTORY UPDATE
+     *
+     * This allows TicketDetails.jsx to update immediately.
+     * =====================================================
+     */
+
+    if (previousStatus !== ticket.status && io) {
+      io.to(getTicketRoom(ticket._id)).emit("ticket:status-changed", {
+        ticketId: String(ticket._id),
+
+        previousStatus,
+
+        status: ticket.status,
+
+        resolvedAt: ticket.resolvedAt || null,
+
+        reopenedAt: ticket.reopenedAt || null,
+
+        closedAt: ticket.closedAt || null,
+
+        statusHistory: ticket.statusHistory || [],
+      });
+    }
 
     /*
      * =====================================================
@@ -596,7 +714,6 @@ export const addTicketReply = async (req, res) => {
         if (item.senderRole === "customer") {
           return {
             role: "user",
-
             content: item.message,
           };
         }
@@ -608,20 +725,17 @@ export const addTicketReply = async (req, res) => {
         if (item.senderRole === "ai") {
           return {
             role: "assistant",
-
             content: item.message,
           };
         }
 
         /*
-         * Agent/admin messages →
-         * assistant context
+         * Agent/admin messages → assistant context
          */
 
         if (item.senderRole === "agent" || item.senderRole === "admin") {
           return {
             role: "assistant",
-
             content: item.message,
           };
         }
@@ -654,7 +768,6 @@ Status: ${ticket.status || "open"}
     const aiMessages = [
       {
         role: "user",
-
         content: ticketContext,
       },
 
@@ -671,13 +784,9 @@ Status: ${ticket.status || "open"}
 
     try {
       console.log("==========================================");
-
       console.log("CALLING OLLAMA");
-
       console.log("MODEL:", process.env.OLLAMA_MODEL || "llama3.2");
-
       console.log("URL:", process.env.OLLAMA_URL || "http://localhost:11434");
-
       console.log("==========================================");
 
       aiResult = await generateAIResponse({
@@ -685,16 +794,15 @@ Status: ${ticket.status || "open"}
       });
 
       console.log("OLLAMA RESPONSE RECEIVED:");
-
       console.log(aiResult);
     } catch (aiError) {
       console.error("OLLAMA RESPONSE ERROR:", aiError);
 
       /*
-       * Customer message is already saved.
+       * Customer message has already been saved.
        *
-       * We intentionally do not fail the
-       * request because of AI failure.
+       * We intentionally don't fail the request
+       * when Ollama is unavailable.
        */
 
       aiResult = null;
@@ -750,10 +858,26 @@ Status: ${ticket.status || "open"}
       broadcastNewMessage(req, ticket._id, aiMessage);
 
       /*
-       * Broadcast updated ticket metadata.
+       * ===================================================
+       * BROADCAST UPDATED TICKET
+       * ===================================================
        */
 
       broadcastTicketUpdate(req, ticket);
+
+      /*
+       * ===================================================
+       * NOTIFY CUSTOMER ABOUT AI REPLY
+       *
+       * This is intentionally AFTER the AI response
+       * has actually been generated and saved.
+       * ===================================================
+       */
+
+      await notifyAIReply({
+        req,
+        ticket,
+      });
     } else {
       console.log("NO AI RESPONSE WAS GENERATED.");
     }
@@ -940,6 +1064,55 @@ export const uploadTicketAttachments = async (req, res) => {
       success: false,
 
       message: error.message || "Failed to upload attachments.",
+    });
+  }
+};
+
+export const getTicketStatusHistory = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID.",
+      });
+    }
+
+    const ticket = await Ticket.findOne({
+      _id: id,
+      customer: req.user.id,
+    })
+      .select(
+        "_id ticketNumber status statusHistory createdAt resolvedAt reopenedAt closedAt",
+      )
+      .populate("statusHistory.changedBy", "name username email avatar role")
+      .lean();
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      ticketId: ticket._id,
+      ticketNumber: ticket.ticketNumber,
+      currentStatus: ticket.status,
+      createdAt: ticket.createdAt,
+      resolvedAt: ticket.resolvedAt || null,
+      reopenedAt: ticket.reopenedAt || null,
+      closedAt: ticket.closedAt || null,
+      statusHistory: ticket.statusHistory || [],
+    });
+  } catch (error) {
+    console.error("GET TICKET STATUS HISTORY ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load ticket status history.",
     });
   }
 };

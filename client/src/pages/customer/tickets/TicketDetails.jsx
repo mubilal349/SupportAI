@@ -21,12 +21,14 @@ import {
   Paperclip,
   Wifi,
   WifiOff,
+  History,
 } from "lucide-react";
 
 import { Link, useParams } from "react-router-dom";
 
 import {
   getTicketById,
+  getTicketStatusHistory,
   generateTicketSummary,
   uploadTicketAttachments,
   replyToTicket,
@@ -36,37 +38,326 @@ import socket from "../../../socket/socket";
 
 const API_BASE_URL = "http://localhost:8000";
 
+/*
+ * =========================================================
+ * STATUS CONFIGURATION
+ * =========================================================
+ */
+
+const STATUS_CONFIG = {
+  open: {
+    label: "Open",
+    icon: AlertCircle,
+    className: "border-blue-500/20 bg-blue-500/10 text-blue-400",
+  },
+
+  waiting: {
+    label: "Waiting",
+    icon: Clock3,
+    className: "border-yellow-500/20 bg-yellow-500/10 text-yellow-400",
+  },
+
+  pending: {
+    label: "Pending",
+    icon: Clock3,
+    className: "border-yellow-500/20 bg-yellow-500/10 text-yellow-400",
+  },
+
+  "in-progress": {
+    label: "In Progress",
+    icon: Clock3,
+    className: "border-orange-500/20 bg-orange-500/10 text-orange-400",
+  },
+
+  resolved: {
+    label: "Resolved",
+    icon: CheckCircle2,
+    className: "border-emerald-500/20 bg-emerald-500/10 text-emerald-400",
+  },
+
+  closed: {
+    label: "Closed",
+    icon: XCircle,
+    className: "border-slate-700 bg-slate-800 text-slate-500",
+  },
+};
+
+/*
+ * =========================================================
+ * STATUS DESCRIPTIONS
+ * =========================================================
+ */
+
+const STATUS_DESCRIPTIONS = {
+  open: "Your ticket has been received and is waiting to be handled.",
+
+  waiting: "The support team is waiting for additional information from you.",
+
+  pending: "Your ticket is waiting for the next support action.",
+
+  "in-progress": "A support team member is currently working on your ticket.",
+
+  resolved:
+    "The support team has resolved the issue. You can still reply if you need more help.",
+
+  closed: "This ticket has been closed and can no longer receive new replies.",
+};
+
+/*
+ * =========================================================
+ * PRIORITY CONFIGURATION
+ * =========================================================
+ */
+
+const PRIORITY_CONFIG = {
+  high: {
+    label: "High",
+    className: "border-red-500/20 bg-red-500/10 text-red-400",
+  },
+
+  medium: {
+    label: "Medium",
+    className: "border-orange-500/20 bg-orange-500/10 text-orange-400",
+  },
+
+  low: {
+    label: "Low",
+    className: "border-slate-700 bg-slate-800 text-slate-400",
+  },
+};
+
+/*
+ * =========================================================
+ * NORMALIZE MESSAGE
+ * =========================================================
+ */
+
+const normalizeReply = (message, index = 0) => {
+  const sender = message?.sender;
+
+  const senderRole =
+    message?.senderRole || sender?.role || message?.user?.role || "agent";
+
+  let senderName =
+    sender?.name ||
+    sender?.username ||
+    message?.user?.name ||
+    message?.senderName;
+
+  if (!senderName) {
+    if (senderRole === "customer" || senderRole === "user") {
+      senderName = "You";
+    } else if (senderRole === "ai") {
+      senderName = "SupportAI";
+    } else if (senderRole === "system") {
+      senderName = "System";
+    } else if (senderRole === "admin") {
+      senderName = "Support Admin";
+    } else {
+      senderName = "Support Agent";
+    }
+  }
+
+  return {
+    id: message?.id || message?._id || `reply-${index}-${Date.now()}`,
+
+    message: message?.message || message?.content || message?.text || "",
+
+    sender,
+
+    senderName,
+
+    senderRole,
+
+    createdAt: message?.createdAt || message?.timestamp || null,
+
+    attachments: Array.isArray(message?.attachments) ? message.attachments : [],
+
+    isRead: message?.isRead ?? false,
+  };
+};
+
+/*
+ * =========================================================
+ * NORMALIZE TICKET
+ * =========================================================
+ */
+
+const normalizeTicket = (data, fallbackId = "") => {
+  if (!data) {
+    return null;
+  }
+
+  const conversation = Array.isArray(data.conversation)
+    ? data.conversation
+    : [];
+
+  const normalizedConversation =
+    conversation.length > 0
+      ? conversation.map(normalizeReply)
+      : data.description
+        ? [
+            {
+              id: `initial-${data._id || data.id || fallbackId}`,
+              message: data.description,
+              sender: data.customer || null,
+              senderName:
+                data.customer?.name || data.customer?.username || "You",
+              senderRole: "customer",
+              createdAt: data.createdAt || data.created || null,
+              attachments: [],
+              isRead: true,
+            },
+          ]
+        : [];
+
+  return {
+    ...data,
+
+    id: data.id || data._id || fallbackId,
+
+    ticketNumber: data.ticketNumber || data.id || data._id || "—",
+
+    subject: data.subject || "Untitled ticket",
+
+    description: data.description || "No description provided.",
+
+    category: data.category || "General",
+
+    status: String(data.status || "open").toLowerCase(),
+
+    priority: String(data.priority || "medium").toLowerCase(),
+
+    agent:
+      data.assignedAgent?.name ||
+      data.assignedAgent?.username ||
+      data.agent?.name ||
+      data.assignedTo?.name ||
+      data.agentName ||
+      "Unassigned",
+
+    agentEmail:
+      data.assignedAgent?.email ||
+      data.agent?.email ||
+      data.assignedTo?.email ||
+      data.agentEmail ||
+      "",
+
+    createdAt: data.createdAt || data.created || null,
+
+    updatedAt: data.updatedAt || data.updated || null,
+
+    reopenedAt: data.reopenedAt || null,
+
+    resolvedAt: data.resolvedAt || null,
+
+    closedAt: data.closedAt || null,
+
+    attachments: Array.isArray(data.attachments) ? data.attachments : [],
+
+    conversation: normalizedConversation,
+
+    replyCount:
+      typeof data.replies === "number"
+        ? data.replies
+        : normalizedConversation.length,
+
+    customerRating: data.customerRating || null,
+
+    customerFeedback: data.customerFeedback || "",
+
+    statusHistory: Array.isArray(data.statusHistory) ? data.statusHistory : [],
+  };
+};
+
+/*
+ * =========================================================
+ * TICKET DETAILS
+ * =========================================================
+ */
+
 const TicketDetails = () => {
   const { id } = useParams();
 
-  // =========================================================
-  // STATE
-  // =========================================================
+  /*
+   * =======================================================
+   * TICKET STATE
+   * =======================================================
+   */
 
   const [ticket, setTicket] = useState(null);
 
-  const [loading, setLoading] = useState(true);
+  /*
+   * IMPORTANT:
+   *
+   * Ticket loading and status-history loading are now
+   * completely independent.
+   *
+   * The ticket can render even if status-history is still
+   * loading or its endpoint is temporarily unavailable.
+   */
+
+  const [ticketLoading, setTicketLoading] = useState(true);
+
+  const [statusHistory, setStatusHistory] = useState([]);
+
+  const [statusHistoryLoading, setStatusHistoryLoading] = useState(true);
+
+  const [statusHistoryError, setStatusHistoryError] = useState("");
+
   const [refreshing, setRefreshing] = useState(false);
 
   const [error, setError] = useState("");
 
+  /*
+   * =======================================================
+   * REPLY
+   * =======================================================
+   */
+
   const [reply, setReply] = useState("");
+
   const [sending, setSending] = useState(false);
 
+  /*
+   * =======================================================
+   * RATING
+   * =======================================================
+   */
+
   const [rating, setRating] = useState(0);
+
   const [feedback, setFeedback] = useState("");
+
   const [submittingRating, setSubmittingRating] = useState(false);
 
+  /*
+   * =======================================================
+   * AI SUMMARY
+   * =======================================================
+   */
+
   const [aiSummary, setAiSummary] = useState(null);
+
   const [generatingSummary, setGeneratingSummary] = useState(false);
+
   const [summaryError, setSummaryError] = useState("");
 
+  /*
+   * =======================================================
+   * ATTACHMENTS
+   * =======================================================
+   */
+
   const [selectedFiles, setSelectedFiles] = useState([]);
+
   const [uploadingFiles, setUploadingFiles] = useState(false);
 
-  // =========================================================
-  // REAL-TIME SOCKET STATE
-  // =========================================================
+  /*
+   * =======================================================
+   * SOCKET
+   * =======================================================
+   */
 
   const [socketConnected, setSocketConnected] = useState(socket.connected);
 
@@ -74,78 +365,35 @@ const TicketDetails = () => {
 
   const [onlineUsers, setOnlineUsers] = useState([]);
 
+  /*
+   * =======================================================
+   * REFS
+   * =======================================================
+   */
+
   const conversationEndRef = useRef(null);
 
   const typingTimeoutRef = useRef(null);
 
   const currentTicketIdRef = useRef(id);
 
-  // =========================================================
-  // STATUS CONFIG
-  // =========================================================
-
-  const statusConfig = {
-    open: {
-      label: "Open",
-      icon: AlertCircle,
-      className: "border-blue-500/20 bg-blue-500/10 text-blue-400",
-    },
-
-    waiting: {
-      label: "Waiting",
-      icon: Clock3,
-      className: "border-yellow-500/20 bg-yellow-500/10 text-yellow-400",
-    },
-
-    pending: {
-      label: "Pending",
-      icon: Clock3,
-      className: "border-yellow-500/20 bg-yellow-500/10 text-yellow-400",
-    },
-
-    "in-progress": {
-      label: "In progress",
-      icon: Clock3,
-      className: "border-orange-500/20 bg-orange-500/10 text-orange-400",
-    },
-
-    resolved: {
-      label: "Resolved",
-      icon: CheckCircle2,
-      className: "border-emerald-500/20 bg-emerald-500/10 text-emerald-400",
-    },
-
-    closed: {
-      label: "Closed",
-      icon: XCircle,
-      className: "border-slate-700 bg-slate-800 text-slate-500",
-    },
-  };
-
-  const priorityConfig = {
-    high: {
-      label: "High",
-      className: "border-red-500/20 bg-red-500/10 text-red-400",
-    },
-
-    medium: {
-      label: "Medium",
-      className: "border-orange-500/20 bg-orange-500/10 text-orange-400",
-    },
-
-    low: {
-      label: "Low",
-      className: "border-slate-700 bg-slate-800 text-slate-400",
-    },
-  };
-
-  // =========================================================
-  // LOAD TICKET
-  // =========================================================
+  /*
+   * =======================================================
+   * LOAD TICKET
+   *
+   * ONLY loads the ticket.
+   *
+   * It does NOT wait for status history.
+   * =======================================================
+   */
 
   const loadTicket = useCallback(async () => {
+    if (!id) {
+      return null;
+    }
+
     try {
-      setLoading(true);
+      setTicketLoading(true);
       setError("");
 
       const response = await getTicketById(id);
@@ -161,10 +409,15 @@ const TicketDetails = () => {
       if (!ticketData) {
         setError("Ticket not found.");
         setTicket(null);
-        return;
+
+        return null;
       }
 
-      setTicket(normalizeTicket(ticketData));
+      const normalized = normalizeTicket(ticketData, id);
+
+      setTicket(normalized);
+
+      return normalized;
     } catch (err) {
       console.error("LOAD TICKET ERROR:", err);
 
@@ -175,161 +428,134 @@ const TicketDetails = () => {
       );
 
       setTicket(null);
+
+      return null;
     } finally {
-      setLoading(false);
+      setTicketLoading(false);
     }
   }, [id]);
 
-  useEffect(() => {
-    if (id) {
-      currentTicketIdRef.current = id;
-      loadTicket();
+  /*
+   * =======================================================
+   * LOAD STATUS HISTORY
+   *
+   * COMPLETELY INDEPENDENT FROM TICKET LOADING.
+   *
+   * A failure here does NOT hide the ticket page.
+   * =======================================================
+   */
+
+  const loadStatusHistory = useCallback(async () => {
+    if (!id) {
+      return;
     }
-  }, [id, loadTicket]);
 
-  // =========================================================
-  // NORMALIZE TICKET
-  // =========================================================
+    try {
+      setStatusHistoryLoading(true);
+      setStatusHistoryError("");
 
-  const normalizeTicket = (data) => {
-    if (!data) return null;
+      const response = await getTicketStatusHistory(id);
 
-    const conversation = Array.isArray(data.conversation)
-      ? data.conversation
-      : [];
+      console.log("TICKET STATUS HISTORY:", response);
 
-    const normalizedConversation =
-      conversation.length > 0
-        ? conversation.map(normalizeReply)
-        : data.description
-          ? [
-              {
-                id: `initial-${data._id || data.id || Date.now()}`,
-                message: data.description,
-                sender: data.customer || null,
-                senderName:
-                  data.customer?.name || data.customer?.username || "You",
-                senderRole: "customer",
-                createdAt: data.createdAt || data.created || null,
-                attachments: [],
-                isRead: true,
-              },
-            ]
-          : [];
+      const history =
+        response?.statusHistory || response?.data?.statusHistory || [];
 
-    return {
-      ...data,
+      setStatusHistory(Array.isArray(history) ? history : []);
 
-      id: data.id || data._id || id,
+      /*
+       * Also update the current ticket status if the
+       * history endpoint gives us newer information.
+       */
 
-      ticketNumber: data.ticketNumber || data.id || data._id || "—",
+      if (response?.currentStatus || response?.status) {
+        setTicket((previous) => {
+          if (!previous) {
+            return previous;
+          }
 
-      subject: data.subject || "Untitled ticket",
+          return {
+            ...previous,
 
-      description: data.description || "No description provided.",
+            status: String(
+              response.currentStatus || response.status || previous.status,
+            ).toLowerCase(),
 
-      category: data.category || "General",
+            resolvedAt: response.resolvedAt ?? previous.resolvedAt,
 
-      status: String(data.status || "open").toLowerCase(),
+            reopenedAt: response.reopenedAt ?? previous.reopenedAt,
 
-      priority: String(data.priority || "medium").toLowerCase(),
-
-      agent:
-        data.assignedAgent?.name ||
-        data.assignedAgent?.username ||
-        data.agent?.name ||
-        data.assignedTo?.name ||
-        data.agentName ||
-        "Unassigned",
-
-      agentEmail:
-        data.assignedAgent?.email ||
-        data.agent?.email ||
-        data.assignedTo?.email ||
-        data.agentEmail ||
-        "",
-
-      createdAt: data.createdAt || data.created || null,
-
-      updatedAt: data.updatedAt || data.updated || null,
-
-      attachments: Array.isArray(data.attachments) ? data.attachments : [],
-
-      conversation: normalizedConversation,
-
-      replyCount:
-        typeof data.replies === "number"
-          ? data.replies
-          : normalizedConversation.length,
-
-      customerRating: data.customerRating || null,
-
-      customerFeedback: data.customerFeedback || "",
-    };
-  };
-
-  // =========================================================
-  // NORMALIZE CONVERSATION MESSAGE
-  // =========================================================
-
-  const normalizeReply = (message, index) => {
-    const sender = message?.sender;
-
-    const senderRole =
-      message?.senderRole || sender?.role || message?.user?.role || "agent";
-
-    let senderName =
-      sender?.name ||
-      sender?.username ||
-      message?.user?.name ||
-      message?.senderName;
-
-    if (!senderName) {
-      if (senderRole === "customer" || senderRole === "user") {
-        senderName = "You";
-      } else if (senderRole === "ai") {
-        senderName = "SupportAI";
-      } else if (senderRole === "system") {
-        senderName = "System";
-      } else if (senderRole === "admin") {
-        senderName = "Support Admin";
-      } else {
-        senderName = "Support Agent";
+            closedAt: response.closedAt ?? previous.closedAt,
+          };
+        });
       }
+    } catch (err) {
+      console.error("LOAD STATUS HISTORY ERROR:", err);
+
+      /*
+       * IMPORTANT:
+       *
+       * Do not set the main page error here.
+       *
+       * The ticket itself may have loaded successfully.
+       */
+
+      const message =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        "Status history could not be loaded.";
+
+      setStatusHistoryError(message);
+
+      /*
+       * Keep existing status history if there is any.
+       */
+
+      setStatusHistory((previous) => (Array.isArray(previous) ? previous : []));
+    } finally {
+      setStatusHistoryLoading(false);
     }
+  }, [id]);
 
-    return {
-      id: message?.id || message?._id || `reply-${index}-${Date.now()}`,
-
-      message: message?.message || message?.content || message?.text || "",
-
-      sender,
-
-      senderName,
-
-      senderRole,
-
-      createdAt: message?.createdAt || message?.timestamp || null,
-
-      attachments: Array.isArray(message?.attachments)
-        ? message.attachments
-        : [],
-
-      isRead: message?.isRead ?? false,
-    };
-  };
-
-  // =========================================================
-  // REAL-TIME SOCKET CONNECTION
-  // =========================================================
+  /*
+   * =======================================================
+   * INITIAL DATA LOADING
+   *
+   * Both requests start at the SAME TIME.
+   *
+   * Promise.allSettled means one request does not block
+   * the other.
+   * =======================================================
+   */
 
   useEffect(() => {
-    if (!id) return;
+    if (!id) {
+      return;
+    }
+
+    currentTicketIdRef.current = id;
+
+    loadTicket();
+
+    loadStatusHistory();
+  }, [id, loadTicket, loadStatusHistory]);
+
+  /*
+   * =======================================================
+   * REAL-TIME SOCKET CONNECTION
+   * =======================================================
+   */
+
+  useEffect(() => {
+    if (!id) {
+      return;
+    }
 
     const token = localStorage.getItem("supportai_token");
 
     if (!token) {
       console.warn("No authentication token found for Socket.IO.");
+
       return;
     }
 
@@ -375,17 +601,26 @@ const TicketDetails = () => {
     const handleSocketError = (data) => {
       console.error("Ticket Socket.IO error:", data);
 
-      if (data?.message) {
+      /*
+       * Socket errors should not destroy an already
+       * loaded ticket.
+       */
+
+      if (data?.message && !ticket) {
         setError(data.message);
       }
     };
 
-    // ---------------------------------------------------------
-    // NEW REAL-TIME MESSAGE
-    // ---------------------------------------------------------
+    /*
+     * =====================================================
+     * NEW MESSAGE
+     * =====================================================
+     */
 
     const handleNewMessage = (data) => {
-      if (!data) return;
+      if (!data) {
+        return;
+      }
 
       const incomingTicketId = String(data.ticketId || "");
 
@@ -413,13 +648,6 @@ const TicketDetails = () => {
         const existingConversation = Array.isArray(previous.conversation)
           ? previous.conversation
           : [];
-
-        // -----------------------------------------------------
-        // IMPORTANT:
-        // Prevent duplicate messages.
-        // The REST response and Socket.IO event can arrive
-        // almost at the same time.
-        // -----------------------------------------------------
 
         const messageExists = existingConversation.some(
           (message) =>
@@ -451,10 +679,6 @@ const TicketDetails = () => {
         };
       });
 
-      // -------------------------------------------------------
-      // Mark received message as read.
-      // -------------------------------------------------------
-
       if (normalizedMessage.senderRole !== "customer" && normalizedMessage.id) {
         socket.emit("ticket:message:read", {
           ticketId: id,
@@ -463,12 +687,16 @@ const TicketDetails = () => {
       }
     };
 
-    // ---------------------------------------------------------
-    // REAL-TIME TICKET UPDATE
-    // ---------------------------------------------------------
+    /*
+     * =====================================================
+     * TICKET UPDATED
+     * =====================================================
+     */
 
     const handleTicketUpdate = (data) => {
-      if (!data) return;
+      if (!data) {
+        return;
+      }
 
       if (data.ticketId && String(data.ticketId) !== String(id)) {
         return;
@@ -498,7 +726,7 @@ const TicketDetails = () => {
 
           updatedAt: data.updatedAt || data.lastReplyAt || previous.updatedAt,
 
-          reopenedAt: data.reopenedAt || previous.reopenedAt,
+          reopenedAt: data.reopenedAt ?? previous.reopenedAt,
 
           resolvedAt:
             data.resolvedAt !== undefined
@@ -507,16 +735,95 @@ const TicketDetails = () => {
 
           closedAt:
             data.closedAt !== undefined ? data.closedAt : previous.closedAt,
+
+          statusHistory: Array.isArray(data.statusHistory)
+            ? data.statusHistory
+            : previous.statusHistory,
         };
       });
+
+      /*
+       * If backend includes status history in the
+       * ticket update, synchronize it.
+       */
+
+      if (Array.isArray(data.statusHistory)) {
+        setStatusHistory(data.statusHistory);
+      }
     };
 
-    // ---------------------------------------------------------
-    // TYPING
-    // ---------------------------------------------------------
+    /*
+     * =====================================================
+     * REAL-TIME STATUS CHANGED
+     * =====================================================
+     */
+
+    const handleStatusChanged = (data) => {
+      if (!data) {
+        return;
+      }
+
+      if (data.ticketId && String(data.ticketId) !== String(id)) {
+        return;
+      }
+
+      console.log("REAL-TIME STATUS CHANGED:", data);
+
+      setTicket((previous) => {
+        if (!previous) {
+          return previous;
+        }
+
+        return {
+          ...previous,
+
+          status:
+            data.status !== undefined
+              ? String(data.status).toLowerCase()
+              : previous.status,
+
+          resolvedAt:
+            data.resolvedAt !== undefined
+              ? data.resolvedAt
+              : previous.resolvedAt,
+
+          reopenedAt:
+            data.reopenedAt !== undefined
+              ? data.reopenedAt
+              : previous.reopenedAt,
+
+          closedAt:
+            data.closedAt !== undefined ? data.closedAt : previous.closedAt,
+
+          statusHistory: Array.isArray(data.statusHistory)
+            ? data.statusHistory
+            : previous.statusHistory,
+        };
+      });
+
+      if (Array.isArray(data.statusHistory)) {
+        setStatusHistory(data.statusHistory);
+      } else {
+        /*
+         * Reload history in the background.
+         *
+         * This does not block the page.
+         */
+
+        loadStatusHistory();
+      }
+    };
+
+    /*
+     * =====================================================
+     * TYPING
+     * =====================================================
+     */
 
     const handleTyping = (data) => {
-      if (!data) return;
+      if (!data) {
+        return;
+      }
 
       if (data.ticketId && String(data.ticketId) !== String(id)) {
         return;
@@ -532,12 +839,16 @@ const TicketDetails = () => {
       }
     };
 
-    // ---------------------------------------------------------
-    // USER ONLINE
-    // ---------------------------------------------------------
+    /*
+     * =====================================================
+     * USER ONLINE
+     * =====================================================
+     */
 
     const handleUserOnline = (data) => {
-      if (!data) return;
+      if (!data) {
+        return;
+      }
 
       if (data.ticketId && String(data.ticketId) !== String(id)) {
         return;
@@ -562,12 +873,16 @@ const TicketDetails = () => {
       });
     };
 
-    // ---------------------------------------------------------
-    // USER OFFLINE
-    // ---------------------------------------------------------
+    /*
+     * =====================================================
+     * USER OFFLINE
+     * =====================================================
+     */
 
     const handleUserOffline = (data) => {
-      if (!data) return;
+      if (!data) {
+        return;
+      }
 
       if (data.ticketId && String(data.ticketId) !== String(id)) {
         return;
@@ -578,12 +893,16 @@ const TicketDetails = () => {
       );
     };
 
-    // ---------------------------------------------------------
-    // REGISTER LISTENERS BEFORE CONNECTING
-    // ---------------------------------------------------------
+    /*
+     * =====================================================
+     * REGISTER SOCKET LISTENERS
+     * =====================================================
+     */
 
     socket.on("connect", handleConnect);
+
     socket.on("disconnect", handleDisconnect);
+
     socket.on("connect_error", handleConnectError);
 
     socket.on("ticket:joined", handleJoined);
@@ -594,15 +913,19 @@ const TicketDetails = () => {
 
     socket.on("ticket:updated", handleTicketUpdate);
 
+    socket.on("ticket:status-changed", handleStatusChanged);
+
     socket.on("ticket:typing", handleTyping);
 
     socket.on("ticket:user-online", handleUserOnline);
 
     socket.on("ticket:user-offline", handleUserOffline);
 
-    // ---------------------------------------------------------
-    // AUTHENTICATE SOCKET
-    // ---------------------------------------------------------
+    /*
+     * =====================================================
+     * AUTHENTICATE SOCKET
+     * =====================================================
+     */
 
     socket.auth = {
       token,
@@ -614,9 +937,11 @@ const TicketDetails = () => {
       socket.connect();
     }
 
-    // ---------------------------------------------------------
-    // CLEANUP
-    // ---------------------------------------------------------
+    /*
+     * =====================================================
+     * CLEANUP
+     * =====================================================
+     */
 
     return () => {
       console.log(`Leaving real-time ticket room: ticket:${id}`);
@@ -626,7 +951,9 @@ const TicketDetails = () => {
       });
 
       socket.off("connect", handleConnect);
+
       socket.off("disconnect", handleDisconnect);
+
       socket.off("connect_error", handleConnectError);
 
       socket.off("ticket:joined", handleJoined);
@@ -637,6 +964,8 @@ const TicketDetails = () => {
 
       socket.off("ticket:updated", handleTicketUpdate);
 
+      socket.off("ticket:status-changed", handleStatusChanged);
+
       socket.off("ticket:typing", handleTyping);
 
       socket.off("ticket:user-online", handleUserOnline);
@@ -645,16 +974,20 @@ const TicketDetails = () => {
 
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
+
+        typingTimeoutRef.current = null;
       }
 
       setTypingUser(null);
       setOnlineUsers([]);
     };
-  }, [id]);
+  }, [id, loadStatusHistory]);
 
-  // =========================================================
-  // AUTO SCROLL CONVERSATION
-  // =========================================================
+  /*
+   * =========================================================
+   * AUTO SCROLL
+   * =========================================================
+   */
 
   useEffect(() => {
     if (!conversationEndRef.current) {
@@ -667,25 +1000,36 @@ const TicketDetails = () => {
     });
   }, [ticket?.conversation?.length, typingUser]);
 
-  // =========================================================
-  // REFRESH
-  // =========================================================
+  /*
+   * =========================================================
+   * REFRESH
+   * =========================================================
+   */
 
   const handleRefresh = async () => {
     try {
       setRefreshing(true);
-      await loadTicket();
+
+      /*
+       * Refresh both independently.
+       */
+
+      await Promise.allSettled([loadTicket(), loadStatusHistory()]);
     } finally {
       setRefreshing(false);
     }
   };
 
-  // =========================================================
-  // FORMAT DATE
-  // =========================================================
+  /*
+   * =========================================================
+   * FORMAT DATE
+   * =========================================================
+   */
 
   const formatDate = (date) => {
-    if (!date) return "—";
+    if (!date) {
+      return "—";
+    }
 
     try {
       const parsedDate = new Date(date);
@@ -700,12 +1044,64 @@ const TicketDetails = () => {
     }
   };
 
-  // =========================================================
-  // FORMAT FILE SIZE
-  // =========================================================
+  /*
+   * =========================================================
+   * FORMAT RELATIVE DATE
+   * =========================================================
+   */
+
+  const formatRelativeDate = (date) => {
+    if (!date) {
+      return "";
+    }
+
+    try {
+      const parsed = new Date(date);
+
+      if (Number.isNaN(parsed.getTime())) {
+        return "";
+      }
+
+      const diff = Date.now() - parsed.getTime();
+
+      const minutes = Math.floor(diff / 60000);
+
+      if (minutes < 1) {
+        return "Just now";
+      }
+
+      if (minutes < 60) {
+        return `${minutes} ${minutes === 1 ? "minute" : "minutes"} ago`;
+      }
+
+      const hours = Math.floor(minutes / 60);
+
+      if (hours < 24) {
+        return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+      }
+
+      const days = Math.floor(hours / 24);
+
+      if (days < 7) {
+        return `${days} ${days === 1 ? "day" : "days"} ago`;
+      }
+
+      return parsed.toLocaleDateString();
+    } catch {
+      return "";
+    }
+  };
+
+  /*
+   * =========================================================
+   * FILE SIZE
+   * =========================================================
+   */
 
   const formatFileSize = (bytes) => {
-    if (!bytes) return "0 KB";
+    if (!bytes) {
+      return "0 KB";
+    }
 
     if (bytes < 1024) {
       return `${bytes} B`;
@@ -718,15 +1114,20 @@ const TicketDetails = () => {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  // =========================================================
-  // AI TICKET SUMMARY
-  // =========================================================
+  /*
+   * =========================================================
+   * AI SUMMARY
+   * =========================================================
+   */
 
   const handleGenerateSummary = async () => {
-    if (!ticket?.id) return;
+    if (!ticket?.id) {
+      return;
+    }
 
     try {
       setGeneratingSummary(true);
+
       setSummaryError("");
 
       const response = await generateTicketSummary(ticket.id);
@@ -787,8 +1188,6 @@ const TicketDetails = () => {
         };
       }
 
-      console.log("NORMALIZED AI SUMMARY:", normalizedSummary);
-
       if (
         !normalizedSummary.summary &&
         normalizedSummary.keyPoints.length === 0 &&
@@ -813,9 +1212,11 @@ const TicketDetails = () => {
     }
   };
 
-  // =========================================================
-  // FILE SELECT
-  // =========================================================
+  /*
+   * =========================================================
+   * FILE SELECT
+   * =========================================================
+   */
 
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files || []);
@@ -849,9 +1250,11 @@ const TicketDetails = () => {
     e.target.value = "";
   };
 
-  // =========================================================
-  // REMOVE SELECTED FILE
-  // =========================================================
+  /*
+   * =========================================================
+   * REMOVE FILE
+   * =========================================================
+   */
 
   const removeSelectedFile = (index) => {
     setSelectedFiles((previous) =>
@@ -859,9 +1262,11 @@ const TicketDetails = () => {
     );
   };
 
-  // =========================================================
-  // UPLOAD ATTACHMENTS
-  // =========================================================
+  /*
+   * =========================================================
+   * UPLOAD ATTACHMENTS
+   * =========================================================
+   */
 
   const handleUploadAttachments = async () => {
     if (!selectedFiles.length || !ticket?.id) {
@@ -870,6 +1275,7 @@ const TicketDetails = () => {
 
     try {
       setUploadingFiles(true);
+
       setError("");
 
       const response = await uploadTicketAttachments(ticket.id, selectedFiles);
@@ -895,9 +1301,11 @@ const TicketDetails = () => {
     }
   };
 
-  // =========================================================
-  // START TYPING
-  // =========================================================
+  /*
+   * =========================================================
+   * TYPING START
+   * =========================================================
+   */
 
   const handleTypingStart = () => {
     if (!id || !socket.connected || ticket?.status === "closed") {
@@ -919,9 +1327,11 @@ const TicketDetails = () => {
     }, 1500);
   };
 
-  // =========================================================
-  // STOP TYPING
-  // =========================================================
+  /*
+   * =========================================================
+   * TYPING STOP
+   * =========================================================
+   */
 
   const handleTypingStop = () => {
     if (!id || !socket.connected) {
@@ -939,9 +1349,11 @@ const TicketDetails = () => {
     });
   };
 
-  // =========================================================
-  // SEND REPLY
-  // =========================================================
+  /*
+   * =========================================================
+   * SEND REPLY
+   * =========================================================
+   */
 
   const handleSendReply = async (e) => {
     e.preventDefault();
@@ -954,48 +1366,36 @@ const TicketDetails = () => {
 
     if (!ticket?.id) {
       setError("Ticket ID is missing.");
+
       return;
     }
 
     if (ticket.status === "closed") {
-      setError("This ticket is closed. Please reopen it before continuing.");
+      setError("This ticket is closed. Please create a new ticket.");
+
       return;
     }
 
     try {
       setSending(true);
+
       setError("");
 
       handleTypingStop();
-
-      /*
-       * IMPORTANT:
-       *
-       * We do NOT manually add the message here.
-       *
-       * Backend saves the message and emits:
-       *
-       * ticket:new-message
-       *
-       * Socket.IO then updates the conversation instantly.
-       */
 
       const response = await replyToTicket(ticket.id, message);
 
       console.log("REPLY RESPONSE:", response);
 
       /*
-       * Fallback:
-       *
-       * If Socket.IO is disconnected, use the REST
-       * response so the message still appears.
+       * If socket is unavailable, use REST response.
        */
 
       if (!socket.connected) {
         const updatedTicket = response?.ticket;
 
         if (updatedTicket) {
-          setTicket(normalizeTicket(updatedTicket));
+          setTicket(normalizeTicket(updatedTicket, ticket.id));
         } else if (response?.conversation) {
           setTicket((previous) => ({
             ...previous,
@@ -1006,6 +1406,14 @@ const TicketDetails = () => {
           }));
         }
       }
+
+      /*
+       * Refresh status history in background because
+       * sending a reply can reopen a resolved/waiting
+       * ticket.
+       */
+
+      loadStatusHistory();
 
       setReply("");
     } catch (err) {
@@ -1021,9 +1429,11 @@ const TicketDetails = () => {
     }
   };
 
-  // =========================================================
-  // HANDLE ENTER / SHIFT + ENTER
-  // =========================================================
+  /*
+   * =========================================================
+   * ENTER / SHIFT+ENTER
+   * =========================================================
+   */
 
   const handleReplyKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1035,19 +1445,27 @@ const TicketDetails = () => {
     }
   };
 
-  // =========================================================
-  // REOPEN TICKET
-  // =========================================================
-
   /*
-   * Your current backend does not yet have a dedicated
-   * reopen endpoint.
+   * =========================================================
+   * REOPEN
    *
-   * The backend automatically reopens a resolved ticket
-   * when the customer sends a new reply.
+   * There is currently no dedicated backend reopen
+   * endpoint.
+   *
+   * Resolved tickets are reopened when the customer
+   * sends a reply.
+   * =========================================================
    */
 
   const handleReopenTicket = () => {
+    if (!ticket) {
+      return;
+    }
+
+    setError(
+      "This ticket will reopen automatically when you send a new reply.",
+    );
+
     setTicket((previous) => ({
       ...previous,
 
@@ -1055,22 +1473,20 @@ const TicketDetails = () => {
 
       resolvedAt: null,
 
-      closedAt: null,
-
       reopenedAt: new Date().toISOString(),
     }));
+
+    setTimeout(() => {
+      setError("");
+    }, 4000);
   };
 
-  // =========================================================
-  // ESCALATE TO HUMAN
-  // =========================================================
-
   /*
-   * Currently local UI behavior.
+   * =========================================================
+   * ESCALATE
    *
-   * Later this can call:
-   *
-   * PATCH /api/tickets/:id/escalate
+   * Currently UI-only.
+   * =========================================================
    */
 
   const handleEscalate = async () => {
@@ -1081,16 +1497,12 @@ const TicketDetails = () => {
     }));
   };
 
-  // =========================================================
-  // SUBMIT RATING
-  // =========================================================
-
   /*
-   * Currently local UI behavior.
+   * =========================================================
+   * RATING
    *
-   * Later this can call:
-   *
-   * POST /api/tickets/:id/rating
+   * Currently UI-only.
+   * =========================================================
    */
 
   const handleSubmitRating = async (e) => {
@@ -1102,6 +1514,7 @@ const TicketDetails = () => {
 
     try {
       setSubmittingRating(true);
+
       setError("");
 
       setTicket((previous) => ({
@@ -1120,9 +1533,11 @@ const TicketDetails = () => {
     }
   };
 
-  // =========================================================
-  // ATTACHMENT URL
-  // =========================================================
+  /*
+   * =========================================================
+   * ATTACHMENT URL
+   * =========================================================
+   */
 
   const getAttachmentUrl = (file) => {
     const path = file?.path || file?.fileUrl || file?.url;
@@ -1138,17 +1553,19 @@ const TicketDetails = () => {
     return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
   };
 
-  // =========================================================
-  // MESSAGE ATTACHMENT URL
-  // =========================================================
+  /*
+   * =========================================================
+   * MESSAGE ATTACHMENT URL
+   * =========================================================
+   */
 
-  const getMessageAttachmentUrl = (file) => {
-    return getAttachmentUrl(file);
-  };
+  const getMessageAttachmentUrl = (file) => getAttachmentUrl(file);
 
-  // =========================================================
-  // MESSAGE ROLE CONFIG
-  // =========================================================
+  /*
+   * =========================================================
+   * MESSAGE ROLE CONFIG
+   * =========================================================
+   */
 
   const getMessageConfig = (senderRole) => {
     switch (senderRole) {
@@ -1196,26 +1613,34 @@ const TicketDetails = () => {
     }
   };
 
-  // =========================================================
-  // DERIVED VALUES
-  // =========================================================
+  /*
+   * =========================================================
+   * STATUS HISTORY CONFIG
+   * =========================================================
+   */
+
+  const getHistoryStatus = (status) => {
+    const normalized = String(status || "open").toLowerCase();
+
+    return STATUS_CONFIG[normalized] || STATUS_CONFIG.open;
+  };
+
+  /*
+   * =========================================================
+   * DERIVED VALUES
+   * =========================================================
+   */
 
   const currentStatus = useMemo(() => {
-    return statusConfig[ticket?.status] || statusConfig.open;
+    return STATUS_CONFIG[ticket?.status] || STATUS_CONFIG.open;
   }, [ticket?.status]);
 
   const currentPriority = useMemo(() => {
-    return priorityConfig[ticket?.priority] || priorityConfig.medium;
+    return PRIORITY_CONFIG[ticket?.priority] || PRIORITY_CONFIG.medium;
   }, [ticket?.priority]);
 
   const StatusIcon = currentStatus.icon;
 
-  /*
-   * CLOSED is actually closed.
-   *
-   * RESOLVED is allowed to receive another customer
-   * reply because your backend automatically reopens it.
-   */
   const isClosed = ticket?.status === "closed";
 
   const isResolved = ticket?.status === "resolved";
@@ -1226,25 +1651,37 @@ const TicketDetails = () => {
     ? ticket.conversation
     : [];
 
-  // =========================================================
-  // LOADING
-  // =========================================================
+  /*
+   * =========================================================
+   * MAIN LOADING
+   *
+   * ONLY the ticket request controls this.
+   *
+   * Status history does NOT block the page.
+   * =========================================================
+   */
 
-  if (loading) {
+  if (ticketLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
         <div className="text-center">
           <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-500" />
 
           <p className="mt-4 text-sm text-slate-500">Loading ticket...</p>
+
+          <p className="mt-2 text-[10px] text-slate-700">
+            Loading your support conversation
+          </p>
         </div>
       </div>
     );
   }
 
-  // =========================================================
-  // ERROR / NOT FOUND
-  // =========================================================
+  /*
+   * =========================================================
+   * NOT FOUND
+   * =========================================================
+   */
 
   if (!ticket) {
     return (
@@ -1281,7 +1718,7 @@ const TicketDetails = () => {
                 onClick={loadTicket}
                 className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold transition hover:bg-blue-700"
               >
-                <RefreshCw className="h-4 w-4 cursor-pointer" />
+                <RefreshCw className="h-4 w-4" />
                 Try again
               </button>
 
@@ -1298,9 +1735,11 @@ const TicketDetails = () => {
     );
   }
 
-  // =========================================================
-  // MAIN RENDER
-  // =========================================================
+  /*
+   * =========================================================
+   * MAIN RENDER
+   * =========================================================
+   */
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -1327,19 +1766,12 @@ const TicketDetails = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* REAL-TIME CONNECTION STATUS */}
-
             <div
               className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] sm:flex ${
                 socketConnected
                   ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"
                   : "border-slate-800 bg-slate-900 text-slate-600"
               }`}
-              title={
-                socketConnected
-                  ? "Real-time connection active"
-                  : "Real-time connection disconnected"
-              }
             >
               {socketConnected ? (
                 <>
@@ -1381,7 +1813,7 @@ const TicketDetails = () => {
       ====================================================== */}
 
       <main className="mx-auto max-w-7xl px-6 py-8">
-        {/* Error */}
+        {/* ERROR */}
 
         {error && (
           <div className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3">
@@ -1470,6 +1902,222 @@ const TicketDetails = () => {
               />
             </div>
           </div>
+
+          {/* CURRENT STATUS EXPLANATION */}
+
+          <div className="mt-6 border-t border-slate-800 pt-5">
+            <div className="flex items-start gap-3">
+              <div
+                className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${currentStatus.className}`}
+              >
+                <StatusIcon className="h-4 w-4" />
+              </div>
+
+              <div>
+                <p className="text-xs font-medium text-slate-300">
+                  {currentStatus.label}
+                </p>
+
+                <p className="mt-1 text-[11px] leading-5 text-slate-600">
+                  {STATUS_DESCRIPTIONS[ticket.status] ||
+                    "Your ticket is being handled by the support team."}
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* =================================================
+            STATUS HISTORY
+        ================================================== */}
+
+        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60">
+          <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
+            <div className="flex items-center gap-2">
+              <History className="h-4 w-4 text-blue-400" />
+
+              <div>
+                <h3 className="text-sm font-semibold">Ticket status history</h3>
+
+                <p className="mt-1 text-[10px] text-slate-600">
+                  See how your ticket has progressed.
+                </p>
+              </div>
+            </div>
+
+            {statusHistoryLoading && (
+              <div className="flex items-center gap-2 text-[10px] text-slate-600">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Updating
+              </div>
+            )}
+          </div>
+
+          <div className="p-6">
+            {statusHistoryError && statusHistory.length === 0 && (
+              <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-400" />
+
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-yellow-400">
+                      Status history is temporarily unavailable
+                    </p>
+
+                    <p className="mt-1 text-[10px] leading-5 text-slate-600">
+                      Your ticket and conversation are still available. The
+                      status timeline will appear when the history service is
+                      available.
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={loadStatusHistory}
+                      disabled={statusHistoryLoading}
+                      className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-[10px] font-medium text-slate-400 hover:bg-slate-800 hover:text-white disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={`h-3.5 w-3.5 ${
+                          statusHistoryLoading ? "animate-spin" : ""
+                        }`}
+                      />
+                      Try again
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {statusHistoryLoading && statusHistory.length === 0 && (
+              <div className="space-y-5">
+                {[1, 2, 3].map((item) => (
+                  <div key={item} className="flex animate-pulse gap-4">
+                    <div className="h-9 w-9 rounded-full bg-slate-800" />
+
+                    <div className="flex-1">
+                      <div className="h-3 w-32 rounded bg-slate-800" />
+
+                      <div className="mt-2 h-2 w-56 rounded bg-slate-900" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!statusHistoryLoading &&
+              !statusHistoryError &&
+              statusHistory.length === 0 && (
+                <div className="rounded-xl border border-dashed border-slate-800 bg-slate-950/40 p-6 text-center">
+                  <History className="mx-auto h-6 w-6 text-slate-700" />
+
+                  <p className="mt-3 text-xs text-slate-500">
+                    No status history recorded yet.
+                  </p>
+
+                  <p className="mt-1 text-[10px] leading-5 text-slate-700">
+                    Future status changes will appear here.
+                  </p>
+                </div>
+              )}
+
+            {statusHistory.length > 0 && (
+              <div className="relative">
+                <div className="absolute left-[17px] top-5 bottom-5 w-px bg-slate-800" />
+
+                <div className="space-y-6">
+                  {statusHistory.map((history, index) => {
+                    const historyStatus = getHistoryStatus(history?.status);
+
+                    const HistoryIcon = historyStatus.icon;
+
+                    const changedBy = history?.changedBy;
+
+                    const changedByName =
+                      changedBy?.name ||
+                      changedBy?.username ||
+                      history?.changedByName ||
+                      (history?.changedByRole === "customer"
+                        ? "You"
+                        : history?.changedByRole === "ai"
+                          ? "SupportAI"
+                          : history?.changedByRole === "admin"
+                            ? "Support Admin"
+                            : history?.changedByRole === "agent"
+                              ? "Support Agent"
+                              : "System");
+
+                    return (
+                      <div
+                        key={
+                          history?._id ||
+                          history?.id ||
+                          `${history?.status}-${history?.createdAt}-${index}`
+                        }
+                        className="relative flex gap-4"
+                      >
+                        <div
+                          className={`relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${historyStatus.className}`}
+                        >
+                          <HistoryIcon className="h-4 w-4" />
+                        </div>
+
+                        <div className="min-w-0 flex-1 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                  className={`rounded-full border px-2 py-1 text-[10px] font-medium ${historyStatus.className}`}
+                                >
+                                  {historyStatus.label}
+                                </span>
+
+                                {index === statusHistory.length - 1 && (
+                                  <span className="rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-1 text-[9px] text-blue-400">
+                                    Current
+                                  </span>
+                                )}
+                              </div>
+
+                              <p className="mt-3 text-xs font-medium text-slate-300">
+                                {STATUS_DESCRIPTIONS[
+                                  String(
+                                    history?.status || "open",
+                                  ).toLowerCase()
+                                ] || "Ticket status was updated."}
+                              </p>
+                            </div>
+
+                            <div className="shrink-0 text-left sm:text-right">
+                              <p className="text-[10px] text-slate-600">
+                                {formatDate(history?.createdAt)}
+                              </p>
+
+                              <p className="mt-1 text-[9px] text-slate-700">
+                                {formatRelativeDate(history?.createdAt)}
+                              </p>
+                            </div>
+                          </div>
+
+                          {history?.note && (
+                            <p className="mt-3 rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-[11px] leading-5 text-slate-500">
+                              {history.note}
+                            </p>
+                          )}
+
+                          <p className="mt-3 text-[9px] text-slate-700">
+                            Updated by{" "}
+                            <span className="text-slate-600">
+                              {changedByName}
+                            </span>
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </section>
 
         {/* =================================================
@@ -1540,140 +2188,138 @@ const TicketDetails = () => {
             </div>
           )}
 
-          <div className="mt-5">
-            {aiSummary && (
-              <div className="space-y-6">
-                {aiSummary.summary && (
+          {aiSummary && (
+            <div className="mt-5 space-y-6">
+              {aiSummary.summary && (
+                <section>
+                  <h3 className="text-xs font-semibold text-white">
+                    AI Summary
+                  </h3>
+
+                  <p className="mt-2 text-[12px] leading-6 text-slate-400">
+                    {aiSummary.summary}
+                  </p>
+                </section>
+              )}
+
+              {Array.isArray(aiSummary.keyPoints) &&
+                aiSummary.keyPoints.length > 0 && (
                   <section>
                     <h3 className="text-xs font-semibold text-white">
-                      AI Summary
+                      Important information
                     </h3>
 
-                    <p className="mt-2 text-[12px] leading-6 text-slate-400">
-                      {aiSummary.summary}
-                    </p>
+                    <ul className="mt-2 space-y-2 pl-5">
+                      {aiSummary.keyPoints.map((point, index) => (
+                        <li
+                          key={index}
+                          className="list-disc pl-1 text-[12px] leading-6 text-slate-400 marker:text-slate-500"
+                        >
+                          {point}
+                        </li>
+                      ))}
+                    </ul>
                   </section>
                 )}
 
-                {Array.isArray(aiSummary.keyPoints) &&
-                  aiSummary.keyPoints.length > 0 && (
-                    <section>
-                      <h3 className="text-xs font-semibold text-white">
-                        Important information
-                      </h3>
+              {aiSummary.suggestedResolution && (
+                <section>
+                  <h3 className="text-xs font-semibold text-white">
+                    What you can do
+                  </h3>
 
-                      <ul className="mt-2 space-y-2 pl-5">
-                        {aiSummary.keyPoints.map((point, index) => (
-                          <li
-                            key={index}
-                            className="list-disc pl-1 text-[12px] leading-6 text-slate-400 marker:text-slate-500"
-                          >
-                            {point}
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
-                  )}
+                  <p className="mt-2 text-[12px] leading-6 text-slate-400">
+                    {aiSummary.suggestedResolution}
+                  </p>
+                </section>
+              )}
 
-                {aiSummary.suggestedResolution && (
-                  <section>
-                    <h3 className="text-xs font-semibold text-white">
-                      What you can do
-                    </h3>
+              {aiSummary.recommendation && (
+                <section>
+                  <h3 className="text-xs font-semibold text-white">
+                    Next step
+                  </h3>
 
-                    <p className="mt-2 text-[12px] leading-6 text-slate-400">
-                      {aiSummary.suggestedResolution}
-                    </p>
-                  </section>
-                )}
+                  <p className="mt-2 text-[12px] leading-6 text-slate-400">
+                    {aiSummary.recommendation}
+                  </p>
+                </section>
+              )}
 
-                {aiSummary.recommendation && (
-                  <section>
-                    <h3 className="text-xs font-semibold text-white">
-                      Next step
-                    </h3>
-
-                    <p className="mt-2 text-[12px] leading-6 text-slate-400">
-                      {aiSummary.recommendation}
-                    </p>
-                  </section>
-                )}
-
-                <div className="flex flex-wrap gap-2 border-t border-slate-800 pt-4">
-                  <button
-                    type="button"
-                    onClick={handleGenerateSummary}
-                    disabled={generatingSummary}
-                    className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-[10px] font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white disabled:opacity-50"
-                  >
-                    {generatingSummary ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    )}
-
-                    {generatingSummary ? "Analyzing..." : "Regenerate"}
-                  </button>
-
-                  {!isClosed && (
-                    <button
-                      type="button"
-                      onClick={handleEscalate}
-                      className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-[10px] font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white"
-                    >
-                      <UserRoundCheck className="h-3.5 w-3.5" />
-                      Talk to a person
-                    </button>
-                  )}
-                </div>
-
-                <p className="text-[9px] leading-4 text-slate-600">
-                  AI-generated information may not always be accurate. If you're
-                  unsure, a support agent can help.
-                </p>
-              </div>
-            )}
-
-            {!aiSummary && !generatingSummary && (
-              <div className="py-6">
-                <p className="text-xs font-medium text-slate-300">
-                  Need help with this ticket?
-                </p>
-
-                <p className="mt-2 text-[10px] leading-5 text-slate-500">
-                  Ask SupportAI to explain your issue and suggest what you can
-                  do next.
-                </p>
-
+              <div className="flex flex-wrap gap-2 border-t border-slate-800 pt-4">
                 <button
                   type="button"
                   onClick={handleGenerateSummary}
-                  className="mt-4 inline-flex items-center gap-2 rounded-lg bg-blue-500/10 px-3 py-2 text-[10px] font-semibold text-blue-400 hover:bg-blue-500/20"
+                  disabled={generatingSummary}
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-[10px] font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white disabled:opacity-50"
                 >
-                  <Bot className="h-3.5 w-3.5" />
-                  Get AI help
+                  {generatingSummary ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+
+                  {generatingSummary ? "Analyzing..." : "Regenerate"}
                 </button>
+
+                {!isClosed && (
+                  <button
+                    type="button"
+                    onClick={handleEscalate}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-[10px] font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white"
+                  >
+                    <UserRoundCheck className="h-3.5 w-3.5" />
+                    Talk to a person
+                  </button>
+                )}
               </div>
-            )}
 
-            {generatingSummary && !aiSummary && (
-              <div className="py-6">
-                <div className="flex items-center gap-3">
-                  <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+              <p className="text-[9px] leading-4 text-slate-600">
+                AI-generated information may not always be accurate. If you're
+                unsure, a support agent can help.
+              </p>
+            </div>
+          )}
 
-                  <div>
-                    <p className="text-xs font-medium text-slate-300">
-                      Understanding your issue...
-                    </p>
+          {!aiSummary && !generatingSummary && (
+            <div className="py-6">
+              <p className="text-xs font-medium text-slate-300">
+                Need help with this ticket?
+              </p>
 
-                    <p className="mt-1 text-[10px] text-slate-500">
-                      We're preparing a simple explanation for you.
-                    </p>
-                  </div>
+              <p className="mt-2 text-[10px] leading-5 text-slate-500">
+                Ask SupportAI to explain your issue and suggest what you can do
+                next.
+              </p>
+
+              <button
+                type="button"
+                onClick={handleGenerateSummary}
+                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-blue-500/10 px-3 py-2 text-[10px] font-semibold text-blue-400 hover:bg-blue-500/20"
+              >
+                <Bot className="h-3.5 w-3.5" />
+                Get AI help
+              </button>
+            </div>
+          )}
+
+          {generatingSummary && !aiSummary && (
+            <div className="py-6">
+              <div className="flex items-center gap-3">
+                <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+
+                <div>
+                  <p className="text-xs font-medium text-slate-300">
+                    Understanding your issue...
+                  </p>
+
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    We're preparing a simple explanation for you.
+                  </p>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </section>
 
         {/* ===================================================
@@ -1718,26 +2364,18 @@ const TicketDetails = () => {
                   <h3 className="text-sm font-semibold">Conversation</h3>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] text-slate-600">
-                    {conversation.length}{" "}
-                    {conversation.length === 1 ? "message" : "messages"}
-                  </span>
-                </div>
+                <span className="text-[10px] text-slate-600">
+                  {conversation.length}{" "}
+                  {conversation.length === 1 ? "message" : "messages"}
+                </span>
               </div>
-
-              {/* =================================================
-                  TYPING INDICATOR
-              ================================================== */}
 
               {typingUser && (
                 <div className="border-b border-slate-800 bg-slate-950/50 px-6 py-3">
                   <div className="flex items-center gap-2 text-[10px] text-slate-500">
                     <span className="flex gap-1">
                       <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-400 [animation-delay:-0.3s]" />
-
                       <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-400 [animation-delay:-0.15s]" />
-
                       <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-400" />
                     </span>
 
@@ -1808,8 +2446,6 @@ const TicketDetails = () => {
                                 {message.message}
                               </p>
 
-                              {/* MESSAGE ATTACHMENTS */}
-
                               {message.attachments?.length > 0 && (
                                 <div className="mt-4 space-y-2 border-t border-slate-800/70 pt-3">
                                   {message.attachments.map(
@@ -1857,13 +2493,11 @@ const TicketDetails = () => {
                   </div>
                 )}
 
-                {/* AUTO-SCROLL TARGET */}
-
                 <div ref={conversationEndRef} />
               </div>
 
               {/* =================================================
-                  REPLY BOX
+                  REPLY
               ================================================== */}
 
               {!isClosed && (
@@ -1959,8 +2593,7 @@ const TicketDetails = () => {
                       </p>
 
                       <p className="mt-1 text-[11px] leading-5 text-slate-600">
-                        If you still need help, reopen the ticket to continue
-                        the conversation.
+                        If you still need help, you can create a new ticket.
                       </p>
 
                       <button
@@ -1968,7 +2601,7 @@ const TicketDetails = () => {
                         onClick={handleReopenTicket}
                         className="mt-4 rounded-xl border border-blue-500/20 bg-blue-500/10 px-4 py-2 text-xs font-semibold text-blue-400 transition hover:bg-blue-500/20"
                       >
-                        Reopen ticket
+                        Continue conversation
                       </button>
                     </div>
                   </div>
@@ -2085,7 +2718,6 @@ const TicketDetails = () => {
                                 type="button"
                                 onClick={() => removeSelectedFile(index)}
                                 className="text-slate-600 transition hover:text-red-400"
-                                title="Remove file"
                               >
                                 <X className="h-3.5 w-3.5" />
                               </button>
@@ -2211,7 +2843,7 @@ const TicketDetails = () => {
           ================================================== */}
 
           <aside className="space-y-6">
-            {/* Assignment */}
+            {/* SUPPORT */}
 
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
               <div className="flex items-center gap-2">
@@ -2255,7 +2887,7 @@ const TicketDetails = () => {
               )}
             </section>
 
-            {/* AI Support */}
+            {/* AI SUPPORT */}
 
             <section className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5">
               <div className="flex items-start gap-3">
@@ -2287,7 +2919,7 @@ const TicketDetails = () => {
               )}
             </section>
 
-            {/* Ticket information */}
+            {/* TICKET INFORMATION */}
 
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
               <div className="flex items-center gap-2">
@@ -2313,7 +2945,7 @@ const TicketDetails = () => {
               </div>
             </section>
 
-            {/* Real-time status */}
+            {/* LIVE CONNECTION */}
 
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
               <div className="flex items-center gap-2">
@@ -2361,7 +2993,47 @@ const TicketDetails = () => {
               </div>
             </section>
 
-            {/* Need more help */}
+            {/* STATUS HISTORY QUICK INFO */}
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="flex items-center gap-2">
+                <History className="h-4 w-4 text-blue-400" />
+
+                <h3 className="text-sm font-semibold">Status tracking</h3>
+              </div>
+
+              <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+                {statusHistoryLoading ? (
+                  <div className="flex items-center gap-2 text-[10px] text-slate-600">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Loading status updates...
+                  </div>
+                ) : statusHistory.length > 0 ? (
+                  <>
+                    <p className="text-xs font-medium text-slate-300">
+                      {statusHistory.length} status{" "}
+                      {statusHistory.length === 1 ? "update" : "updates"}
+                    </p>
+
+                    <p className="mt-1 text-[10px] leading-5 text-slate-600">
+                      Your ticket status changes are tracked automatically.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs font-medium text-slate-500">
+                      No history yet
+                    </p>
+
+                    <p className="mt-1 text-[10px] leading-5 text-slate-700">
+                      Status changes will appear here.
+                    </p>
+                  </>
+                )}
+              </div>
+            </section>
+
+            {/* NEED MORE HELP */}
 
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800 text-slate-400">
@@ -2393,9 +3065,11 @@ const TicketDetails = () => {
   );
 };
 
-// ===========================================================
-// TICKET META
-// ===========================================================
+/*
+ * ===========================================================
+ * TICKET META
+ * ===========================================================
+ */
 
 const TicketMeta = ({ icon: Icon, label, value }) => {
   return (
@@ -2415,9 +3089,11 @@ const TicketMeta = ({ icon: Icon, label, value }) => {
   );
 };
 
-// ===========================================================
-// INFO ROW
-// ===========================================================
+/*
+ * ===========================================================
+ * INFO ROW
+ * ===========================================================
+ */
 
 const InfoRow = ({ label, value }) => {
   return (

@@ -185,6 +185,44 @@ const ticketSchema = new mongoose.Schema(
     },
 
     // ==========================================
+    // STATUS HISTORY
+    // ==========================================
+
+    statusHistory: [
+      {
+        status: {
+          type: String,
+          enum: ["open", "in-progress", "waiting", "resolved", "closed"],
+          required: true,
+        },
+
+        changedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          default: null,
+        },
+
+        changedByRole: {
+          type: String,
+          enum: ["customer", "agent", "admin", "ai", "system"],
+          default: "system",
+        },
+
+        note: {
+          type: String,
+          trim: true,
+          maxlength: 1000,
+          default: "",
+        },
+
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+
+    // ==========================================
     // CONVERSATION
     // ==========================================
 
