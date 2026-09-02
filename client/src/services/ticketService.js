@@ -99,3 +99,59 @@ export const getTicketStatusHistory = async (ticketId) => {
 
   return response.data;
 };
+
+/*
+ * =========================================================
+ * GET TICKET RATING
+ * =========================================================
+ *
+ * Retrieves the customer's existing rating and feedback.
+ *
+ * GET /api/tickets/:ticketId/rating
+ * =========================================================
+ */
+
+export const getTicketRating = async (ticketId) => {
+  const response = await api.get(`/tickets/${ticketId}/rating`);
+
+  return response.data;
+};
+
+/*
+ * =========================================================
+ * SUBMIT TICKET RATING & FEEDBACK
+ * =========================================================
+ *
+ * rating:
+ *    1 - Very Poor
+ *    2 - Poor
+ *    3 - Average
+ *    4 - Good
+ *    5 - Excellent
+ *
+ * feedback is optional.
+ *
+ * POST /api/tickets/:ticketId/rating
+ * =========================================================
+ */
+
+export const submitTicketRating = async (ticketId, rating, feedback = "") => {
+  const response = await api.post(`/tickets/${ticketId}/rating`, {
+    rating,
+    feedback,
+  });
+
+  return response.data;
+};
+
+/*
+ * =========================================================
+ * RESOLVE CUSTOMER TICKET
+ * =========================================================
+ */
+
+export const resolveCustomerTicket = async (ticketId) => {
+  const response = await api.patch(`/tickets/${ticketId}/resolve`);
+
+  return response.data;
+};

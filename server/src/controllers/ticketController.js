@@ -611,14 +611,13 @@ export const addTicketReply = async (req, res) => {
 
       console.log(`TICKET STATUS CHANGED: ${previousStatus} → open`);
     } else if (ticket.status === "waiting") {
-
-    /*
-     * =====================================================
-     * WAITING → OPEN
-     *
-     * Customer has responded with the requested information.
-     * =====================================================
-     */
+      /*
+       * =====================================================
+       * WAITING → OPEN
+       *
+       * Customer has responded with the requested information.
+       * =====================================================
+       */
       ticket.status = "open";
 
       ticket.statusHistory.push({
@@ -928,6 +927,215 @@ Status: ${ticket.status || "open"}
 
 /*
  * =========================================================
+ * CUSTOMER MARK TICKET AS RESOLVED
+ * =========================================================
+ *
+ * Customer
+ *    ↓
+ * Mark ticket as resolved
+ *    ↓
+ * Save resolvedAt
+ *    ↓
+ * Add status history
+ *    ↓
+ * Broadcast status change
+ *
+ * This allows the customer to rate the ticket afterward.
+ *
+ * =========================================================
+ */
+
+export const resolveCustomerTicket = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    /*
+     * =====================================================
+     * VALIDATE TICKET ID
+     * =====================================================
+     */
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * FIND CUSTOMER TICKET
+     * =====================================================
+     */
+
+    const ticket = await Ticket.findOne({
+      _id: id,
+      customer: req.user.id,
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * CHECK CURRENT STATUS
+     * =====================================================
+     */
+
+    if (ticket.status === "closed") {
+      return res.status(400).json({
+        success: false,
+        message: "This ticket is already closed.",
+      });
+    }
+
+    if (ticket.status === "resolved") {
+      return res.status(400).json({
+        success: false,
+        message: "This ticket is already resolved.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * SAVE PREVIOUS STATUS
+     * =====================================================
+     */
+
+    const previousStatus = ticket.status;
+
+    const now = new Date();
+
+    /*
+     * =====================================================
+     * CHANGE STATUS
+     * =====================================================
+     */
+
+    ticket.status = "resolved";
+
+    ticket.resolvedAt = now;
+
+    /*
+     * =====================================================
+     * STATUS HISTORY
+     * =====================================================
+     */
+
+    addStatusHistory({
+      ticket,
+
+      status: "resolved",
+
+      changedBy: req.user.id,
+
+      changedByRole: "customer",
+
+      note: "Ticket marked as resolved by customer.",
+
+      createdAt: now,
+    });
+
+    /*
+     * =====================================================
+     * SAVE TICKET
+     * =====================================================
+     */
+
+    await ticket.save();
+
+    /*
+     * =====================================================
+     * SOCKET.IO
+     * =====================================================
+     */
+
+    const io = getSocketIO(req);
+
+    if (io) {
+      /*
+       * Status changed event
+       */
+
+      io.to(getTicketRoom(ticket._id)).emit("ticket:status-changed", {
+        ticketId: String(ticket._id),
+
+        previousStatus,
+
+        status: "resolved",
+
+        resolvedAt: ticket.resolvedAt,
+
+        reopenedAt: ticket.reopenedAt || null,
+
+        closedAt: ticket.closedAt || null,
+
+        statusHistory: ticket.statusHistory || [],
+      });
+
+      /*
+       * General ticket update
+       */
+
+      io.to(getTicketRoom(ticket._id)).emit("ticket:updated", {
+        ticketId: String(ticket._id),
+
+        status: "resolved",
+
+        replies: ticket.replies,
+
+        lastReplyAt: ticket.lastReplyAt,
+
+        reopenedAt: ticket.reopenedAt || null,
+
+        resolvedAt: ticket.resolvedAt,
+
+        closedAt: ticket.closedAt || null,
+      });
+    }
+
+    /*
+     * =====================================================
+     * GET UPDATED / POPULATED TICKET
+     * =====================================================
+     */
+
+    const updatedTicket = await Ticket.findById(ticket._id)
+      .populate("customer", "name username email avatar role")
+      .populate("assignedAgent", "name username email avatar role")
+      .populate("conversation.sender", "name username email avatar role")
+      .lean();
+
+    /*
+     * =====================================================
+     * RESPONSE
+     * =====================================================
+     */
+
+    return res.status(200).json({
+      success: true,
+
+      message: "Ticket marked as resolved successfully.",
+
+      ticket: updatedTicket,
+    });
+  } catch (error) {
+    console.error("RESOLVE CUSTOMER TICKET ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+
+      message: "Failed to resolve ticket.",
+    });
+  }
+};
+
+/*
+ * =========================================================
  * UPLOAD TICKET ATTACHMENTS
  * =========================================================
  */
@@ -1113,6 +1321,287 @@ export const getTicketStatusHistory = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to load ticket status history.",
+    });
+  }
+};
+
+/*
+ * =========================================================
+ * SUBMIT TICKET RATING & FEEDBACK
+ * =========================================================
+ *
+ * CUSTOMER
+ *    ↓
+ * Validate ticket ID
+ *    ↓
+ * Find customer's ticket
+ *    ↓
+ * Check ticket is resolved/closed
+ *    ↓
+ * Validate rating
+ *    ↓
+ * Prevent duplicate rating
+ *    ↓
+ * Save rating + feedback
+ *    ↓
+ * Broadcast rating event
+ *    ↓
+ * Return result
+ *
+ * =========================================================
+ */
+
+export const submitTicketRating = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rating, feedback } = req.body;
+
+    /*
+     * =====================================================
+     * VALIDATE TICKET ID
+     * =====================================================
+     */
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * VALIDATE RATING
+     * =====================================================
+     */
+
+    const numericRating = Number(rating);
+
+    if (
+      !Number.isInteger(numericRating) ||
+      numericRating < 1 ||
+      numericRating > 5
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Rating must be between 1 and 5.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * VALIDATE FEEDBACK
+     * =====================================================
+     */
+
+    const cleanFeedback = typeof feedback === "string" ? feedback.trim() : "";
+
+    if (cleanFeedback.length > 2000) {
+      return res.status(400).json({
+        success: false,
+        message: "Feedback cannot exceed 2000 characters.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * FIND CUSTOMER TICKET
+     * =====================================================
+     *
+     * The customer can only rate their own ticket.
+     *
+     * =====================================================
+     */
+
+    const ticket = await Ticket.findOne({
+      _id: id,
+      customer: req.user.id,
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * CHECK TICKET STATUS
+     * =====================================================
+     *
+     * Customers can rate only completed tickets.
+     *
+     * =====================================================
+     */
+
+    if (!["resolved", "closed"].includes(ticket.status)) {
+      return res.status(400).json({
+        success: false,
+        message: "You can only rate a resolved or closed ticket.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * PREVENT DUPLICATE RATING
+     * =====================================================
+     */
+
+    if (ticket.customerRating !== null || ticket.ratedAt) {
+      return res.status(400).json({
+        success: false,
+        message: "This ticket has already been rated.",
+        rating: ticket.customerRating,
+        feedback: ticket.customerFeedback || "",
+        ratedAt: ticket.ratedAt || null,
+      });
+    }
+
+    /*
+     * =====================================================
+     * SAVE RATING
+     * =====================================================
+     */
+
+    const ratedAt = new Date();
+
+    ticket.customerRating = numericRating;
+    ticket.customerFeedback = cleanFeedback;
+    ticket.ratedAt = ratedAt;
+
+    await ticket.save();
+
+    /*
+     * =====================================================
+     * SOCKET.IO
+     * =====================================================
+     *
+     * Notify clients currently viewing the ticket.
+     * =====================================================
+     */
+
+    const io = getSocketIO(req);
+
+    if (io) {
+      io.to(getTicketRoom(ticket._id)).emit("ticket:rating-submitted", {
+        ticketId: String(ticket._id),
+        ticketNumber: ticket.ticketNumber,
+        rating: ticket.customerRating,
+        feedback: ticket.customerFeedback || "",
+        ratedAt: ticket.ratedAt,
+      });
+    }
+
+    /*
+     * =====================================================
+     * RESPONSE
+     * =====================================================
+     */
+
+    return res.status(201).json({
+      success: true,
+      message: "Thank you for your feedback.",
+      rating: ticket.customerRating,
+      feedback: ticket.customerFeedback || "",
+      ratedAt: ticket.ratedAt,
+    });
+  } catch (error) {
+    console.error("SUBMIT TICKET RATING ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to submit ticket rating.",
+    });
+  }
+};
+
+/*
+ * =========================================================
+ * GET TICKET RATING
+ * =========================================================
+ *
+ * Returns the rating belonging to the authenticated
+ * customer for the requested ticket.
+ *
+ * =========================================================
+ */
+
+export const getTicketRating = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    /*
+     * =====================================================
+     * VALIDATE TICKET ID
+     * =====================================================
+     */
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * FIND CUSTOMER TICKET
+     * =====================================================
+     */
+
+    const ticket = await Ticket.findOne({
+      _id: id,
+      customer: req.user.id,
+    })
+      .select("_id ticketNumber status customerRating customerFeedback ratedAt")
+      .lean();
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * DETERMINE RATING STATE
+     * =====================================================
+     */
+
+    const hasRating =
+      ticket.customerRating !== null && ticket.customerRating !== undefined;
+
+    /*
+     * =====================================================
+     * RESPONSE
+     * =====================================================
+     */
+
+    return res.status(200).json({
+      success: true,
+
+      ticketId: ticket._id,
+
+      ticketNumber: ticket.ticketNumber,
+
+      status: ticket.status,
+
+      hasRating,
+
+      rating: hasRating ? ticket.customerRating : null,
+
+      feedback: ticket.customerFeedback || "",
+
+      ratedAt: ticket.ratedAt || null,
+    });
+  } catch (error) {
+    console.error("GET TICKET RATING ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load ticket rating.",
     });
   }
 };

@@ -7,6 +7,9 @@ import {
   addTicketReply,
   uploadTicketAttachments,
   getTicketStatusHistory,
+  submitTicketRating,
+  getTicketRating,
+  resolveCustomerTicket,
 } from "../controllers/ticketController.js";
 
 import { authenticateToken } from "../middleware/authMiddleware.js";
@@ -39,15 +42,29 @@ router.post("/", createTicket);
  * =========================================================
  * IMPORTANT
  *
- * These specific routes must come BEFORE:
+ * Specific routes must come BEFORE:
  *
  * /:id
  *
  * =========================================================
  */
 
+/*
+ * =========================================================
+ * TICKET REPLIES
+ * =========================================================
+ */
+
+router.patch("/:id/resolve", resolveCustomerTicket);
+
 // POST /api/tickets/:id/replies
 router.post("/:id/replies", addTicketReply);
+
+/*
+ * =========================================================
+ * TICKET ATTACHMENTS
+ * =========================================================
+ */
 
 // POST /api/tickets/:id/attachments
 router.post(
@@ -56,7 +73,34 @@ router.post(
   uploadTicketAttachments,
 );
 
-router.get("/:id/status-history", authenticateToken, getTicketStatusHistory);
+/*
+ * =========================================================
+ * TICKET STATUS HISTORY
+ * =========================================================
+ */
+
+// GET /api/tickets/:id/status-history
+router.get("/:id/status-history", getTicketStatusHistory);
+
+/*
+ * =========================================================
+ * TICKET RATING & FEEDBACK
+ * =========================================================
+ */
+
+// POST /api/tickets/:id/rating
+router.post("/:id/rating", submitTicketRating);
+
+// GET /api/tickets/:id/rating
+router.get("/:id/rating", getTicketRating);
+
+/*
+ * =========================================================
+ * GET SINGLE CUSTOMER TICKET
+ *
+ * Keep this AFTER all specific /:id/... routes.
+ * =========================================================
+ */
 
 // GET /api/tickets/:id
 router.get("/:id", getCustomerTicket);

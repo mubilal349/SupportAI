@@ -28,10 +28,12 @@ import { Link, useParams } from "react-router-dom";
 
 import {
   getTicketById,
-  getTicketStatusHistory,
-  generateTicketSummary,
-  uploadTicketAttachments,
   replyToTicket,
+  uploadTicketAttachments,
+  getTicketStatusHistory,
+  submitTicketRating,
+  generateTicketSummary,
+  resolveCustomerTicket,
 } from "../../../services/ticketService";
 
 import socket from "../../../socket/socket";
@@ -199,13 +201,20 @@ const normalizeTicket = (data, fallbackId = "") => {
         ? [
             {
               id: `initial-${data._id || data.id || fallbackId}`,
+
               message: data.description,
+
               sender: data.customer || null,
+
               senderName:
                 data.customer?.name || data.customer?.username || "You",
+
               senderRole: "customer",
+
               createdAt: data.createdAt || data.created || null,
+
               attachments: [],
+
               isRead: true,
             },
           ]
@@ -224,7 +233,9 @@ const normalizeTicket = (data, fallbackId = "") => {
 
     category: data.category || "General",
 
-    status: String(data.status || "open").toLowerCase(),
+    status: String(data.status || "open")
+      .trim()
+      .toLowerCase(),
 
     priority: String(data.priority || "medium").toLowerCase(),
 
@@ -262,9 +273,15 @@ const normalizeTicket = (data, fallbackId = "") => {
         ? data.replies
         : normalizedConversation.length,
 
-    customerRating: data.customerRating || null,
+    /*
+     * CUSTOMER RATING
+     */
+    customerRating: data.customerRating ?? data.rating ?? null,
 
-    customerFeedback: data.customerFeedback || "",
+    /*
+     * CUSTOMER FEEDBACK
+     */
+    customerFeedback: data.customerFeedback ?? data.feedback ?? "",
 
     statusHistory: Array.isArray(data.statusHistory) ? data.statusHistory : [],
   };
@@ -286,16 +303,6 @@ const TicketDetails = () => {
    */
 
   const [ticket, setTicket] = useState(null);
-
-  /*
-   * IMPORTANT:
-   *
-   * Ticket loading and status-history loading are now
-   * completely independent.
-   *
-   * The ticket can render even if status-history is still
-   * loading or its endpoint is temporarily unavailable.
-   */
 
   const [ticketLoading, setTicketLoading] = useState(true);
 
@@ -321,7 +328,7 @@ const TicketDetails = () => {
 
   /*
    * =======================================================
-   * RATING
+   * RATING & FEEDBACK
    * =======================================================
    */
 
@@ -330,6 +337,10 @@ const TicketDetails = () => {
   const [feedback, setFeedback] = useState("");
 
   const [submittingRating, setSubmittingRating] = useState(false);
+
+  const [ratingSuccess, setRatingSuccess] = useState("");
+
+  const [ratingError, setRatingError] = useState("");
 
   /*
    * =======================================================
@@ -378,12 +389,47 @@ const TicketDetails = () => {
   const currentTicketIdRef = useRef(id);
 
   /*
+   * =========================================================
+   * HANDLER FUNCTIONS
+   * =========================================================
+   */
+  const handleResolveTicket = async () => {
+    if (!ticket?.id) {
+      return;
+    }
+
+    try {
+      setError("");
+
+      const response = await resolveCustomerTicket(ticket.id);
+
+      const updatedTicket =
+        response?.ticket || response?.data?.ticket || response?.data || null;
+
+      if (updatedTicket) {
+        setTicket(normalizeTicket(updatedTicket, ticket.id));
+      } else {
+        setTicket((prev) => ({
+          ...prev,
+          status: "resolved",
+          resolvedAt: new Date().toISOString(),
+        }));
+      }
+
+      await loadStatusHistory(ticket.id);
+    } catch (err) {
+      console.error("RESOLVE TICKET ERROR:", err);
+
+      setError(
+        err?.response?.data?.message ||
+          "Failed to mark the ticket as resolved.",
+      );
+    }
+  };
+
+  /*
    * =======================================================
    * LOAD TICKET
-   *
-   * ONLY loads the ticket.
-   *
-   * It does NOT wait for status history.
    * =======================================================
    */
 
@@ -417,6 +463,20 @@ const TicketDetails = () => {
 
       setTicket(normalized);
 
+      /*
+       * Restore existing rating
+       */
+      if (normalized.customerRating) {
+        setRating(Number(normalized.customerRating));
+      } else {
+        setRating(0);
+      }
+
+      /*
+       * Restore existing feedback
+       */
+      setFeedback(normalized.customerFeedback || "");
+
       return normalized;
     } catch (err) {
       console.error("LOAD TICKET ERROR:", err);
@@ -438,10 +498,6 @@ const TicketDetails = () => {
   /*
    * =======================================================
    * LOAD STATUS HISTORY
-   *
-   * COMPLETELY INDEPENDENT FROM TICKET LOADING.
-   *
-   * A failure here does NOT hide the ticket page.
    * =======================================================
    */
 
@@ -462,11 +518,6 @@ const TicketDetails = () => {
         response?.statusHistory || response?.data?.statusHistory || [];
 
       setStatusHistory(Array.isArray(history) ? history : []);
-
-      /*
-       * Also update the current ticket status if the
-       * history endpoint gives us newer information.
-       */
 
       if (response?.currentStatus || response?.status) {
         setTicket((previous) => {
@@ -492,24 +543,12 @@ const TicketDetails = () => {
     } catch (err) {
       console.error("LOAD STATUS HISTORY ERROR:", err);
 
-      /*
-       * IMPORTANT:
-       *
-       * Do not set the main page error here.
-       *
-       * The ticket itself may have loaded successfully.
-       */
-
       const message =
         err?.response?.data?.message ||
         err?.response?.data?.error ||
         "Status history could not be loaded.";
 
       setStatusHistoryError(message);
-
-      /*
-       * Keep existing status history if there is any.
-       */
 
       setStatusHistory((previous) => (Array.isArray(previous) ? previous : []));
     } finally {
@@ -520,11 +559,6 @@ const TicketDetails = () => {
   /*
    * =======================================================
    * INITIAL DATA LOADING
-   *
-   * Both requests start at the SAME TIME.
-   *
-   * Promise.allSettled means one request does not block
-   * the other.
    * =======================================================
    */
 
@@ -600,11 +634,6 @@ const TicketDetails = () => {
 
     const handleSocketError = (data) => {
       console.error("Ticket Socket.IO error:", data);
-
-      /*
-       * Socket errors should not destroy an already
-       * loaded ticket.
-       */
 
       if (data?.message && !ticket) {
         setError(data.message);
@@ -736,16 +765,15 @@ const TicketDetails = () => {
           closedAt:
             data.closedAt !== undefined ? data.closedAt : previous.closedAt,
 
+          customerRating: data.customerRating ?? previous.customerRating,
+
+          customerFeedback: data.customerFeedback ?? previous.customerFeedback,
+
           statusHistory: Array.isArray(data.statusHistory)
             ? data.statusHistory
             : previous.statusHistory,
         };
       });
-
-      /*
-       * If backend includes status history in the
-       * ticket update, synchronize it.
-       */
 
       if (Array.isArray(data.statusHistory)) {
         setStatusHistory(data.statusHistory);
@@ -804,12 +832,6 @@ const TicketDetails = () => {
       if (Array.isArray(data.statusHistory)) {
         setStatusHistory(data.statusHistory);
       } else {
-        /*
-         * Reload history in the background.
-         *
-         * This does not block the page.
-         */
-
         loadStatusHistory();
       }
     };
@@ -895,7 +917,7 @@ const TicketDetails = () => {
 
     /*
      * =====================================================
-     * REGISTER SOCKET LISTENERS
+     * REGISTER LISTENERS
      * =====================================================
      */
 
@@ -981,7 +1003,7 @@ const TicketDetails = () => {
       setTypingUser(null);
       setOnlineUsers([]);
     };
-  }, [id, loadStatusHistory]);
+  }, [id, loadStatusHistory, ticket]);
 
   /*
    * =========================================================
@@ -1009,10 +1031,6 @@ const TicketDetails = () => {
   const handleRefresh = async () => {
     try {
       setRefreshing(true);
-
-      /*
-       * Refresh both independently.
-       */
 
       await Promise.allSettled([loadTicket(), loadStatusHistory()]);
     } finally {
@@ -1387,10 +1405,6 @@ const TicketDetails = () => {
 
       console.log("REPLY RESPONSE:", response);
 
-      /*
-       * If socket is unavailable, use REST response.
-       */
-
       if (!socket.connected) {
         const updatedTicket = response?.ticket;
 
@@ -1406,12 +1420,6 @@ const TicketDetails = () => {
           }));
         }
       }
-
-      /*
-       * Refresh status history in background because
-       * sending a reply can reopen a resolved/waiting
-       * ticket.
-       */
 
       loadStatusHistory();
 
@@ -1448,12 +1456,6 @@ const TicketDetails = () => {
   /*
    * =========================================================
    * REOPEN
-   *
-   * There is currently no dedicated backend reopen
-   * endpoint.
-   *
-   * Resolved tickets are reopened when the customer
-   * sends a reply.
    * =========================================================
    */
 
@@ -1484,8 +1486,6 @@ const TicketDetails = () => {
   /*
    * =========================================================
    * ESCALATE
-   *
-   * Currently UI-only.
    * =========================================================
    */
 
@@ -1499,35 +1499,77 @@ const TicketDetails = () => {
 
   /*
    * =========================================================
-   * RATING
-   *
-   * Currently UI-only.
+   * SUBMIT RATING & FEEDBACK
    * =========================================================
    */
 
-  const handleSubmitRating = async (e) => {
-    e.preventDefault();
+  const handleSubmitRating = async (event) => {
+    event?.preventDefault();
 
-    if (!rating) {
+    if (!ticket?.id) {
+      setRatingError("Ticket information is missing.");
+      return;
+    }
+
+    if (!rating || rating < 1 || rating > 5) {
+      setRatingError("Please select a rating from 1 to 5.");
       return;
     }
 
     try {
       setSubmittingRating(true);
+      setRatingError("");
+      setRatingSuccess("");
 
-      setError("");
+      const trimmedFeedback = feedback.trim();
 
-      setTicket((previous) => ({
-        ...previous,
+      const response = await submitTicketRating(
+        ticket.id,
+        Number(rating),
+        trimmedFeedback,
+      );
 
-        customerRating: rating,
+      const updatedTicket =
+        response?.ticket ||
+        response?.data?.ticket ||
+        response?.data ||
+        response ||
+        {};
 
-        customerFeedback: feedback.trim(),
+      const savedRating =
+        updatedTicket?.customerRating ??
+        updatedTicket?.rating ??
+        response?.customerRating ??
+        response?.rating ??
+        Number(rating);
+
+      const savedFeedback =
+        updatedTicket?.customerFeedback ??
+        updatedTicket?.feedback ??
+        response?.customerFeedback ??
+        response?.feedback ??
+        trimmedFeedback;
+
+      setTicket((prev) => ({
+        ...prev,
+        customerRating: Number(savedRating),
+        customerFeedback: savedFeedback,
       }));
-    } catch (err) {
-      console.error("RATING ERROR:", err);
 
-      setError(err?.response?.data?.message || "Failed to submit rating.");
+      setRating(Number(savedRating));
+      setFeedback(savedFeedback);
+
+      setRatingSuccess(
+        "Thank you! Your rating and feedback have been submitted successfully.",
+      );
+    } catch (err) {
+      console.error("Rating submission error:", err);
+
+      setRatingError(
+        err?.response?.data?.message ||
+          err?.response?.data?.error ||
+          "Failed to submit your rating. Please try again.",
+      );
     } finally {
       setSubmittingRating(false);
     }
@@ -1641,9 +1683,33 @@ const TicketDetails = () => {
 
   const StatusIcon = currentStatus.icon;
 
-  const isClosed = ticket?.status === "closed";
+  const ticketStatus = String(ticket?.status || "")
+    .trim()
+    .toLowerCase();
 
-  const isResolved = ticket?.status === "resolved";
+  const isClosed = ticketStatus === "closed";
+  const isResolved = ticketStatus === "resolved";
+
+  // Customer can rate after the ticket is resolved OR closed
+  const canRateTicket = isResolved || isClosed;
+
+  console.log("========== RATING DEBUG ==========");
+  console.log("Full ticket:", ticket);
+  console.log("Original status:", ticket?.status);
+  console.log("Normalized status:", ticketStatus);
+  console.log("Is resolved:", isResolved);
+  console.log("Is closed:", isClosed);
+  console.log("Can rate:", canRateTicket);
+  console.log("Customer rating:", ticket?.customerRating);
+  console.log("Customer feedback:", ticket?.customerFeedback);
+  console.log("==================================");
+
+  // Useful for showing the rating section even if the backend
+  // returns status with different capitalization/spacing.
+  const hasSubmittedRating =
+    ticket?.customerRating !== null &&
+    ticket?.customerRating !== undefined &&
+    Number(ticket?.customerRating) > 0;
 
   const isAssigned = ticket?.agent && ticket.agent !== "Unassigned";
 
@@ -1654,10 +1720,6 @@ const TicketDetails = () => {
   /*
    * =========================================================
    * MAIN LOADING
-   *
-   * ONLY the ticket request controls this.
-   *
-   * Status history does NOT block the page.
    * =========================================================
    */
 
@@ -1743,9 +1805,7 @@ const TicketDetails = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      {/* =====================================================
-          HEADER
-      ====================================================== */}
+      {/* HEADER */}
 
       <header className="border-b border-slate-800 bg-slate-950">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
@@ -1808,10 +1868,6 @@ const TicketDetails = () => {
         </div>
       </header>
 
-      {/* =====================================================
-          MAIN
-      ====================================================== */}
-
       <main className="mx-auto max-w-7xl px-6 py-8">
         {/* ERROR */}
 
@@ -1833,9 +1889,7 @@ const TicketDetails = () => {
           </div>
         )}
 
-        {/* =================================================
-            TICKET HEADER
-        ================================================== */}
+        {/* TICKET HEADER */}
 
         <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
@@ -1903,8 +1957,6 @@ const TicketDetails = () => {
             </div>
           </div>
 
-          {/* CURRENT STATUS EXPLANATION */}
-
           <div className="mt-6 border-t border-slate-800 pt-5">
             <div className="flex items-start gap-3">
               <div
@@ -1927,9 +1979,7 @@ const TicketDetails = () => {
           </div>
         </section>
 
-        {/* =================================================
-            STATUS HISTORY
-        ================================================== */}
+        {/* STATUS HISTORY */}
 
         <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60">
           <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
@@ -2120,9 +2170,7 @@ const TicketDetails = () => {
           </div>
         </section>
 
-        {/* =================================================
-            AI SUPPORT SUMMARY
-        ================================================== */}
+        {/* AI SUPPORT SUMMARY */}
 
         <section className="mt-6 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5">
           <div className="flex items-start gap-3">
@@ -2322,20 +2370,13 @@ const TicketDetails = () => {
           )}
         </section>
 
-        {/* ===================================================
-            CONTENT GRID
-        ==================================================== */}
+        {/* CONTENT GRID */}
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
-          {/* =================================================
-              LEFT
-          ================================================== */}
+          {/* LEFT */}
 
           <div className="space-y-6">
-            {/* =================================================
-                DESCRIPTION
-            ================================================== */}
-
+            {/* DESCRIPTION */}
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60">
               <div className="border-b border-slate-800 px-6 py-4">
                 <div className="flex items-center gap-2">
@@ -2351,11 +2392,7 @@ const TicketDetails = () => {
                 </p>
               </div>
             </section>
-
-            {/* =================================================
-                CONVERSATION
-            ================================================== */}
-
+            {/* CONVERSATION */}
             <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
               <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
                 <div className="flex items-center gap-2">
@@ -2496,9 +2533,7 @@ const TicketDetails = () => {
                 <div ref={conversationEndRef} />
               </div>
 
-              {/* =================================================
-                  REPLY
-              ================================================== */}
+              {/* REPLY */}
 
               {!isClosed && (
                 <div className="border-t border-slate-800 p-6">
@@ -2608,11 +2643,7 @@ const TicketDetails = () => {
                 </div>
               )}
             </section>
-
-            {/* =================================================
-                ATTACHMENTS
-            ================================================== */}
-
+            {/* ATTACHMENTS */}
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60">
               <div className="border-b border-slate-800 px-6 py-4">
                 <div className="flex items-center justify-between gap-4">
@@ -2749,98 +2780,219 @@ const TicketDetails = () => {
                 )}
               </div>
             </section>
-
-            {/* =================================================
-                CUSTOMER SATISFACTION
-            ================================================== */}
-
-            {isClosed && (
+            {/* =========================================================
+                     CUSTOMER RATING & FEEDBACK
+           ========================================================= */}
+            {canRateTicket && (
               <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
+                {/* Header */}
                 <div className="flex items-start gap-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-yellow-500/10 text-yellow-400">
-                    <Star className="h-5 w-5" />
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/10">
+                    <Star className="h-5 w-5 text-amber-400" />
                   </div>
 
-                  <div>
-                    <h3 className="text-sm font-semibold">How did we do?</h3>
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-semibold text-white">
+                      How did we do?
+                    </h3>
 
-                    <p className="mt-1 text-xs text-slate-600">
-                      Your feedback helps us improve SupportAI.
+                    <p className="mt-1 text-sm text-slate-400">
+                      Your feedback helps us improve our support experience.
                     </p>
                   </div>
                 </div>
 
-                {ticket.customerRating ? (
-                  <div className="mt-6 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4">
-                    <p className="text-xs font-medium text-emerald-400">
-                      Thanks for your feedback!
-                    </p>
+                <div className="mt-6">
+                  {hasSubmittedRating ? (
+                    /* =====================================================
+           ALREADY SUBMITTED
+           ===================================================== */
+                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-5">
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500/10">
+                          <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                        </div>
 
-                    <div className="mt-2 flex gap-1">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <Star
-                          key={star}
-                          className={`h-4 w-4 ${
-                            star <= ticket.customerRating
-                              ? "fill-current text-yellow-400"
-                              : "text-slate-700"
-                          }`}
-                        />
-                      ))}
+                        <div className="flex-1">
+                          <h4 className="font-medium text-emerald-300">
+                            Thank you for your feedback!
+                          </h4>
+
+                          <p className="mt-1 text-sm text-slate-400">
+                            You have already rated this ticket.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Submitted Rating */}
+                      <div className="mt-5">
+                        <p className="mb-2 text-sm font-medium text-slate-300">
+                          Your rating
+                        </p>
+
+                        <div className="flex items-center gap-1">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <Star
+                              key={star}
+                              className={`h-7 w-7 ${
+                                star <= Number(ticket.customerRating)
+                                  ? "fill-amber-400 text-amber-400"
+                                  : "text-slate-600"
+                              }`}
+                            />
+                          ))}
+
+                          <span className="ml-2 text-sm text-slate-400">
+                            {Number(ticket.customerRating)}/5
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Submitted Feedback */}
+                      {ticket?.customerFeedback?.trim() && (
+                        <div className="mt-5">
+                          <p className="mb-2 text-sm font-medium text-slate-300">
+                            Your feedback
+                          </p>
+
+                          <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                            <p className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                              {ticket.customerFeedback}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
+                  ) : (
+                    /* =====================================================
+           RATING FORM
+           ===================================================== */
+                    <form onSubmit={handleSubmitRating} className="space-y-6">
+                      {/* Error */}
+                      {ratingError && (
+                        <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 p-4">
+                          <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
 
-                    {ticket.customerFeedback && (
-                      <p className="mt-3 text-xs leading-5 text-slate-500">
-                        {ticket.customerFeedback}
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <form onSubmit={handleSubmitRating} className="mt-6">
-                    <div className="flex gap-2">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <button
-                          key={star}
-                          type="button"
-                          onClick={() => setRating(star)}
-                          className="transition hover:scale-110"
-                          title={`${star} star`}
+                          <p className="text-sm text-red-300">{ratingError}</p>
+                        </div>
+                      )}
+
+                      {/* Success */}
+                      {ratingSuccess && (
+                        <div className="flex items-start gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4">
+                          <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
+
+                          <p className="text-sm text-emerald-300">
+                            {ratingSuccess}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Stars */}
+                      <div>
+                        <label className="mb-3 block text-sm font-medium text-slate-300">
+                          Rate your support experience
+                        </label>
+
+                        <div className="flex items-center gap-2">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <button
+                              key={star}
+                              type="button"
+                              disabled={submittingRating}
+                              onClick={() => {
+                                setRating(star);
+                                setRatingError("");
+                                setRatingSuccess("");
+                              }}
+                              className="rounded-lg p-1 transition hover:scale-110 disabled:cursor-not-allowed disabled:opacity-50"
+                              aria-label={`Rate ${star} out of 5`}
+                            >
+                              <Star
+                                className={`h-8 w-8 transition ${
+                                  star <= rating
+                                    ? "fill-amber-400 text-amber-400"
+                                    : "text-slate-600 hover:text-amber-300"
+                                }`}
+                              />
+                            </button>
+                          ))}
+                        </div>
+
+                        <p className="mt-2 text-xs text-slate-500">
+                          {rating === 0
+                            ? "Select a rating"
+                            : `${rating} out of 5 stars selected`}
+                        </p>
+                      </div>
+
+                      {/* Feedback */}
+                      <div>
+                        <label
+                          htmlFor="ticket-feedback"
+                          className="mb-2 block text-sm font-medium text-slate-300"
                         >
-                          <Star
-                            className={`h-6 w-6 ${
-                              star <= rating
-                                ? "fill-current text-yellow-400"
-                                : "text-slate-700 hover:text-yellow-400"
-                            }`}
-                          />
+                          Additional feedback
+                          <span className="ml-1 font-normal text-slate-500">
+                            (optional)
+                          </span>
+                        </label>
+
+                        <textarea
+                          id="ticket-feedback"
+                          value={feedback}
+                          onChange={(e) => {
+                            setFeedback(e.target.value);
+                            setRatingError("");
+                            setRatingSuccess("");
+                          }}
+                          maxLength={1000}
+                          rows={4}
+                          disabled={submittingRating}
+                          placeholder="Tell us about your experience..."
+                          className="w-full resize-none rounded-xl border border-slate-700 bg-slate-950/50 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+
+                        <div className="mt-1 flex justify-end">
+                          <span className="text-xs text-slate-500">
+                            {feedback.length}/1000
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Submit */}
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-xs text-slate-500">
+                          You can rate your ticket after it has been resolved or
+                          closed.
+                        </p>
+
+                        <button
+                          type="submit"
+                          disabled={!rating || submittingRating}
+                          className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {submittingRating ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Submitting...
+                            </>
+                          ) : (
+                            <>
+                              <Star className="h-4 w-4" />
+                              Submit Feedback
+                            </>
+                          )}
                         </button>
-                      ))}
-                    </div>
-
-                    <textarea
-                      value={feedback}
-                      onChange={(e) => setFeedback(e.target.value)}
-                      rows={3}
-                      placeholder="Optional feedback..."
-                      className="mt-4 w-full resize-none rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-700 focus:border-blue-500"
-                    />
-
-                    <button
-                      type="submit"
-                      disabled={!rating || submittingRating}
-                      className="mt-3 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {submittingRating ? "Submitting..." : "Submit feedback"}
-                    </button>
-                  </form>
-                )}
+                      </div>
+                    </form>
+                  )}
+                </div>
               </section>
             )}
           </div>
 
-          {/* =================================================
-              RIGHT SIDEBAR
-          ================================================== */}
+          {/* RIGHT SIDEBAR */}
 
           <aside className="space-y-6">
             {/* SUPPORT */}
@@ -2918,6 +3070,17 @@ const TicketDetails = () => {
                 </button>
               )}
             </section>
+
+            {!isClosed && !isResolved && (
+              <button
+                type="button"
+                onClick={handleResolveTicket}
+                className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-medium text-emerald-300 transition hover:bg-emerald-500/20"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Mark as Resolved
+              </button>
+            )}
 
             {/* TICKET INFORMATION */}
 
