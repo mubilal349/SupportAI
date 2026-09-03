@@ -155,3 +155,17 @@ export const resolveCustomerTicket = async (ticketId) => {
 
   return response.data;
 };
+
+/*
+ * =========================================================
+ * DELETE TICKET
+ * =========================================================
+ */
+
+export const deleteTicketAttachment = async (ticketId, attachmentId) => {
+  const response = await api.delete(
+    `/tickets/${ticketId}/attachments/${attachmentId}`,
+  );
+
+  return response.data;
+};

@@ -25,6 +25,7 @@ import {
   Wifi,
   WifiOff,
   History,
+  Trash2,
 } from "lucide-react";
 
 import { Link, useParams } from "react-router-dom";
@@ -37,6 +38,7 @@ import {
   submitTicketRating,
   generateTicketSummary,
   resolveCustomerTicket,
+  deleteTicketAttachment,
 } from "../../../services/ticketService";
 
 import socket from "../../../socket/socket";
@@ -402,6 +404,14 @@ const TicketDetails = () => {
 
   /*
    * =======================================================
+   * DELETE
+   * =======================================================
+   */
+
+  const [deletingAttachmentId, setDeletingAttachmentId] = useState(null);
+
+  /*
+   * =======================================================
    * REFS
    * =======================================================
    */
@@ -448,6 +458,51 @@ const TicketDetails = () => {
         err?.response?.data?.message ||
           "Failed to mark the ticket as resolved.",
       );
+    }
+  };
+
+  /*
+   * =======================================================
+   * DELETE HNADLER FNCTION
+   * =======================================================
+   */
+
+  const handleDeleteAttachment = async (file) => {
+    const attachmentId = file?._id || file?.id;
+
+    if (!ticket?.id || !attachmentId) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${file.originalName || file.filename || file.name || "this attachment"}"?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeletingAttachmentId(attachmentId);
+      setError("");
+
+      // Replace this API call with your actual delete endpoint
+      await deleteTicketAttachment(ticket.id, attachmentId);
+
+      setTicket((prev) => ({
+        ...prev,
+        attachments: (prev.attachments || []).filter(
+          (attachment) => (attachment._id || attachment.id) !== attachmentId,
+        ),
+      }));
+    } catch (error) {
+      console.error("Delete attachment error:", error);
+
+      setError(
+        error?.response?.data?.message || "Failed to delete attachment.",
+      );
+    } finally {
+      setDeletingAttachmentId(null);
     }
   };
 
@@ -3045,28 +3100,49 @@ const TicketDetails = () => {
                         file.filename ||
                         file.name ||
                         "Attachment";
+                      const mimeType = file.mimeType || file.type || "";
+
                       const isImage =
-                        file.mimeType?.startsWith("image/") ||
+                        mimeType.startsWith("image/") ||
                         /\.(jpg|jpeg|png|gif|webp)$/i.test(fileName);
+
+                      const isPdf =
+                        mimeType === "application/pdf" ||
+                        /\.pdf$/i.test(fileName);
 
                       return (
                         <div
                           key={file._id || file.id || index}
                           className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60 transition hover:border-blue-500/30"
                         >
+                          {/* IMAGE PREVIEW */}
                           {isImage && fileUrl !== "#" && (
                             <a
                               href={fileUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="block border-b border-slate-800 bg-slate-950"
+                              className="block border-b border-slate-800 bg-slate-950 p-3"
                             >
                               <img
                                 src={fileUrl}
                                 alt={fileName}
-                                className="max-h-64 w-full object-contain"
+                                className="max-h-64 w-full rounded-lg object-contain"
+                                onError={(e) => {
+                                  e.currentTarget.style.display = "none";
+                                }}
                               />
                             </a>
+                          )}
+
+                          {/* PDF PREVIEW */}
+                          {isPdf && fileUrl !== "#" && (
+                            <div className="border-b border-slate-800 bg-slate-950">
+                              <iframe
+                                src={fileUrl}
+                                title={`Preview of ${fileName}`}
+                                className="h-[500px] w-full border-0"
+                              />
+                            </div>
                           )}
 
                           <div className="flex items-center justify-between gap-4 p-4">
@@ -3109,6 +3185,23 @@ const TicketDetails = () => {
                               >
                                 <Download className="h-3.5 w-3.5" />
                               </a>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteAttachment(file)}
+                                disabled={
+                                  deletingAttachmentId === (file._id || file.id)
+                                }
+                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-800 text-slate-500 transition hover:border-red-500/40 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                                title="Delete attachment"
+                              >
+                                {deletingAttachmentId ===
+                                (file._id || file.id) ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                )}
+                              </button>
                             </div>
                           </div>
                         </div>

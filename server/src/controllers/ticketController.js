@@ -1,4 +1,7 @@
+import fs from "fs";
+import path from "path";
 import mongoose from "mongoose";
+import { fileURLToPath } from "url";
 import Ticket from "../models/Ticket.js";
 import { generateAIResponse } from "../services/aiService.js";
 import {
@@ -1272,6 +1275,178 @@ export const uploadTicketAttachments = async (req, res) => {
       success: false,
 
       message: error.message || "Failed to upload attachments.",
+    });
+  }
+};
+
+/*
+ * =========================================================
+ * DELETE TICKET ATTACHMENT
+ * =========================================================
+ */
+
+export const deleteTicketAttachment = async (req, res) => {
+  try {
+    const { id, attachmentId } = req.params;
+
+    console.log("==========================================");
+    console.log("DELETE ATTACHMENT REQUEST");
+    console.log("Ticket ID:", id);
+    console.log("Attachment ID:", attachmentId);
+    console.log("User ID:", req.user?.id);
+    console.log("==========================================");
+
+    /*
+     * =====================================================
+     * VALIDATE IDS
+     * =====================================================
+     */
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID.",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(attachmentId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid attachment ID.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * FIND CUSTOMER TICKET
+     * =====================================================
+     */
+
+    const ticket = await Ticket.findOne({
+      _id: id,
+      customer: req.user.id,
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found.",
+      });
+    }
+
+    /*
+     * =====================================================
+     * FIND ATTACHMENT
+     * =====================================================
+     */
+
+    const attachment = ticket.attachments.find(
+      (file) => String(file._id) === String(attachmentId),
+    );
+
+    if (!attachment) {
+      return res.status(404).json({
+        success: false,
+        message: "Attachment not found.",
+      });
+    }
+
+    console.log("Attachment found:");
+    console.log({
+      id: attachment._id,
+      filename: attachment.filename,
+      originalName: attachment.originalName,
+      path: attachment.path,
+    });
+
+    /*
+     * =====================================================
+     * DELETE PHYSICAL FILE
+     * =====================================================
+     */
+
+    if (attachment.filename) {
+      const filePath = path.join(
+        process.cwd(),
+        "uploads",
+        "tickets",
+        attachment.filename,
+      );
+
+      console.log("Physical file path:");
+      console.log(filePath);
+
+      try {
+        await fs.promises.access(filePath);
+
+        await fs.promises.unlink(filePath);
+
+        console.log("Physical attachment deleted successfully:", filePath);
+      } catch (fileError) {
+        /*
+         * If the file does not exist, we still remove
+         * the database record.
+         */
+
+        if (fileError.code === "ENOENT") {
+          console.warn("Physical file was already missing:", filePath);
+        } else {
+          console.error("Failed to delete physical attachment:", fileError);
+
+          /*
+           * Do NOT return 500 here.
+           *
+           * We can still remove the MongoDB attachment
+           * record.
+           */
+        }
+      }
+    }
+
+    /*
+     * =====================================================
+     * REMOVE ATTACHMENT FROM MONGODB
+     * =====================================================
+     */
+
+    ticket.attachments.pull(attachmentId);
+
+    await ticket.save();
+
+    console.log("Attachment removed from MongoDB:", attachmentId);
+
+    /*
+     * =====================================================
+     * SOCKET UPDATE
+     * =====================================================
+     */
+
+    broadcastTicketUpdate(req, ticket);
+
+    /*
+     * =====================================================
+     * RESPONSE
+     * =====================================================
+     */
+
+    return res.status(200).json({
+      success: true,
+      message: "Attachment deleted successfully.",
+      attachmentId,
+      attachments: ticket.attachments,
+      ticket,
+    });
+  } catch (error) {
+    console.error("==========================================");
+    console.error("DELETE TICKET ATTACHMENT ERROR");
+    console.error(error);
+    console.error("MESSAGE:", error?.message);
+    console.error("STACK:", error?.stack);
+    console.error("==========================================");
+
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to delete attachment.",
     });
   }
 };

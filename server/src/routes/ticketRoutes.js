@@ -10,6 +10,7 @@ import {
   submitTicketRating,
   getTicketRating,
   resolveCustomerTicket,
+  deleteTicketAttachment,
 } from "../controllers/ticketController.js";
 
 import { authenticateToken } from "../middleware/authMiddleware.js";
@@ -72,6 +73,9 @@ router.post(
   uploadTicket.array("attachments", 5),
   uploadTicketAttachments,
 );
+
+// DELETE /api/tickets/:id/attachments/:attachmentId
+router.delete("/:id/attachments/:attachmentId", deleteTicketAttachment);
 
 /*
  * =========================================================
