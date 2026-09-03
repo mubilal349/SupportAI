@@ -520,12 +520,13 @@ const Profile = () => {
                 {/* User mini profile */}
                 <div className="border-b border-slate-800 p-5">
                   <div className="flex items-center gap-3">
-                    <div className="relative">
+                    <div className="relative h-12 w-12 shrink-0 sm:h-14 sm:w-14">
+                      {" "}
                       {profile.avatar ? (
                         <img
                           src={getAvatarUrl(profile.avatar)}
                           alt={profile.name || "Profile"}
-                          className="h-full w-full object-cover"
+                          className="h-full w-full rounded-2xl object-cover"
                           onError={(e) => {
                             console.error(
                               "Avatar failed to load:",
@@ -535,12 +536,12 @@ const Profile = () => {
                           }}
                         />
                       ) : (
-                        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-600 text-lg font-bold">
-                          {getInitials()}
+                        <div className="flex h-full w-full items-center justify-center rounded-2xl bg-blue-600 text-base font-bold sm:text-lg">
+                          {" "}
+                          {getInitials()}{" "}
                         </div>
-                      )}
-
-                      <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-slate-900 bg-emerald-500" />
+                      )}{" "}
+                      <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-slate-900 bg-emerald-500 sm:h-3.5 sm:w-3.5" />{" "}
                     </div>
 
                     <div className="min-w-0">

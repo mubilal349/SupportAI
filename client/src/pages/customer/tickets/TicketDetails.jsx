@@ -6,6 +6,9 @@ import {
   Bot,
   CheckCircle2,
   Clock3,
+  Download,
+  Eye,
+  Image as ImageIcon,
   FileText,
   Loader2,
   MessageSquare,
@@ -39,6 +42,23 @@ import {
 import socket from "../../../socket/socket";
 
 const API_BASE_URL = "http://localhost:8000";
+
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const MAX_ATTACHMENT_COUNT = 5;
+
+const ALLOWED_ATTACHMENT_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+  "text/plain",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/zip",
+];
 
 /*
  * =========================================================
@@ -363,6 +383,10 @@ const TicketDetails = () => {
   const [selectedFiles, setSelectedFiles] = useState([]);
 
   const [uploadingFiles, setUploadingFiles] = useState(false);
+
+  const [replyFiles, setReplyFiles] = useState([]);
+
+  const [uploadingReplyFiles, setUploadingReplyFiles] = useState(false);
 
   /*
    * =======================================================
@@ -1232,7 +1256,54 @@ const TicketDetails = () => {
 
   /*
    * =========================================================
-   * FILE SELECT
+   * ATTACHMENT HELPERS
+   * =========================================================
+   */
+
+  const isAllowedAttachmentType = (file) => {
+    return ALLOWED_ATTACHMENT_TYPES.includes(file?.type);
+  };
+
+  const isImageFile = (file) => {
+    return file?.type?.startsWith("image/");
+  };
+
+  const validateAttachmentFiles = (files, existingFiles = []) => {
+    const validFiles = [];
+    const errors = [];
+
+    for (const file of files) {
+      if (file.size > MAX_ATTACHMENT_SIZE) {
+        errors.push(`${file.name} is larger than the 10 MB limit.`);
+        continue;
+      }
+
+      if (!isAllowedAttachmentType(file)) {
+        errors.push(`${file.name} is not a supported file type.`);
+        continue;
+      }
+
+      const duplicate = existingFiles.some(
+        (existing) =>
+          existing.name === file.name &&
+          existing.size === file.size &&
+          existing.lastModified === file.lastModified,
+      );
+
+      if (duplicate) {
+        errors.push(`${file.name} is already selected.`);
+        continue;
+      }
+
+      validFiles.push(file);
+    }
+
+    return { validFiles, errors };
+  };
+
+  /*
+   * =========================================================
+   * TICKET FILE SELECT
    * =========================================================
    */
 
@@ -1245,32 +1316,57 @@ const TicketDetails = () => {
 
     setError("");
 
-    const maxSize = 10 * 1024 * 1024;
+    const { validFiles, errors } = validateAttachmentFiles(
+      files,
+      selectedFiles,
+    );
 
-    const validFiles = files.filter((file) => {
-      if (file.size > maxSize) {
-        setError(`${file.name} is larger than the 10 MB limit.`);
+    const availableSlots = MAX_ATTACHMENT_COUNT - selectedFiles.length;
+    const filesToAdd = validFiles.slice(0, Math.max(0, availableSlots));
 
-        return false;
-      }
-
-      return true;
-    });
-
-    if (validFiles.length > 5) {
-      setError("You can upload a maximum of 5 files at a time.");
-
-      setSelectedFiles(validFiles.slice(0, 5));
-    } else {
-      setSelectedFiles(validFiles);
+    if (errors.length) {
+      setError(errors.join(" "));
+    } else if (validFiles.length > availableSlots) {
+      setError(`You can select a maximum of ${MAX_ATTACHMENT_COUNT} files.`);
     }
 
+    setSelectedFiles((previous) => [...previous, ...filesToAdd]);
     e.target.value = "";
   };
 
   /*
    * =========================================================
-   * REMOVE FILE
+   * REPLY FILE SELECT
+   * =========================================================
+   */
+
+  const handleReplyFileSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+
+    if (!files.length) {
+      return;
+    }
+
+    setError("");
+
+    const { validFiles, errors } = validateAttachmentFiles(files, replyFiles);
+
+    const availableSlots = MAX_ATTACHMENT_COUNT - replyFiles.length;
+    const filesToAdd = validFiles.slice(0, Math.max(0, availableSlots));
+
+    if (errors.length) {
+      setError(errors.join(" "));
+    } else if (validFiles.length > availableSlots) {
+      setError(`You can attach a maximum of ${MAX_ATTACHMENT_COUNT} files.`);
+    }
+
+    setReplyFiles((previous) => [...previous, ...filesToAdd]);
+    e.target.value = "";
+  };
+
+  /*
+   * =========================================================
+   * REMOVE FILES
    * =========================================================
    */
 
@@ -1280,30 +1376,40 @@ const TicketDetails = () => {
     );
   };
 
+  const removeReplyFile = (index) => {
+    setReplyFiles((previous) =>
+      previous.filter((_, fileIndex) => fileIndex !== index),
+    );
+  };
+
   /*
    * =========================================================
-   * UPLOAD ATTACHMENTS
+   * UPLOAD TICKET ATTACHMENTS
    * =========================================================
    */
 
   const handleUploadAttachments = async () => {
-    if (!selectedFiles.length || !ticket?.id) {
+    if (!selectedFiles.length || !ticket?.id || isClosed) {
       return;
     }
 
     try {
       setUploadingFiles(true);
-
       setError("");
 
       const response = await uploadTicketAttachments(ticket.id, selectedFiles);
 
-      const uploadedAttachments = response?.attachments || [];
+      const uploadedAttachments =
+        response?.attachments || response?.data?.attachments || [];
+
+      const returnedAttachments =
+        response?.ticket?.attachments ||
+        response?.data?.ticket?.attachments ||
+        null;
 
       setTicket((previous) => ({
         ...previous,
-
-        attachments: response?.ticket?.attachments || [
+        attachments: returnedAttachments || [
           ...(previous?.attachments || []),
           ...uploadedAttachments,
         ],
@@ -1313,9 +1419,57 @@ const TicketDetails = () => {
     } catch (err) {
       console.error("UPLOAD ATTACHMENTS ERROR:", err);
 
-      setError(err?.response?.data?.message || "Failed to upload attachments.");
+      setError(
+        err?.response?.data?.message ||
+          err?.response?.data?.error ||
+          "Failed to upload attachments.",
+      );
     } finally {
       setUploadingFiles(false);
+    }
+  };
+
+  /*
+   * =========================================================
+   * UPLOAD REPLY ATTACHMENTS
+   * =========================================================
+   *
+   * The existing ticketService exposes uploadTicketAttachments(),
+   * so reply attachments are uploaded to the same ticket after
+   * the reply is successfully created. This keeps the existing
+   * backend API compatible while still allowing customers to
+   * send a message with files from the reply composer.
+   */
+
+  const uploadReplyAttachments = async (files) => {
+    if (!files?.length || !ticket?.id) {
+      return [];
+    }
+
+    setUploadingReplyFiles(true);
+
+    try {
+      const response = await uploadTicketAttachments(ticket.id, files);
+
+      const uploadedAttachments =
+        response?.attachments || response?.data?.attachments || [];
+
+      const returnedAttachments =
+        response?.ticket?.attachments ||
+        response?.data?.ticket?.attachments ||
+        null;
+
+      setTicket((previous) => ({
+        ...previous,
+        attachments: returnedAttachments || [
+          ...(previous?.attachments || []),
+          ...uploadedAttachments,
+        ],
+      }));
+
+      return uploadedAttachments;
+    } finally {
+      setUploadingReplyFiles(false);
     }
   };
 
@@ -1378,34 +1532,30 @@ const TicketDetails = () => {
 
     const message = reply.trim();
 
-    if (!message) {
+    if (!message && replyFiles.length === 0) {
       return;
     }
 
     if (!ticket?.id) {
       setError("Ticket ID is missing.");
-
       return;
     }
 
     if (ticket.status === "closed") {
       setError("This ticket is closed. Please create a new ticket.");
-
       return;
     }
 
     try {
       setSending(true);
-
       setError("");
-
       handleTypingStop();
 
-      const response = await replyToTicket(ticket.id, message);
+      const response = message ? await replyToTicket(ticket.id, message) : null;
 
       console.log("REPLY RESPONSE:", response);
 
-      if (!socket.connected) {
+      if (!socket.connected && response) {
         const updatedTicket = response?.ticket;
 
         if (updatedTicket) {
@@ -1413,17 +1563,33 @@ const TicketDetails = () => {
         } else if (response?.conversation) {
           setTicket((previous) => ({
             ...previous,
-
             conversation: response.conversation.map(normalizeReply),
-
             replyCount: response.conversation.length,
           }));
         }
       }
 
-      loadStatusHistory();
+      if (replyFiles.length > 0) {
+        try {
+          await uploadReplyAttachments(replyFiles);
+        } catch (attachmentError) {
+          console.error("REPLY ATTACHMENT UPLOAD ERROR:", attachmentError);
+
+          setError(
+            attachmentError?.response?.data?.message ||
+              "Your reply was sent, but the attachments could not be uploaded.",
+          );
+        }
+      }
+
+      await loadStatusHistory();
 
       setReply("");
+      setReplyFiles([]);
+
+      if (replyFiles.length > 0) {
+        await loadTicket();
+      }
     } catch (err) {
       console.error("SEND REPLY ERROR:", err);
 
@@ -1434,6 +1600,7 @@ const TicketDetails = () => {
       );
     } finally {
       setSending(false);
+      setUploadingReplyFiles(false);
     }
   };
 
@@ -1447,7 +1614,7 @@ const TicketDetails = () => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
 
-      if (!sending && reply.trim()) {
+      if (!sending && (reply.trim() || replyFiles.length > 0)) {
         e.currentTarget.form?.requestSubmit();
       }
     }
@@ -2486,27 +2653,159 @@ const TicketDetails = () => {
                               {message.attachments?.length > 0 && (
                                 <div className="mt-4 space-y-2 border-t border-slate-800/70 pt-3">
                                   {message.attachments.map(
-                                    (file, fileIndex) => (
-                                      <a
-                                        key={file._id || file.id || fileIndex}
-                                        href={getMessageAttachmentUrl(file)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-950/60 p-3 transition hover:border-blue-500/30"
-                                      >
-                                        <Paperclip className="h-4 w-4 text-blue-400" />
+                                    (file, fileIndex) => {
+                                      const fileUrl =
+                                        getMessageAttachmentUrl(file);
 
-                                        <span className="truncate text-xs text-slate-400">
-                                          {file.originalName ||
-                                            file.filename ||
-                                            "Attachment"}
-                                        </span>
+                                      const fileName =
+                                        file.originalName ||
+                                        file.filename ||
+                                        file.name ||
+                                        "Attachment";
 
-                                        <span className="ml-auto text-[10px] text-slate-600">
-                                          {formatFileSize(file.size)}
-                                        </span>
-                                      </a>
-                                    ),
+                                      const mimeType =
+                                        file.mimeType || file.type || "";
+
+                                      const isImage =
+                                        mimeType.startsWith("image/");
+                                      const isPdf =
+                                        mimeType === "application/pdf" ||
+                                        fileName.toLowerCase().endsWith(".pdf");
+
+                                      const isVideo =
+                                        mimeType.startsWith("video/");
+                                      const isAudio =
+                                        mimeType.startsWith("audio/");
+
+                                      return (
+                                        <div
+                                          key={file._id || file.id || fileIndex}
+                                          className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60"
+                                        >
+                                          {/* ================= ATTACHMENT HEADER ================= */}
+                                          <div className="flex items-center gap-3 p-3">
+                                            {/* FILE ICON */}
+                                            <div
+                                              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+                                                isPdf
+                                                  ? "bg-red-500/10 text-red-400"
+                                                  : isImage
+                                                    ? "bg-blue-500/10 text-blue-400"
+                                                    : "bg-slate-800 text-slate-400"
+                                              }`}
+                                            >
+                                              {isImage ? (
+                                                <ImageIcon className="h-5 w-5" />
+                                              ) : isPdf ? (
+                                                <FileText className="h-5 w-5" />
+                                              ) : (
+                                                <Paperclip className="h-5 w-5" />
+                                              )}
+                                            </div>
+
+                                            {/* FILE INFORMATION */}
+                                            <div className="min-w-0 flex-1">
+                                              <p className="truncate text-xs font-medium text-slate-300">
+                                                {fileName}
+                                              </p>
+
+                                              <div className="mt-1 flex items-center gap-2">
+                                                <p className="text-[10px] text-slate-600">
+                                                  {formatFileSize(file.size)}
+                                                </p>
+
+                                                {isPdf && (
+                                                  <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-[9px] font-medium text-red-400">
+                                                    PDF
+                                                  </span>
+                                                )}
+
+                                                {isImage && (
+                                                  <span className="rounded bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-medium text-blue-400">
+                                                    IMAGE
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+
+                                            {/* VIEW */}
+                                            <a
+                                              href={fileUrl}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-800 text-slate-500 transition hover:border-blue-500/40 hover:bg-blue-500/5 hover:text-blue-400"
+                                              title="View attachment"
+                                            >
+                                              <Eye className="h-3.5 w-3.5" />
+                                            </a>
+
+                                            {/* DOWNLOAD */}
+                                            <a
+                                              href={fileUrl}
+                                              download={fileName}
+                                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-800 text-slate-500 transition hover:border-blue-500/40 hover:bg-blue-500/5 hover:text-blue-400"
+                                              title="Download attachment"
+                                            >
+                                              <Download className="h-3.5 w-3.5" />
+                                            </a>
+                                          </div>
+
+                                          {/* ================= IMAGE PREVIEW ================= */}
+                                          {isImage && fileUrl && (
+                                            <div className="border-t border-slate-800/70 bg-slate-900/30 p-3">
+                                              <a
+                                                href={fileUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                              >
+                                                <img
+                                                  src={fileUrl}
+                                                  alt={fileName}
+                                                  className="max-h-80 w-full rounded-lg object-contain"
+                                                  onError={(e) => {
+                                                    e.currentTarget.style.display =
+                                                      "none";
+                                                  }}
+                                                />
+                                              </a>
+                                            </div>
+                                          )}
+
+                                          {/* ================= PDF PREVIEW ================= */}
+                                          {isPdf && fileUrl && (
+                                            <div className="border-t border-slate-800/70 bg-slate-900/30">
+                                              <iframe
+                                                src={fileUrl}
+                                                title={fileName}
+                                                className="h-[500px] w-full rounded-b-xl border-0"
+                                              />
+                                            </div>
+                                          )}
+
+                                          {/* ================= VIDEO PREVIEW ================= */}
+                                          {isVideo && fileUrl && (
+                                            <div className="border-t border-slate-800/70 bg-slate-900/30 p-3">
+                                              <video
+                                                src={fileUrl}
+                                                controls
+                                                className="max-h-80 w-full rounded-lg"
+                                              />
+                                            </div>
+                                          )}
+
+                                          {/* ================= AUDIO PREVIEW ================= */}
+                                          {isAudio && fileUrl && (
+                                            <div className="border-t border-slate-800/70 bg-slate-900/30 p-3">
+                                              <audio
+                                                src={fileUrl}
+                                                controls
+                                                className="w-full"
+                                              />
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    },
                                   )}
                                 </div>
                               )}
@@ -2565,7 +2864,6 @@ const TicketDetails = () => {
                       value={reply}
                       onChange={(e) => {
                         setReply(e.target.value);
-
                         handleTypingStart();
                       }}
                       onKeyDown={handleReplyKeyDown}
@@ -2576,8 +2874,81 @@ const TicketDetails = () => {
                       className="w-full resize-none rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-700 focus:border-blue-500 disabled:opacity-50"
                     />
 
+                    {replyFiles.length > 0 && (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {replyFiles.map((file, index) => (
+                          <div
+                            key={`${file.name}-${file.lastModified}`}
+                            className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/70"
+                          >
+                            {isImageFile(file) ? (
+                              <div className="relative">
+                                <img
+                                  src={URL.createObjectURL(file)}
+                                  alt={file.name}
+                                  className="h-28 w-full object-cover"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => removeReplyFile(index)}
+                                  className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white transition hover:bg-red-500"
+                                  title="Remove attachment"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-3 p-3">
+                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400">
+                                  <FileText className="h-4 w-4" />
+                                </div>
+
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-xs text-slate-300">
+                                    {file.name}
+                                  </p>
+                                  <p className="mt-1 text-[10px] text-slate-600">
+                                    {formatFileSize(file.size)}
+                                  </p>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => removeReplyFile(index)}
+                                  className="text-slate-600 transition hover:text-red-400"
+                                  title="Remove attachment"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="space-y-1">
+                      <div className="flex flex-col gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-[10px] font-medium text-slate-400 transition hover:border-blue-500/40 hover:text-blue-400">
+                            <Paperclip className="h-3.5 w-3.5" />
+                            Attach files
+                            <input
+                              type="file"
+                              multiple
+                              accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.txt,.doc,.docx,.xls,.xlsx,.zip"
+                              onChange={handleReplyFileSelect}
+                              disabled={sending || uploadingReplyFiles}
+                              className="hidden"
+                            />
+                          </label>
+
+                          <span className="text-[10px] text-slate-700">
+                            {replyFiles.length}/{MAX_ATTACHMENT_COUNT} files •
+                            10 MB each
+                          </span>
+                        </div>
+
                         <p className="text-[10px] text-slate-700">
                           Press Enter to send. Use Shift + Enter for a new line.
                         </p>
@@ -2597,13 +2968,19 @@ const TicketDetails = () => {
 
                       <button
                         type="submit"
-                        disabled={sending || !reply.trim()}
+                        disabled={
+                          sending ||
+                          uploadingReplyFiles ||
+                          (!reply.trim() && replyFiles.length === 0)
+                        }
                         className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {sending ? (
+                        {sending || uploadingReplyFiles ? (
                           <>
                             <Loader2 className="h-4 w-4 animate-spin" />
-                            Sending...
+                            {uploadingReplyFiles
+                              ? "Uploading..."
+                              : "Sending..."}
                           </>
                         ) : (
                           <>
@@ -2648,8 +3025,7 @@ const TicketDetails = () => {
               <div className="border-b border-slate-800 px-6 py-4">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-blue-400" />
-
+                    <Paperclip className="h-4 w-4 text-blue-400" />
                     <h3 className="text-sm font-semibold">Attachments</h3>
                   </div>
 
@@ -2664,103 +3040,176 @@ const TicketDetails = () => {
                   <div className="space-y-3">
                     {ticket.attachments.map((file, index) => {
                       const fileUrl = getAttachmentUrl(file);
+                      const fileName =
+                        file.originalName ||
+                        file.filename ||
+                        file.name ||
+                        "Attachment";
+                      const isImage =
+                        file.mimeType?.startsWith("image/") ||
+                        /\.(jpg|jpeg|png|gif|webp)$/i.test(fileName);
 
                       return (
-                        <a
+                        <div
                           key={file._id || file.id || index}
-                          href={fileUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/60 p-4 transition hover:border-blue-500/30 hover:bg-slate-950"
+                          className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60 transition hover:border-blue-500/30"
                         >
-                          <div className="flex min-w-0 items-center gap-3">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
-                              <FileText className="h-4 w-4" />
+                          {isImage && fileUrl !== "#" && (
+                            <a
+                              href={fileUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block border-b border-slate-800 bg-slate-950"
+                            >
+                              <img
+                                src={fileUrl}
+                                alt={fileName}
+                                className="max-h-64 w-full object-contain"
+                              />
+                            </a>
+                          )}
+
+                          <div className="flex items-center justify-between gap-4 p-4">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
+                                {isImage ? (
+                                  <ImageIcon className="h-4 w-4" />
+                                ) : (
+                                  <FileText className="h-4 w-4" />
+                                )}
+                              </div>
+
+                              <div className="min-w-0">
+                                <p className="truncate text-xs font-medium text-slate-300">
+                                  {fileName}
+                                </p>
+                                <p className="mt-1 text-[10px] text-slate-600">
+                                  {formatFileSize(file.size)}
+                                  {file.mimeType ? ` • ${file.mimeType}` : ""}
+                                </p>
+                              </div>
                             </div>
 
-                            <div className="min-w-0">
-                              <p className="truncate text-xs font-medium text-slate-300">
-                                {file.originalName ||
-                                  file.filename ||
-                                  "Attachment"}
-                              </p>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <a
+                                href={fileUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-800 text-slate-500 transition hover:border-blue-500/40 hover:text-blue-400"
+                                title="View attachment"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                              </a>
 
-                              <p className="mt-1 text-[10px] text-slate-600">
-                                {formatFileSize(file.size)}
-                              </p>
+                              <a
+                                href={fileUrl}
+                                download={fileName}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-800 text-slate-500 transition hover:border-blue-500/40 hover:text-blue-400"
+                                title="Download attachment"
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                              </a>
                             </div>
                           </div>
-
-                          <span className="shrink-0 text-[10px] font-medium text-blue-400">
-                            View
-                          </span>
-                        </a>
+                        </div>
                       );
                     })}
                   </div>
                 ) : (
                   <div className="rounded-xl border border-dashed border-slate-800 bg-slate-950/40 p-6 text-center">
-                    <FileText className="mx-auto h-6 w-6 text-slate-700" />
-
+                    <Paperclip className="mx-auto h-6 w-6 text-slate-700" />
                     <p className="mt-3 text-xs text-slate-500">
                       No attachments
+                    </p>
+                    <p className="mt-1 text-[10px] text-slate-700">
+                      Files you upload will appear here.
                     </p>
                   </div>
                 )}
 
                 {!isClosed && (
                   <div className="mt-5 border-t border-slate-800 pt-5">
-                    <label className="block text-xs font-medium text-slate-400">
-                      Add attachments
-                    </label>
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="block text-xs font-medium text-slate-400">
+                        Add attachments
+                      </label>
+                      <span className="text-[10px] text-slate-700">
+                        {selectedFiles.length}/{MAX_ATTACHMENT_COUNT}
+                      </span>
+                    </div>
 
                     <input
                       type="file"
                       multiple
+                      accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.txt,.doc,.docx,.xls,.xlsx,.zip"
                       onChange={handleFileSelect}
-                      className="mt-3 block w-full cursor-pointer rounded-xl border border-slate-800 bg-slate-950 p-3 text-xs text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-xs file:font-medium file:text-white"
+                      disabled={uploadingFiles}
+                      className="mt-3 block w-full cursor-pointer rounded-xl border border-slate-800 bg-slate-950 p-3 text-xs text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-xs file:font-medium file:text-white disabled:cursor-not-allowed disabled:opacity-50"
                     />
 
-                    <p className="mt-2 text-[10px] text-slate-700">
-                      Maximum 5 files, 10 MB each.
+                    <p className="mt-2 text-[10px] leading-5 text-slate-700">
+                      JPG, PNG, GIF, WEBP, PDF, TXT, DOC, DOCX, XLS, XLSX and
+                      ZIP. Maximum 5 files, 10 MB each.
                     </p>
 
                     {selectedFiles.length > 0 && (
-                      <div className="mt-4 space-y-2">
-                        {selectedFiles.map((file, index) => (
-                          <div
-                            key={`${file.name}-${file.lastModified}`}
-                            className="flex items-center justify-between rounded-lg bg-slate-950 px-3 py-2"
-                          >
-                            <div className="flex min-w-0 items-center gap-2">
-                              <Paperclip className="h-3.5 w-3.5 shrink-0 text-blue-400" />
+                      <div className="mt-4 space-y-3">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {selectedFiles.map((file, index) => (
+                            <div
+                              key={`${file.name}-${file.lastModified}`}
+                              className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/70"
+                            >
+                              {isImageFile(file) ? (
+                                <div className="relative">
+                                  <img
+                                    src={URL.createObjectURL(file)}
+                                    alt={file.name}
+                                    className="h-28 w-full object-cover"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => removeSelectedFile(index)}
+                                    className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white transition hover:bg-red-500"
+                                    title="Remove attachment"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-3 p-3">
+                                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400">
+                                    <FileText className="h-4 w-4" />
+                                  </div>
 
-                              <span className="truncate text-xs text-slate-400">
-                                {file.name}
-                              </span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-xs text-slate-300">
+                                      {file.name}
+                                    </p>
+                                    <p className="mt-1 text-[10px] text-slate-600">
+                                      {formatFileSize(file.size)}
+                                    </p>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => removeSelectedFile(index)}
+                                    className="text-slate-600 transition hover:text-red-400"
+                                    title="Remove attachment"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
-
-                            <div className="ml-3 flex shrink-0 items-center gap-3">
-                              <span className="text-[10px] text-slate-600">
-                                {formatFileSize(file.size)}
-                              </span>
-
-                              <button
-                                type="button"
-                                onClick={() => removeSelectedFile(index)}
-                                className="text-slate-600 transition hover:text-red-400"
-                              >
-                                <X className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
 
                         <button
                           type="button"
                           onClick={handleUploadAttachments}
                           disabled={uploadingFiles}
-                          className="mt-3 flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {uploadingFiles ? (
                             <>
