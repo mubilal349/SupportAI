@@ -13,6 +13,7 @@ import ticketRoutes from "./routes/ticketRoutes.js";
 import customerRoutes from "./routes/customerRoutes.js";
 import aiTicketRoutes from "./routes/aiTicketRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
+import analyticsRoutes from "./routes/analyticsRoutes.js";
 
 const app = express();
 
@@ -43,5 +44,6 @@ app.use("/api/tickets", ticketRoutes);
 app.use("/api/customer", customerRoutes);
 app.use("/api/ai-tickets", aiTicketRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/analytics", analyticsRoutes);
 
 export default app;

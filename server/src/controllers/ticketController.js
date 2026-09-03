@@ -1780,3 +1780,1019 @@ export const getTicketRating = async (req, res) => {
     });
   }
 };
+
+// =========================================================
+// CUSTOMER DASHBOARD ANALYTICS
+// GET /api/tickets/analytics?period=7d
+// =========================================================
+
+export const getCustomerAnalytics = async (req, res) => {
+  try {
+    const customerId = req.user?.id;
+
+    if (!customerId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(customerId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid customer ID.",
+      });
+    }
+
+    // -----------------------------------------------------
+    // PERIOD
+    // -----------------------------------------------------
+
+    const requestedPeriod = req.query.period || "7d";
+
+    if (!["7d", "30d", "90d"].includes(requestedPeriod)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid analytics period. Use 7d, 30d, or 90d.",
+      });
+    }
+
+    const { period, days, now, currentStart, previousStart } =
+      getAnalyticsPeriod(requestedPeriod);
+
+    // -----------------------------------------------------
+    // CURRENT PERIOD TICKETS
+    // -----------------------------------------------------
+
+    const currentTickets = await Ticket.find({
+      customer: customerId,
+      createdAt: {
+        $gte: currentStart,
+        $lte: now,
+      },
+    })
+      .select(
+        [
+          "ticketNumber",
+          "subject",
+          "category",
+          "priority",
+          "status",
+          "conversation",
+          "statusHistory",
+          "replies",
+          "createdAt",
+          "updatedAt",
+          "resolvedAt",
+          "closedAt",
+          "reopenedAt",
+          "customerRating",
+          "customerFeedback",
+          "ratedAt",
+          "isEscalated",
+          "escalatedAt",
+          "attachments",
+        ].join(" "),
+      )
+      .lean();
+
+    // -----------------------------------------------------
+    // PREVIOUS PERIOD TICKETS
+    // -----------------------------------------------------
+
+    const previousTickets = await Ticket.find({
+      customer: customerId,
+      createdAt: {
+        $gte: previousStart,
+        $lt: currentStart,
+      },
+    })
+      .select(
+        [
+          "ticketNumber",
+          "subject",
+          "category",
+          "priority",
+          "status",
+          "conversation",
+          "statusHistory",
+          "replies",
+          "createdAt",
+          "updatedAt",
+          "resolvedAt",
+          "closedAt",
+          "customerRating",
+          "ratedAt",
+          "isEscalated",
+          "attachments",
+        ].join(" "),
+      )
+      .lean();
+
+    // -----------------------------------------------------
+    // ALL CUSTOMER TICKETS
+    //
+    // Used for current status overview.
+    // -----------------------------------------------------
+
+    const allCustomerTickets = await Ticket.find({
+      customer: customerId,
+    })
+      .select(
+        [
+          "status",
+          "priority",
+          "category",
+          "conversation",
+          "statusHistory",
+          "replies",
+          "createdAt",
+          "updatedAt",
+          "resolvedAt",
+          "closedAt",
+          "customerRating",
+          "customerFeedback",
+          "ratedAt",
+          "isEscalated",
+          "escalatedAt",
+          "attachments",
+        ].join(" "),
+      )
+      .lean();
+
+    // =====================================================
+    // BASIC COUNTS
+    // =====================================================
+
+    const totalTickets = currentTickets.length;
+
+    // The existing UI calls these "conversations".
+    // In this schema each ticket owns one conversation.
+    const totalConversations = totalTickets;
+
+    const previousConversations = previousTickets.length;
+
+    // =====================================================
+    // STATUS COUNTS - CURRENT PERIOD
+    // =====================================================
+
+    const statusCounts = {
+      open: 0,
+      "in-progress": 0,
+      waiting: 0,
+      resolved: 0,
+      closed: 0,
+    };
+
+    currentTickets.forEach((ticket) => {
+      if (Object.prototype.hasOwnProperty.call(statusCounts, ticket.status)) {
+        statusCounts[ticket.status]++;
+      }
+    });
+
+    // =====================================================
+    // ALL-TIME CURRENT STATUS
+    //
+    // Useful for the Ticket Overview section.
+    // =====================================================
+
+    const allStatusCounts = {
+      open: 0,
+      "in-progress": 0,
+      waiting: 0,
+      resolved: 0,
+      closed: 0,
+    };
+
+    allCustomerTickets.forEach((ticket) => {
+      if (
+        Object.prototype.hasOwnProperty.call(allStatusCounts, ticket.status)
+      ) {
+        allStatusCounts[ticket.status]++;
+      }
+    });
+
+    // =====================================================
+    // RESOLUTION
+    // =====================================================
+
+    const resolvedCurrentCount = statusCounts.resolved + statusCounts.closed;
+
+    const resolutionRate = calculatePercentage(
+      resolvedCurrentCount,
+      totalTickets,
+    );
+
+    // =====================================================
+    // AI VS HUMAN RESOLUTION
+    // =====================================================
+
+    let aiResolved = 0;
+    let humanResolved = 0;
+
+    currentTickets.forEach((ticket) => {
+      const resolvedHistory = (ticket.statusHistory || []).filter(
+        (history) =>
+          history.status === "resolved" || history.status === "closed",
+      );
+
+      if (resolvedHistory.length === 0) {
+        return;
+      }
+
+      const lastResolution = resolvedHistory[resolvedHistory.length - 1];
+
+      if (lastResolution.changedByRole === "ai") {
+        aiResolved++;
+      } else if (
+        lastResolution.changedByRole === "agent" ||
+        lastResolution.changedByRole === "admin"
+      ) {
+        humanResolved++;
+      }
+    });
+
+    // Some older tickets might not have a resolution history.
+    // Don't artificially classify them as AI or human.
+
+    const totalResolvedByMethod = aiResolved + humanResolved;
+
+    const aiResolutionRate = calculatePercentage(
+      aiResolved,
+      totalResolvedByMethod,
+    );
+
+    // =====================================================
+    // MESSAGE ANALYTICS
+    // =====================================================
+
+    let totalMessages = 0;
+    let customerMessages = 0;
+    let aiMessages = 0;
+    let agentMessages = 0;
+    let systemMessages = 0;
+
+    currentTickets.forEach((ticket) => {
+      const messages = ticket.conversation || [];
+
+      totalMessages += messages.length;
+
+      messages.forEach((message) => {
+        switch (message.senderRole) {
+          case "customer":
+            customerMessages++;
+            break;
+
+          case "ai":
+            aiMessages++;
+            break;
+
+          case "agent":
+          case "admin":
+            agentMessages++;
+            break;
+
+          case "system":
+            systemMessages++;
+            break;
+
+          default:
+            break;
+        }
+      });
+    });
+
+    // =====================================================
+    // TICKET PRIORITY
+    // =====================================================
+
+    const priorityCounts = {
+      low: 0,
+      medium: 0,
+      high: 0,
+    };
+
+    currentTickets.forEach((ticket) => {
+      if (
+        Object.prototype.hasOwnProperty.call(priorityCounts, ticket.priority)
+      ) {
+        priorityCounts[ticket.priority]++;
+      }
+    });
+
+    // =====================================================
+    // TICKET CATEGORY
+    // =====================================================
+
+    const categoryCounts = {
+      Billing: 0,
+      Technical: 0,
+      Account: 0,
+      Subscription: 0,
+      General: 0,
+    };
+
+    currentTickets.forEach((ticket) => {
+      if (
+        Object.prototype.hasOwnProperty.call(categoryCounts, ticket.category)
+      ) {
+        categoryCounts[ticket.category]++;
+      }
+    });
+
+    // =====================================================
+    // SATISFACTION
+    // =====================================================
+
+    const currentRatings = currentTickets
+      .filter(
+        (ticket) =>
+          typeof ticket.customerRating === "number" &&
+          ticket.customerRating >= 1 &&
+          ticket.customerRating <= 5,
+      )
+      .map((ticket) => ticket.customerRating);
+
+    const previousRatings = previousTickets
+      .filter(
+        (ticket) =>
+          typeof ticket.customerRating === "number" &&
+          ticket.customerRating >= 1 &&
+          ticket.customerRating <= 5,
+      )
+      .map((ticket) => ticket.customerRating);
+
+    const averageRating =
+      currentRatings.length > 0
+        ? Number(
+            (
+              currentRatings.reduce((sum, rating) => sum + rating, 0) /
+              currentRatings.length
+            ).toFixed(2),
+          )
+        : 0;
+
+    const previousAverageRating =
+      previousRatings.length > 0
+        ? Number(
+            (
+              previousRatings.reduce((sum, rating) => sum + rating, 0) /
+              previousRatings.length
+            ).toFixed(2),
+          )
+        : 0;
+
+    // Convert 1-5 rating into percentage.
+    const satisfactionPercentage =
+      averageRating > 0 ? Math.round((averageRating / 5) * 100) : 0;
+
+    const previousSatisfactionPercentage =
+      previousAverageRating > 0
+        ? Math.round((previousAverageRating / 5) * 100)
+        : 0;
+
+    const satisfactionChange =
+      satisfactionPercentage - previousSatisfactionPercentage;
+
+    // =====================================================
+    // RATING DISTRIBUTION
+    // =====================================================
+
+    const ratingDistribution = {
+      1: 0,
+      2: 0,
+      3: 0,
+      4: 0,
+      5: 0,
+    };
+
+    currentRatings.forEach((rating) => {
+      ratingDistribution[rating]++;
+    });
+
+    // =====================================================
+    // RESPONSE TIME
+    //
+    // First AI/agent/admin response after ticket creation.
+    // =====================================================
+
+    const responseTimes = [];
+
+    currentTickets.forEach((ticket) => {
+      const createdAt = new Date(ticket.createdAt);
+
+      const firstResponse = (ticket.conversation || [])
+        .filter(
+          (message) =>
+            message.senderRole === "ai" ||
+            message.senderRole === "agent" ||
+            message.senderRole === "admin",
+        )
+        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))[0];
+
+      if (firstResponse?.createdAt) {
+        const responseTime =
+          new Date(firstResponse.createdAt).getTime() - createdAt.getTime();
+
+        if (responseTime >= 0) {
+          responseTimes.push(responseTime);
+        }
+      }
+    });
+
+    const averageResponseTimeMs =
+      responseTimes.length > 0
+        ? responseTimes.reduce((sum, value) => sum + value, 0) /
+          responseTimes.length
+        : 0;
+
+    // =====================================================
+    // PREVIOUS RESPONSE TIME
+    // =====================================================
+
+    const previousResponseTimes = [];
+
+    previousTickets.forEach((ticket) => {
+      const createdAt = new Date(ticket.createdAt);
+
+      const firstResponse = (ticket.conversation || [])
+        .filter(
+          (message) =>
+            message.senderRole === "ai" ||
+            message.senderRole === "agent" ||
+            message.senderRole === "admin",
+        )
+        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))[0];
+
+      if (firstResponse?.createdAt) {
+        const responseTime =
+          new Date(firstResponse.createdAt).getTime() - createdAt.getTime();
+
+        if (responseTime >= 0) {
+          previousResponseTimes.push(responseTime);
+        }
+      }
+    });
+
+    const previousAverageResponseTimeMs =
+      previousResponseTimes.length > 0
+        ? previousResponseTimes.reduce((sum, value) => sum + value, 0) /
+          previousResponseTimes.length
+        : 0;
+
+    const responseTimeDifference =
+      averageResponseTimeMs - previousAverageResponseTimeMs;
+
+    // =====================================================
+    // RESOLUTION TIME
+    //
+    // resolvedAt - createdAt
+    // =====================================================
+
+    const resolutionTimes = [];
+
+    currentTickets.forEach((ticket) => {
+      if (ticket.resolvedAt && ticket.createdAt) {
+        const duration =
+          new Date(ticket.resolvedAt).getTime() -
+          new Date(ticket.createdAt).getTime();
+
+        if (duration >= 0) {
+          resolutionTimes.push(duration);
+        }
+      }
+    });
+
+    const averageResolutionTimeMs =
+      resolutionTimes.length > 0
+        ? resolutionTimes.reduce((sum, value) => sum + value, 0) /
+          resolutionTimes.length
+        : 0;
+
+    // =====================================================
+    // PREVIOUS RESOLUTION TIME
+    // =====================================================
+
+    const previousResolutionTimes = [];
+
+    previousTickets.forEach((ticket) => {
+      if (ticket.resolvedAt && ticket.createdAt) {
+        const duration =
+          new Date(ticket.resolvedAt).getTime() -
+          new Date(ticket.createdAt).getTime();
+
+        if (duration >= 0) {
+          previousResolutionTimes.push(duration);
+        }
+      }
+    });
+
+    const previousAverageResolutionTimeMs =
+      previousResolutionTimes.length > 0
+        ? previousResolutionTimes.reduce((sum, value) => sum + value, 0) /
+          previousResolutionTimes.length
+        : 0;
+
+    // =====================================================
+    // ESCALATIONS
+    // =====================================================
+
+    const escalatedTickets = currentTickets.filter(
+      (ticket) => ticket.isEscalated === true,
+    ).length;
+
+    const escalationRate = calculatePercentage(escalatedTickets, totalTickets);
+
+    // =====================================================
+    // ATTACHMENTS
+    // =====================================================
+
+    let ticketAttachments = 0;
+    let conversationAttachments = 0;
+
+    currentTickets.forEach((ticket) => {
+      ticketAttachments += Array.isArray(ticket.attachments)
+        ? ticket.attachments.length
+        : 0;
+
+      (ticket.conversation || []).forEach((message) => {
+        conversationAttachments += Array.isArray(message.attachments)
+          ? message.attachments.length
+          : 0;
+      });
+    });
+
+    const totalAttachments = ticketAttachments + conversationAttachments;
+
+    // =====================================================
+    // ACTIVITY DATA
+    // =====================================================
+
+    const activityMap = new Map();
+
+    const addActivity = (date, field) => {
+      if (!date) {
+        return;
+      }
+
+      const activityDate = new Date(date);
+
+      if (Number.isNaN(activityDate.getTime())) {
+        return;
+      }
+
+      if (activityDate < currentStart || activityDate > now) {
+        return;
+      }
+
+      const key = activityDate.toISOString().slice(0, 10);
+
+      if (!activityMap.has(key)) {
+        activityMap.set(key, {
+          date: key,
+          conversations: 0,
+          tickets: 0,
+          resolved: 0,
+          messages: 0,
+        });
+      }
+
+      activityMap.get(key)[field]++;
+    };
+
+    currentTickets.forEach((ticket) => {
+      addActivity(ticket.createdAt, "tickets");
+
+      addActivity(ticket.createdAt, "conversations");
+
+      if (ticket.resolvedAt) {
+        addActivity(ticket.resolvedAt, "resolved");
+      }
+
+      const messages = ticket.conversation || [];
+
+      messages.forEach((message) => {
+        addActivity(message.createdAt, "messages");
+      });
+    });
+
+    // =====================================================
+    // BUILD CHART DATA
+    // =====================================================
+
+    const activity = [];
+
+    if (days === 7) {
+      for (let i = 0; i < 7; i++) {
+        const date = new Date(currentStart);
+
+        date.setDate(currentStart.getDate() + i);
+
+        const key = date.toISOString().slice(0, 10);
+
+        const item = activityMap.get(key);
+
+        activity.push({
+          label: date.toLocaleDateString("en-US", {
+            weekday: "short",
+          }),
+
+          date: key,
+
+          conversations: item?.conversations || 0,
+
+          tickets: item?.tickets || 0,
+
+          resolved: item?.resolved || 0,
+
+          messages: item?.messages || 0,
+        });
+      }
+    } else if (days === 30) {
+      for (let i = 0; i < 30; i++) {
+        const date = new Date(currentStart);
+
+        date.setDate(currentStart.getDate() + i);
+
+        const key = date.toISOString().slice(0, 10);
+
+        const item = activityMap.get(key);
+
+        activity.push({
+          label: date.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+          }),
+
+          date: key,
+
+          conversations: item?.conversations || 0,
+
+          tickets: item?.tickets || 0,
+
+          resolved: item?.resolved || 0,
+
+          messages: item?.messages || 0,
+        });
+      }
+    } else {
+      // 90 days: group by month.
+      const monthlyMap = new Map();
+
+      for (let i = 0; i < 90; i++) {
+        const date = new Date(currentStart);
+
+        date.setDate(currentStart.getDate() + i);
+
+        const monthKey = `${date.getFullYear()}-${String(
+          date.getMonth() + 1,
+        ).padStart(2, "0")}`;
+
+        if (!monthlyMap.has(monthKey)) {
+          monthlyMap.set(monthKey, {
+            date: monthKey,
+            conversations: 0,
+            tickets: 0,
+            resolved: 0,
+            messages: 0,
+          });
+        }
+
+        const item = activityMap.get(date.toISOString().slice(0, 10));
+
+        if (item) {
+          const month = monthlyMap.get(monthKey);
+
+          month.conversations += item.conversations;
+
+          month.tickets += item.tickets;
+
+          month.resolved += item.resolved;
+
+          month.messages += item.messages;
+        }
+      }
+
+      monthlyMap.forEach((item) => {
+        const [year, month] = item.date.split("-");
+
+        const displayDate = new Date(Number(year), Number(month) - 1, 1);
+
+        activity.push({
+          ...item,
+
+          label: displayDate.toLocaleDateString("en-US", {
+            month: "short",
+          }),
+        });
+      });
+    }
+
+    // =====================================================
+    // RECENT SUPPORT ACTIVITY
+    // =====================================================
+
+    const recentActivity = [];
+
+    currentTickets.forEach((ticket) => {
+      // Ticket created
+      recentActivity.push({
+        id: `${ticket._id}-created`,
+        type: "ticket_created",
+        title: `Ticket #${ticket.ticketNumber || ticket._id} was created`,
+        description: ticket.subject,
+        timestamp: ticket.createdAt,
+      });
+
+      // Ticket resolved
+      if (ticket.resolvedAt) {
+        recentActivity.push({
+          id: `${ticket._id}-resolved`,
+          type: "resolved",
+          title: `Ticket #${ticket.ticketNumber || ticket._id} was resolved`,
+          description: ticket.subject,
+          timestamp: ticket.resolvedAt,
+        });
+      }
+
+      // Ticket closed
+      if (ticket.closedAt) {
+        recentActivity.push({
+          id: `${ticket._id}-closed`,
+          type: "closed",
+          title: `Ticket #${ticket.ticketNumber || ticket._id} was closed`,
+          description: ticket.subject,
+          timestamp: ticket.closedAt,
+        });
+      }
+
+      // Escalated
+      if (ticket.escalatedAt) {
+        recentActivity.push({
+          id: `${ticket._id}-escalated`,
+          type: "escalated",
+          title: `Ticket #${ticket.ticketNumber || ticket._id} was escalated`,
+          description: ticket.escalationReason || ticket.subject,
+          timestamp: ticket.escalatedAt,
+        });
+      }
+
+      // Conversation activity
+      (ticket.conversation || []).forEach((message) => {
+        let type = "message";
+        let title = "New support message";
+
+        if (message.senderRole === "ai") {
+          type = "ai";
+          title = "AI Support replied";
+        } else if (
+          message.senderRole === "agent" ||
+          message.senderRole === "admin"
+        ) {
+          type = "agent";
+          title = "Support agent replied";
+        } else if (message.senderRole === "customer") {
+          type = "customer";
+          title = "You replied to a ticket";
+        }
+
+        recentActivity.push({
+          id: `${ticket._id}-message-${message._id}`,
+          type,
+          title,
+          description: message.message?.slice(0, 120) || "",
+          timestamp: message.createdAt,
+        });
+      });
+    });
+
+    recentActivity.sort(
+      (a, b) => new Date(b.timestamp) - new Date(a.timestamp),
+    );
+
+    const limitedRecentActivity = recentActivity.slice(0, 10);
+
+    // =====================================================
+    // OPEN TICKETS
+    // =====================================================
+
+    const openTickets =
+      allStatusCounts.open +
+      allStatusCounts["in-progress"] +
+      allStatusCounts.waiting;
+
+    const resolvedTickets = allStatusCounts.resolved + allStatusCounts.closed;
+
+    const totalHistoricalTickets = allCustomerTickets.length;
+
+    const historicalResolutionRate = calculatePercentage(
+      resolvedTickets,
+      totalHistoricalTickets,
+    );
+
+    // =====================================================
+    // MESSAGE PERCENTAGES
+    // =====================================================
+
+    const aiMessagePercentage = calculatePercentage(aiMessages, totalMessages);
+
+    const agentMessagePercentage = calculatePercentage(
+      agentMessages,
+      totalMessages,
+    );
+
+    const customerMessagePercentage = calculatePercentage(
+      customerMessages,
+      totalMessages,
+    );
+
+    // =====================================================
+    // RESPONSE TIME CHANGE
+    // =====================================================
+
+    let responseTimeChange = 0;
+
+    if (averageResponseTimeMs > 0 && previousAverageResponseTimeMs > 0) {
+      responseTimeChange = Math.round(
+        ((averageResponseTimeMs - previousAverageResponseTimeMs) /
+          previousAverageResponseTimeMs) *
+          100,
+      );
+    }
+
+    // =====================================================
+    // RESOLUTION TIME CHANGE
+    // =====================================================
+
+    let resolutionTimeChange = 0;
+
+    if (averageResolutionTimeMs > 0 && previousAverageResolutionTimeMs > 0) {
+      resolutionTimeChange = Math.round(
+        ((averageResolutionTimeMs - previousAverageResolutionTimeMs) /
+          previousAverageResolutionTimeMs) *
+          100,
+      );
+    }
+
+    // =====================================================
+    // RESPONSE
+    // =====================================================
+
+    return res.status(200).json({
+      success: true,
+
+      period: {
+        value: period,
+        days,
+        currentStart,
+        currentEnd: now,
+        previousStart,
+        previousEnd: currentStart,
+      },
+
+      overview: {
+        totalTickets,
+        totalConversations,
+
+        previousTickets: previousTickets.length,
+
+        previousConversations,
+
+        ticketChange: calculateChange(totalTickets, previousTickets.length),
+
+        conversationChange: calculateChange(
+          totalConversations,
+          previousConversations,
+        ),
+
+        openTickets,
+        resolvedTickets,
+
+        resolutionRate,
+        historicalResolutionRate,
+      },
+
+      status: {
+        current: statusCounts,
+        allTime: allStatusCounts,
+      },
+
+      resolution: {
+        resolved: resolvedCurrentCount,
+
+        aiResolved,
+        humanResolved,
+
+        aiResolutionRate,
+
+        totalResolvedByMethod,
+      },
+
+      messages: {
+        total: totalMessages,
+
+        customer: customerMessages,
+        ai: aiMessages,
+        agents: agentMessages,
+        system: systemMessages,
+
+        customerPercentage: customerMessagePercentage,
+
+        aiPercentage: aiMessagePercentage,
+
+        agentPercentage: agentMessagePercentage,
+      },
+
+      responseTime: {
+        average: formatDuration(averageResponseTimeMs),
+
+        averageMilliseconds: Math.round(averageResponseTimeMs),
+
+        previousAverage: formatDuration(previousAverageResponseTimeMs),
+
+        previousAverageMilliseconds: Math.round(previousAverageResponseTimeMs),
+
+        difference: formatDuration(Math.abs(responseTimeDifference)),
+
+        improved: responseTimeDifference < 0,
+
+        changePercentage: responseTimeChange,
+      },
+
+      resolutionTime: {
+        average: formatDuration(averageResolutionTimeMs),
+
+        averageMilliseconds: Math.round(averageResolutionTimeMs),
+
+        previousAverage: formatDuration(previousAverageResolutionTimeMs),
+
+        previousAverageMilliseconds: Math.round(
+          previousAverageResolutionTimeMs,
+        ),
+
+        changePercentage: resolutionTimeChange,
+
+        improved: resolutionTimeChange < 0,
+      },
+
+      satisfaction: {
+        averageRating,
+        previousAverageRating,
+
+        percentage: satisfactionPercentage,
+
+        previousPercentage: previousSatisfactionPercentage,
+
+        change: satisfactionChange,
+
+        totalRatings: currentRatings.length,
+
+        previousRatings: previousRatings.length,
+
+        distribution: ratingDistribution,
+      },
+
+      priorities: {
+        counts: priorityCounts,
+
+        data: Object.entries(priorityCounts).map(([name, count]) => ({
+          name,
+          count,
+          percentage: calculatePercentage(count, totalTickets),
+        })),
+      },
+
+      categories: {
+        counts: categoryCounts,
+
+        data: Object.entries(categoryCounts).map(([name, count]) => ({
+          name,
+          count,
+          percentage: calculatePercentage(count, totalTickets),
+        })),
+      },
+
+      escalations: {
+        total: escalatedTickets,
+        percentage: escalationRate,
+      },
+
+      attachments: {
+        ticketAttachments,
+        conversationAttachments,
+        total: totalAttachments,
+      },
+
+      activity,
+
+      recentActivity: limitedRecentActivity,
+    });
+  } catch (error) {
+    console.error("GET CUSTOMER ANALYTICS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to load customer analytics.",
+    });
+  }
+};
