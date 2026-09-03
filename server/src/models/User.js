@@ -60,6 +60,10 @@ const userSchema = new mongoose.Schema(
       maxlength: 150,
     },
 
+    // ==========================================
+    // CUSTOMER PREFERENCES
+    // ==========================================
+
     timezone: {
       type: String,
       default: "Asia/Karachi",
@@ -70,6 +74,60 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "English",
       trim: true,
+    },
+
+    theme: {
+      type: String,
+      enum: ["light", "dark", "system"],
+      default: "dark",
+    },
+
+    preferredChannel: {
+      type: String,
+      enum: ["chat", "email", "both"],
+      default: "chat",
+    },
+
+    // ==========================================
+    // NOTIFICATION PREFERENCES
+    // ==========================================
+
+    notificationPreferences: {
+      email: {
+        type: Boolean,
+        default: true,
+      },
+
+      ticketUpdates: {
+        type: Boolean,
+        default: true,
+      },
+
+      newMessages: {
+        type: Boolean,
+        default: true,
+      },
+
+      ticketResolved: {
+        type: Boolean,
+        default: true,
+      },
+    },
+
+    // ==========================================
+    // AI SUPPORT PREFERENCES
+    // ==========================================
+
+    aiSupport: {
+      enabled: {
+        type: Boolean,
+        default: true,
+      },
+
+      allowAutoResponse: {
+        type: Boolean,
+        default: true,
+      },
     },
 
     // ==========================================

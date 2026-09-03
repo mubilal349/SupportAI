@@ -26,11 +26,32 @@ import {
   X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import axios from "axios";
 import api from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
 
-const API_URL = "http://localhost:8000/api";
+const DEFAULT_PROFILE = {
+  name: "",
+  email: "",
+  phone: "",
+  company: "",
+  timezone: "Asia/Karachi",
+  language: "English",
+  avatar: "",
+  avatarFile: undefined,
+};
+
+const DEFAULT_NOTIFICATIONS = {
+  email: true,
+  conversation: true,
+  ticket: true,
+  marketing: false,
+};
+
+const DEFAULT_SUPPORT_PREFERENCES = {
+  aiFirst: true,
+  autoEscalation: true,
+  satisfaction: true,
+};
 
 const Profile = () => {
   const { user, logout } = useAuth();
@@ -38,21 +59,16 @@ const Profile = () => {
   const [activeSection, setActiveSection] = useState("profile");
   const [isEditing, setIsEditing] = useState(false);
 
-  // IMPORTANT:
-  // This is the loading state used by the JSX below.
   const [loadingProfile, setLoadingProfile] = useState(true);
-
   const [savingProfile, setSavingProfile] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
 
-  const [profile, setProfile] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    company: "",
-    timezone: "Asia/Karachi",
-    language: "English",
-    avatar: "",
-    avatarFile: undefined,
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+
+  const [accountInfo, setAccountInfo] = useState({
+    createdAt: null,
+    lastSeen: null,
+    status: "active",
   });
 
   const [passwords, setPasswords] = useState({
@@ -65,18 +81,17 @@ const Profile = () => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const [notifications, setNotifications] = useState({
-    email: true,
-    conversation: true,
-    ticket: true,
-    marketing: false,
-  });
+  /*
+   * These preferences are currently frontend-only.
+   *
+   * Your current User.js does not have database fields for these
+   * preferences. They can be connected to MongoDB later.
+   */
+  const [notifications, setNotifications] = useState(DEFAULT_NOTIFICATIONS);
 
-  const [supportPreferences, setSupportPreferences] = useState({
-    aiFirst: true,
-    autoEscalation: true,
-    satisfaction: true,
-  });
+  const [supportPreferences, setSupportPreferences] = useState(
+    DEFAULT_SUPPORT_PREFERENCES,
+  );
 
   const [saveMessage, setSaveMessage] = useState("");
   const [error, setError] = useState("");
@@ -100,13 +115,84 @@ const Profile = () => {
 
     const normalizedPath = avatar.startsWith("/") ? avatar : `/${avatar}`;
 
-    return `http://localhost:8000${normalizedPath}`;
+    const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+
+    /*
+     * VITE_API_URL normally contains /api.
+     * We need the server root for /uploads.
+     */
+    const serverUrl = baseUrl.replace(/\/api\/?$/, "");
+
+    return `${serverUrl}${normalizedPath}`;
+  };
+
+  /*
+   * ============================================================
+   * INITIALS
+   * ============================================================
+   */
+
+  const getInitials = () => {
+    const name = profile.name || "Customer";
+
+    return name
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+  };
+
+  /*
+   * ============================================================
+   * DATE FORMATTERS
+   * ============================================================
+   */
+
+  const formatMemberSince = (date) => {
+    if (!date) return "Not available";
+
+    const parsedDate = new Date(date);
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      return "Not available";
+    }
+
+    return parsedDate.toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+    });
+  };
+
+  const formatLastSeen = (date) => {
+    if (!date) return "Not available";
+
+    const parsedDate = new Date(date);
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      return "Not available";
+    }
+
+    return parsedDate.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
   };
 
   /*
    * ============================================================
    * LOAD PROFILE
    * ============================================================
+   *
+   * Actual backend:
+   *
+   * GET /api/auth/profile
+   *
+   * authenticateToken
    */
 
   const loadProfile = async () => {
@@ -114,28 +200,38 @@ const Profile = () => {
       setLoadingProfile(true);
       setError("");
 
-      const response = await api.get("/customer/profile");
+      const response = await api.get("/auth/profile");
 
       console.log("PROFILE RESPONSE:", response.data);
 
-      if (response.data?.success && response.data?.user) {
-        const user = response.data.user;
+      const loadedUser = response.data?.user;
 
-        setProfile({
-          name: user.name || "",
-          email: user.email || "",
-          phone: user.phone || "",
-          company: user.company || "",
-          timezone: user.timezone || "Asia/Karachi",
-          language: user.language || "English",
-          avatar: user.avatar || "",
-          avatarFile: undefined,
-        });
+      if (!response.data?.success || !loadedUser) {
+        throw new Error(response.data?.message || "Unable to load profile.");
       }
+
+      setProfile({
+        name: loadedUser.name || "",
+        email: loadedUser.email || "",
+        phone: loadedUser.phone || "",
+        company: loadedUser.company || "",
+        timezone: loadedUser.timezone || "Asia/Karachi",
+        language: loadedUser.language || "English",
+        avatar: loadedUser.avatar || "",
+        avatarFile: undefined,
+      });
+
+      setAccountInfo({
+        createdAt: loadedUser.createdAt || null,
+        lastSeen: loadedUser.lastSeen || null,
+        status: loadedUser.status || "active",
+      });
     } catch (err) {
       console.error("Load profile error:", err.response?.data || err.message);
 
-      setError(err.response?.data?.message || "Failed to load profile");
+      setError(
+        err.response?.data?.message || err.message || "Failed to load profile.",
+      );
     } finally {
       setLoadingProfile(false);
     }
@@ -144,6 +240,20 @@ const Profile = () => {
   useEffect(() => {
     loadProfile();
   }, []);
+
+  /*
+   * ============================================================
+   * CLEANUP AVATAR PREVIEW
+   * ============================================================
+   */
+
+  useEffect(() => {
+    return () => {
+      if (profile.avatar?.startsWith("blob:")) {
+        URL.revokeObjectURL(profile.avatar);
+      }
+    };
+  }, [profile.avatar]);
 
   /*
    * ============================================================
@@ -158,12 +268,28 @@ const Profile = () => {
       ...prev,
       [name]: value,
     }));
+
+    setError("");
+    setSaveMessage("");
   };
 
   /*
    * ============================================================
-   * SAVE PROFILE + AVATAR
+   * SAVE PROFILE
    * ============================================================
+   *
+   * Actual backend:
+   *
+   * PUT /api/auth/profile
+   *
+   * Supports:
+   * name
+   * email
+   * phone
+   * company
+   * timezone
+   * language
+   * avatar
    */
 
   const handleSaveProfile = async () => {
@@ -172,12 +298,22 @@ const Profile = () => {
       setError("");
       setSaveMessage("");
 
+      if (!profile.name.trim()) {
+        setError("Full name is required.");
+        return;
+      }
+
+      if (!profile.email.trim()) {
+        setError("Email address is required.");
+        return;
+      }
+
       const formData = new FormData();
 
-      formData.append("name", profile.name || "");
-      formData.append("email", profile.email || "");
-      formData.append("phone", profile.phone || "");
-      formData.append("company", profile.company || "");
+      formData.append("name", profile.name.trim());
+      formData.append("email", profile.email.trim());
+      formData.append("phone", profile.phone.trim());
+      formData.append("company", profile.company.trim());
       formData.append("timezone", profile.timezone || "Asia/Karachi");
       formData.append("language", profile.language || "English");
 
@@ -185,45 +321,74 @@ const Profile = () => {
         formData.append("avatar", profile.avatarFile);
       }
 
-      const response = await api.put("/customer/profile", formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      });
+      /*
+       * IMPORTANT:
+       * Do not manually set Content-Type here.
+       *
+       * Axios/browser will automatically set:
+       *
+       * multipart/form-data; boundary=...
+       */
+
+      const response = await api.put("/auth/profile", formData);
 
       console.log("UPDATED PROFILE:", response.data);
 
-      if (response.data?.success && response.data?.user) {
-        const updatedUser = response.data.user;
+      const updatedUser = response.data?.user;
 
-        setProfile({
-          name: updatedUser.name || "",
-          email: updatedUser.email || "",
-          phone: updatedUser.phone || "",
-          company: updatedUser.company || "",
-          timezone: updatedUser.timezone || "Asia/Karachi",
-          language: updatedUser.language || "English",
-          avatar: updatedUser.avatar || "",
-          avatarFile: undefined,
-        });
-
-        setIsEditing(false);
-        setSaveMessage("Profile updated successfully.");
-
-        setTimeout(() => {
-          setSaveMessage("");
-        }, 3000);
+      if (!response.data?.success || !updatedUser) {
+        throw new Error(response.data?.message || "Unable to update profile.");
       }
+
+      setProfile({
+        name: updatedUser.name || "",
+        email: updatedUser.email || "",
+        phone: updatedUser.phone || "",
+        company: updatedUser.company || "",
+        timezone: updatedUser.timezone || "Asia/Karachi",
+        language: updatedUser.language || "English",
+        avatar: updatedUser.avatar || "",
+        avatarFile: undefined,
+      });
+
+      setAccountInfo((prev) => ({
+        ...prev,
+        createdAt: updatedUser.createdAt || prev.createdAt,
+        lastSeen: updatedUser.lastSeen || prev.lastSeen,
+        status: updatedUser.status || prev.status,
+      }));
+
+      setIsEditing(false);
+      setSaveMessage("Profile updated successfully.");
+
+      setTimeout(() => {
+        setSaveMessage("");
+      }, 3000);
     } catch (err) {
       console.error("Save profile error:", err.response?.data || err.message);
 
       setError(
         err.response?.data?.message ||
+          err.message ||
           "Unable to update your profile. Please try again.",
       );
     } finally {
       setSavingProfile(false);
     }
+  };
+
+  /*
+   * ============================================================
+   * CANCEL EDITING
+   * ============================================================
+   */
+
+  const handleCancelEditing = async () => {
+    setIsEditing(false);
+    setError("");
+    setSaveMessage("");
+
+    await loadProfile();
   };
 
   /*
@@ -240,23 +405,29 @@ const Profile = () => {
     setError("");
     setSaveMessage("");
 
-    // Validate file type
     const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
 
     if (!allowedTypes.includes(file.type)) {
       setError("Please select a JPG, PNG, or WEBP image.");
+
+      event.target.value = "";
       return;
     }
 
-    // Validate file size - 5MB
     if (file.size > 5 * 1024 * 1024) {
       setError("Profile picture must be smaller than 5MB.");
+
+      event.target.value = "";
       return;
     }
 
     /*
-     * Create temporary preview.
+     * Revoke previous temporary preview.
      */
+    if (profile.avatar?.startsWith("blob:")) {
+      URL.revokeObjectURL(profile.avatar);
+    }
+
     const previewUrl = URL.createObjectURL(file);
 
     setProfile((prev) => ({
@@ -268,7 +439,7 @@ const Profile = () => {
 
   /*
    * ============================================================
-   * PASSWORD
+   * PASSWORD INPUT
    * ============================================================
    */
 
@@ -279,7 +450,27 @@ const Profile = () => {
       ...prev,
       [name]: value,
     }));
+
+    setError("");
+    setSaveMessage("");
   };
+
+  /*
+   * ============================================================
+   * CHANGE PASSWORD
+   * ============================================================
+   *
+   * Actual backend:
+   *
+   * PUT /api/auth/change-password
+   *
+   * Backend expects:
+   *
+   * {
+   *   current,
+   *   newPassword
+   * }
+   */
 
   const handleChangePassword = async (e) => {
     e.preventDefault();
@@ -303,25 +494,24 @@ const Profile = () => {
     }
 
     try {
-      const token = localStorage.getItem("token");
+      setChangingPassword(true);
 
-      if (!token) {
-        setError("Authentication required. Please log in again.");
-        return;
+      /*
+       * api.js automatically adds:
+       *
+       * Authorization: Bearer <supportai_token>
+       */
+
+      const response = await api.put("/auth/change-password", {
+        current: passwords.current,
+        newPassword: passwords.newPassword,
+      });
+
+      console.log("PASSWORD RESPONSE:", response.data);
+
+      if (!response.data?.success) {
+        throw new Error(response.data?.message || "Unable to change password.");
       }
-
-      await axios.put(
-        `${API_URL}/customer/password`,
-        {
-          currentPassword: passwords.current,
-          newPassword: passwords.newPassword,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
 
       setPasswords({
         current: "",
@@ -341,27 +531,13 @@ const Profile = () => {
       );
 
       setError(
-        err.response?.data?.message || "Unable to change your password.",
+        err.response?.data?.message ||
+          err.message ||
+          "Unable to change your password.",
       );
+    } finally {
+      setChangingPassword(false);
     }
-  };
-
-  /*
-   * ============================================================
-   * INITIALS
-   * ============================================================
-   */
-
-  const getInitials = () => {
-    const name = profile.name || "Customer";
-
-    return name
-      .split(" ")
-      .filter(Boolean)
-      .map((part) => part[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase();
   };
 
   /*
@@ -399,6 +575,20 @@ const Profile = () => {
 
   /*
    * ============================================================
+   * STATUS HELPERS
+   * ============================================================
+   */
+
+  const normalizedStatus = String(accountInfo.status || "active").toLowerCase();
+
+  const isActive = normalizedStatus === "active";
+
+  const statusLabel = isActive
+    ? "Active"
+    : normalizedStatus.charAt(0).toUpperCase() + normalizedStatus.slice(1);
+
+  /*
+   * ============================================================
    * RENDER
    * ============================================================
    */
@@ -414,7 +604,7 @@ const Profile = () => {
           <div className="flex items-center gap-3">
             <Link
               to="/support"
-              className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600"
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 transition hover:bg-blue-700"
             >
               <MessageSquare className="h-5 w-5" />
             </Link>
@@ -452,6 +642,7 @@ const Profile = () => {
 
       <main className="mx-auto max-w-7xl px-6 py-8">
         {/* Heading */}
+
         <div className="mb-8">
           <p className="mb-2 text-sm text-slate-600">Account</p>
 
@@ -463,7 +654,10 @@ const Profile = () => {
           </p>
         </div>
 
-        {/* Error */}
+        {/* ======================================================
+            ERROR
+        ====================================================== */}
+
         {error && (
           <div className="mb-6 flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -473,14 +667,18 @@ const Profile = () => {
             <button
               type="button"
               onClick={() => setError("")}
-              className="ml-auto"
+              className="ml-auto cursor-pointer"
+              aria-label="Close error"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
         )}
 
-        {/* Success */}
+        {/* ======================================================
+            SUCCESS
+        ====================================================== */}
+
         {saveMessage && (
           <div className="mb-6 flex items-center gap-3 rounded-xl border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-400">
             <Check className="h-4 w-4 shrink-0" />
@@ -490,7 +688,8 @@ const Profile = () => {
             <button
               type="button"
               onClick={() => setSaveMessage("")}
-              className="ml-auto"
+              className="ml-auto cursor-pointer"
+              aria-label="Close success message"
             >
               <X className="h-4 w-4" />
             </button>
@@ -518,10 +717,10 @@ const Profile = () => {
             <aside>
               <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
                 {/* User mini profile */}
+
                 <div className="border-b border-slate-800 p-5">
                   <div className="flex items-center gap-3">
                     <div className="relative h-12 w-12 shrink-0 sm:h-14 sm:w-14">
-                      {" "}
                       {profile.avatar ? (
                         <img
                           src={getAvatarUrl(profile.avatar)}
@@ -532,16 +731,21 @@ const Profile = () => {
                               "Avatar failed to load:",
                               e.currentTarget.src,
                             );
+
                             e.currentTarget.style.display = "none";
                           }}
                         />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center rounded-2xl bg-blue-600 text-base font-bold sm:text-lg">
-                          {" "}
-                          {getInitials()}{" "}
+                          {getInitials()}
                         </div>
-                      )}{" "}
-                      <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-slate-900 bg-emerald-500 sm:h-3.5 sm:w-3.5" />{" "}
+                      )}
+
+                      <span
+                        className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-slate-900 sm:h-3.5 sm:w-3.5 ${
+                          isActive ? "bg-emerald-500" : "bg-slate-500"
+                        }`}
+                      />
                     </div>
 
                     <div className="min-w-0">
@@ -557,6 +761,7 @@ const Profile = () => {
                 </div>
 
                 {/* Navigation */}
+
                 <nav className="p-2">
                   {menuItems.map((item) => {
                     const Icon = item.icon;
@@ -572,7 +777,7 @@ const Profile = () => {
                           setError("");
                           setSaveMessage("");
                         }}
-                        className={`mb-1 flex w-full items-center gap-3 rounded-xl p-3 text-left transition cursor-pointer ${
+                        className={`mb-1 flex w-full cursor-pointer items-center gap-3 rounded-xl p-3 text-left transition ${
                           active
                             ? "bg-blue-500/10 text-blue-400"
                             : "text-slate-500 hover:bg-slate-800 hover:text-slate-300"
@@ -599,11 +804,12 @@ const Profile = () => {
                 </nav>
 
                 {/* Logout */}
+
                 <div className="border-t border-slate-800 p-2">
                   <button
                     type="button"
                     onClick={logout}
-                    className="flex w-full items-center gap-3 rounded-xl p-3 text-left text-slate-500 transition hover:bg-red-500/5 hover:text-red-400 cursor-pointer"
+                    className="flex w-full cursor-pointer items-center gap-3 rounded-xl p-3 text-left text-slate-500 transition hover:bg-red-500/5 hover:text-red-400"
                   >
                     <LogOut className="h-4 w-4" />
 
@@ -613,17 +819,33 @@ const Profile = () => {
               </div>
 
               {/* Account status */}
-              <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+
+              <div
+                className={`mt-4 rounded-2xl border p-4 ${
+                  isActive
+                    ? "border-emerald-500/20 bg-emerald-500/5"
+                    : "border-amber-500/20 bg-amber-500/5"
+                }`}
+              >
                 <div className="flex gap-3">
-                  <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-400" />
+                  <ShieldCheck
+                    className={`h-5 w-5 shrink-0 ${
+                      isActive ? "text-emerald-400" : "text-amber-400"
+                    }`}
+                  />
 
                   <div>
-                    <p className="text-xs font-semibold text-emerald-400">
-                      Account secure
+                    <p
+                      className={`text-xs font-semibold ${
+                        isActive ? "text-emerald-400" : "text-amber-400"
+                      }`}
+                    >
+                      Account {statusLabel.toLowerCase()}
                     </p>
 
                     <p className="mt-1 text-[10px] leading-4 text-slate-600">
-                      Your account is protected and currently in good standing.
+                      Your SupportAI account is currently{" "}
+                      {statusLabel.toLowerCase()}.
                     </p>
                   </div>
                 </div>
@@ -642,6 +864,7 @@ const Profile = () => {
               {activeSection === "profile" && (
                 <div className="space-y-6">
                   {/* Profile card */}
+
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/60">
                     <div className="flex flex-col justify-between gap-5 border-b border-slate-800 p-6 sm:flex-row sm:items-center">
                       <div>
@@ -660,7 +883,7 @@ const Profile = () => {
                             setError("");
                             setSaveMessage("");
                           }}
-                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-800 cursor-pointer"
+                          className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-800"
                         >
                           <Edit3 className="h-4 w-4" />
                           Edit profile
@@ -669,13 +892,9 @@ const Profile = () => {
                         <div className="flex gap-2">
                           <button
                             type="button"
-                            onClick={() => {
-                              setIsEditing(false);
-                              setError("");
-                              loadProfile();
-                            }}
+                            onClick={handleCancelEditing}
                             disabled={savingProfile}
-                            className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm text-slate-400 hover:bg-slate-800 disabled:opacity-50"
+                            className="cursor-pointer rounded-xl border border-slate-700 px-4 py-2.5 text-sm text-slate-400 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             Cancel
                           </button>
@@ -684,7 +903,7 @@ const Profile = () => {
                             type="button"
                             onClick={handleSaveProfile}
                             disabled={savingProfile}
-                            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {savingProfile ? (
                               <>
@@ -704,6 +923,7 @@ const Profile = () => {
 
                     <div className="p-6">
                       {/* Avatar */}
+
                       <div className="mb-8 flex items-center gap-5">
                         <div className="relative">
                           <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl bg-blue-600 text-2xl font-bold">
@@ -752,10 +972,18 @@ const Profile = () => {
                           </p>
 
                           <div className="mt-2 flex items-center gap-2">
-                            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                            <span
+                              className={`h-2 w-2 rounded-full ${
+                                isActive ? "bg-emerald-500" : "bg-slate-500"
+                              }`}
+                            />
 
-                            <span className="text-xs text-emerald-400">
-                              Active account
+                            <span
+                              className={`text-xs ${
+                                isActive ? "text-emerald-400" : "text-slate-500"
+                              }`}
+                            >
+                              {statusLabel} account
                             </span>
                           </div>
 
@@ -768,8 +996,10 @@ const Profile = () => {
                       </div>
 
                       {/* Form */}
+
                       <div className="grid gap-5 md:grid-cols-2">
                         {/* Name */}
+
                         <div>
                           <label className="mb-2 block text-xs font-medium text-slate-400">
                             Full name
@@ -785,11 +1015,13 @@ const Profile = () => {
                               onChange={handleProfileChange}
                               disabled={!isEditing}
                               className="w-full rounded-xl border border-slate-800 bg-slate-950 py-3 pl-10 pr-4 text-sm text-white outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                              placeholder="Enter your full name"
                             />
                           </div>
                         </div>
 
                         {/* Email */}
+
                         <div>
                           <label className="mb-2 block text-xs font-medium text-slate-400">
                             Email address
@@ -805,11 +1037,13 @@ const Profile = () => {
                               onChange={handleProfileChange}
                               disabled={!isEditing}
                               className="w-full rounded-xl border border-slate-800 bg-slate-950 py-3 pl-10 pr-4 text-sm text-white outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                              placeholder="Enter your email"
                             />
                           </div>
                         </div>
 
                         {/* Phone */}
+
                         <div>
                           <label className="mb-2 block text-xs font-medium text-slate-400">
                             Phone number
@@ -825,11 +1059,13 @@ const Profile = () => {
                               onChange={handleProfileChange}
                               disabled={!isEditing}
                               className="w-full rounded-xl border border-slate-800 bg-slate-950 py-3 pl-10 pr-4 text-sm text-white outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                              placeholder="Enter your phone number"
                             />
                           </div>
                         </div>
 
                         {/* Company */}
+
                         <div>
                           <label className="mb-2 block text-xs font-medium text-slate-400">
                             Company
@@ -845,11 +1081,13 @@ const Profile = () => {
                               onChange={handleProfileChange}
                               disabled={!isEditing}
                               className="w-full rounded-xl border border-slate-800 bg-slate-950 py-3 pl-10 pr-4 text-sm text-white outline-none transition focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                              placeholder="Enter your company"
                             />
                           </div>
                         </div>
 
                         {/* Language */}
+
                         <div>
                           <label className="mb-2 block text-xs font-medium text-slate-400">
                             Language
@@ -862,15 +1100,20 @@ const Profile = () => {
                             disabled={!isEditing}
                             className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            <option>English</option>
-                            <option>Urdu</option>
-                            <option>German</option>
-                            <option>French</option>
-                            <option>Spanish</option>
+                            <option value="English">English</option>
+
+                            <option value="Urdu">Urdu</option>
+
+                            <option value="German">German</option>
+
+                            <option value="French">French</option>
+
+                            <option value="Spanish">Spanish</option>
                           </select>
                         </div>
 
                         {/* Timezone */}
+
                         <div>
                           <label className="mb-2 block text-xs font-medium text-slate-400">
                             Timezone
@@ -909,6 +1152,7 @@ const Profile = () => {
                   </div>
 
                   {/* Account information */}
+
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/60">
                     <div className="border-b border-slate-800 p-6">
                       <h3 className="font-semibold">Account information</h3>
@@ -920,6 +1164,7 @@ const Profile = () => {
 
                     <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-3">
                       {/* Member since */}
+
                       <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
                         <div className="flex items-center gap-3">
                           <CalendarDays className="h-5 w-5 text-blue-400" />
@@ -930,47 +1175,55 @@ const Profile = () => {
                             </p>
 
                             <p className="mt-1 text-sm font-medium">
-                              {user?.createdAt
-                                ? new Date(user.createdAt).toLocaleDateString(
-                                    "en-US",
-                                    {
-                                      month: "long",
-                                      year: "numeric",
-                                    },
-                                  )
-                                : "August 2026"}
+                              {formatMemberSince(
+                                accountInfo.createdAt || user?.createdAt,
+                              )}
                             </p>
                           </div>
                         </div>
                       </div>
 
                       {/* Last login */}
+
                       <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
                         <div className="flex items-center gap-3">
                           <Clock3 className="h-5 w-5 text-purple-400" />
 
                           <div>
                             <p className="text-[10px] uppercase tracking-wider text-slate-600">
-                              Last login
+                              Last seen
                             </p>
 
-                            <p className="mt-1 text-sm font-medium">Today</p>
+                            <p className="mt-1 text-sm font-medium">
+                              {formatLastSeen(
+                                accountInfo.lastSeen || user?.lastSeen,
+                              )}
+                            </p>
                           </div>
                         </div>
                       </div>
 
                       {/* Status */}
+
                       <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
                         <div className="flex items-center gap-3">
-                          <ShieldCheck className="h-5 w-5 text-emerald-400" />
+                          <ShieldCheck
+                            className={`h-5 w-5 ${
+                              isActive ? "text-emerald-400" : "text-amber-400"
+                            }`}
+                          />
 
                           <div>
                             <p className="text-[10px] uppercase tracking-wider text-slate-600">
                               Account status
                             </p>
 
-                            <p className="mt-1 text-sm font-medium text-emerald-400">
-                              Verified
+                            <p
+                              className={`mt-1 text-sm font-medium ${
+                                isActive ? "text-emerald-400" : "text-amber-400"
+                              }`}
+                            >
+                              {statusLabel}
                             </p>
                           </div>
                         </div>
@@ -1008,6 +1261,7 @@ const Profile = () => {
                       className="space-y-5 p-6"
                     >
                       {/* Current password */}
+
                       <div>
                         <label className="mb-2 block text-xs font-medium text-slate-400">
                           Current password
@@ -1023,6 +1277,7 @@ const Profile = () => {
                             onChange={handlePasswordChange}
                             className="w-full rounded-xl border border-slate-800 bg-slate-950 py-3 pl-10 pr-12 text-sm text-white outline-none focus:border-blue-500"
                             placeholder="Enter current password"
+                            autoComplete="current-password"
                           />
 
                           <button
@@ -1030,7 +1285,12 @@ const Profile = () => {
                             onClick={() =>
                               setShowCurrentPassword((prev) => !prev)
                             }
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-400"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-slate-600 hover:text-slate-400"
+                            aria-label={
+                              showCurrentPassword
+                                ? "Hide current password"
+                                : "Show current password"
+                            }
                           >
                             {showCurrentPassword ? (
                               <EyeOff className="h-4 w-4" />
@@ -1042,6 +1302,7 @@ const Profile = () => {
                       </div>
 
                       {/* New password */}
+
                       <div>
                         <label className="mb-2 block text-xs font-medium text-slate-400">
                           New password
@@ -1057,12 +1318,18 @@ const Profile = () => {
                             onChange={handlePasswordChange}
                             className="w-full rounded-xl border border-slate-800 bg-slate-950 py-3 pl-10 pr-12 text-sm text-white outline-none focus:border-blue-500"
                             placeholder="Enter new password"
+                            autoComplete="new-password"
                           />
 
                           <button
                             type="button"
                             onClick={() => setShowNewPassword((prev) => !prev)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-400"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-slate-600 hover:text-slate-400"
+                            aria-label={
+                              showNewPassword
+                                ? "Hide new password"
+                                : "Show new password"
+                            }
                           >
                             {showNewPassword ? (
                               <EyeOff className="h-4 w-4" />
@@ -1074,6 +1341,7 @@ const Profile = () => {
                       </div>
 
                       {/* Confirm password */}
+
                       <div>
                         <label className="mb-2 block text-xs font-medium text-slate-400">
                           Confirm new password
@@ -1089,6 +1357,7 @@ const Profile = () => {
                             onChange={handlePasswordChange}
                             className="w-full rounded-xl border border-slate-800 bg-slate-950 py-3 pl-10 pr-12 text-sm text-white outline-none focus:border-blue-500"
                             placeholder="Confirm new password"
+                            autoComplete="new-password"
                           />
 
                           <button
@@ -1096,7 +1365,12 @@ const Profile = () => {
                             onClick={() =>
                               setShowConfirmPassword((prev) => !prev)
                             }
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-400"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-slate-600 hover:text-slate-400"
+                            aria-label={
+                              showConfirmPassword
+                                ? "Hide password confirmation"
+                                : "Show password confirmation"
+                            }
                           >
                             {showConfirmPassword ? (
                               <EyeOff className="h-4 w-4" />
@@ -1108,6 +1382,7 @@ const Profile = () => {
                       </div>
 
                       {/* Requirements */}
+
                       <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
                         <p className="text-xs font-medium text-slate-400">
                           Password requirements
@@ -1115,37 +1390,71 @@ const Profile = () => {
 
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                           {[
-                            "At least 8 characters",
-                            "One uppercase letter",
-                            "One number",
-                            "One special character",
+                            {
+                              label: "At least 8 characters",
+                              valid: passwords.newPassword.length >= 8,
+                            },
+                            {
+                              label: "One uppercase letter",
+                              valid: /[A-Z]/.test(passwords.newPassword),
+                            },
+                            {
+                              label: "One number",
+                              valid: /\d/.test(passwords.newPassword),
+                            },
+                            {
+                              label: "One special character",
+                              valid: /[^A-Za-z0-9]/.test(passwords.newPassword),
+                            },
                           ].map((requirement) => (
                             <div
-                              key={requirement}
-                              className="flex items-center gap-2 text-xs text-slate-600"
+                              key={requirement.label}
+                              className={`flex items-center gap-2 text-xs ${
+                                requirement.valid
+                                  ? "text-emerald-400"
+                                  : "text-slate-600"
+                              }`}
                             >
-                              <Check className="h-3.5 w-3.5 text-emerald-500" />
+                              <Check
+                                className={`h-3.5 w-3.5 ${
+                                  requirement.valid
+                                    ? "text-emerald-500"
+                                    : "text-slate-700"
+                                }`}
+                              />
 
-                              {requirement}
+                              {requirement.label}
                             </div>
                           ))}
                         </div>
                       </div>
 
                       {/* Submit */}
+
                       <div className="flex justify-end">
                         <button
                           type="submit"
-                          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold hover:bg-blue-700 cursor-pointer"
+                          disabled={changingPassword}
+                          className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          <Save className="h-4 w-4" />
-                          Update password
+                          {changingPassword ? (
+                            <>
+                              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                              Updating...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="h-4 w-4" />
+                              Update password
+                            </>
+                          )}
                         </button>
                       </div>
                     </form>
                   </div>
 
                   {/* Security information */}
+
                   <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-6">
                     <div className="flex gap-4">
                       <ShieldCheck className="h-6 w-6 shrink-0 text-emerald-400" />
@@ -1238,6 +1547,26 @@ const Profile = () => {
                       }
                     />
                   </div>
+
+                  <div className="border-t border-slate-800 p-6">
+                    <div className="rounded-xl border border-blue-500/10 bg-blue-500/5 p-4">
+                      <div className="flex gap-3">
+                        <Bell className="h-5 w-5 shrink-0 text-blue-400" />
+
+                        <div>
+                          <p className="text-sm font-medium text-blue-400">
+                            Notification settings
+                          </p>
+
+                          <p className="mt-1 text-xs leading-5 text-slate-500">
+                            These settings control your current notification
+                            preferences. Persistent notification storage can be
+                            connected to your account settings backend later.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -1248,6 +1577,7 @@ const Profile = () => {
               {activeSection === "preferences" && (
                 <div className="space-y-6">
                   {/* Preferences */}
+
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/60">
                     <div className="border-b border-slate-800 p-6">
                       <div className="flex items-center gap-3">
@@ -1302,38 +1632,61 @@ const Profile = () => {
                         }
                       />
                     </div>
+
+                    <div className="border-t border-slate-800 p-6">
+                      <div className="rounded-xl border border-blue-500/10 bg-blue-500/5 p-4">
+                        <div className="flex gap-3">
+                          <Headphones className="h-5 w-5 shrink-0 text-blue-400" />
+
+                          <div>
+                            <p className="text-sm font-medium text-blue-400">
+                              Support preferences
+                            </p>
+
+                            <p className="mt-1 text-xs leading-5 text-slate-500">
+                              These preferences currently apply to this page
+                              session. Your current User model does not yet
+                              include database fields for these settings.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Support stats */}
+
                   <div className="rounded-2xl border border-slate-800 bg-slate-900/60">
                     <div className="border-b border-slate-800 p-6">
                       <h3 className="font-semibold">Your support activity</h3>
 
                       <p className="mt-1 text-sm text-slate-500">
-                        A summary of your SupportAI usage.
+                        Your support activity can be connected to your analytics
+                        API.
                       </p>
                     </div>
 
                     <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
                       <ActivityCard
                         icon={MessageSquare}
-                        value="10"
+                        value="—"
                         label="Conversations"
                       />
 
-                      <ActivityCard icon={Ticket} value="9" label="Tickets" />
+                      <ActivityCard icon={Ticket} value="—" label="Tickets" />
 
-                      <ActivityCard icon={Check} value="8" label="Resolved" />
+                      <ActivityCard icon={Check} value="—" label="Resolved" />
 
                       <ActivityCard
                         icon={Clock3}
-                        value="1.8s"
+                        value="—"
                         label="Avg. AI response"
                       />
                     </div>
                   </div>
 
                   {/* Danger zone */}
+
                   <div className="rounded-2xl border border-red-500/20 bg-red-500/5">
                     <div className="border-b border-red-500/10 p-6">
                       <div className="flex items-center gap-3">
@@ -1363,7 +1716,10 @@ const Profile = () => {
 
                       <button
                         type="button"
-                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-red-500/20 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:bg-red-500/10 cursor-pointer"
+                        className="inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl border border-red-500/20 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:bg-red-500/10"
+                        onClick={() => {
+                          setError("Account deletion is not available yet.");
+                        }}
                       >
                         <Trash2 className="h-4 w-4" />
                         Delete account
@@ -1401,7 +1757,7 @@ const PreferenceToggle = ({ title, description, checked, onChange }) => {
         type="button"
         onClick={onChange}
         aria-pressed={checked}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition ${
+        className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition ${
           checked ? "bg-blue-600" : "bg-slate-800"
         }`}
       >

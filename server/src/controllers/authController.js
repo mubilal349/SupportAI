@@ -51,6 +51,22 @@ export const register = async (req, res) => {
         avatar: user.avatar || null,
         phone: user.phone || "",
         company: user.company || "",
+        timezone: user.timezone || "Asia/Karachi",
+        language: user.language || "English",
+        theme: user.theme || "dark",
+        preferredChannel: user.preferredChannel || "chat",
+
+        notificationPreferences: {
+          email: user.notificationPreferences?.email ?? true,
+          ticketUpdates: user.notificationPreferences?.ticketUpdates ?? true,
+          newMessages: user.notificationPreferences?.newMessages ?? true,
+          ticketResolved: user.notificationPreferences?.ticketResolved ?? true,
+        },
+
+        aiSupport: {
+          enabled: user.aiSupport?.enabled ?? true,
+          allowAutoResponse: user.aiSupport?.allowAutoResponse ?? true,
+        },
       },
     });
   } catch (error) {
@@ -123,6 +139,22 @@ export const login = async (req, res) => {
         avatar: user.avatar || null,
         phone: user.phone || "",
         company: user.company || "",
+        timezone: user.timezone || "Asia/Karachi",
+        language: user.language || "English",
+        theme: user.theme || "dark",
+        preferredChannel: user.preferredChannel || "chat",
+
+        notificationPreferences: {
+          email: user.notificationPreferences?.email ?? true,
+          ticketUpdates: user.notificationPreferences?.ticketUpdates ?? true,
+          newMessages: user.notificationPreferences?.newMessages ?? true,
+          ticketResolved: user.notificationPreferences?.ticketResolved ?? true,
+        },
+
+        aiSupport: {
+          enabled: user.aiSupport?.enabled ?? true,
+          allowAutoResponse: user.aiSupport?.allowAutoResponse ?? true,
+        },
       },
     });
   } catch (error) {
@@ -177,7 +209,7 @@ export const getProfile = async (req, res) => {
 };
 
 /* =========================================================
-   UPDATE PROFILE
+   UPDATE PROFILE & CUSTOMER PREFERENCES
 ========================================================= */
 
 export const updateProfile = async (req, res) => {
@@ -191,18 +223,45 @@ export const updateProfile = async (req, res) => {
       });
     }
 
-    const { name, email, phone, company, timezone, language } = req.body;
+    const {
+      name,
+      email,
+      phone,
+      company,
+      timezone,
+      language,
+      theme,
+      preferredChannel,
+      notificationPreferences,
+      aiSupport,
+    } = req.body;
 
     /* ---------------------------------------------
-       Update text fields
+       UPDATE PROFILE INFORMATION
     --------------------------------------------- */
 
     if (name !== undefined) {
-      user.name = name.trim();
+      const cleanName = String(name).trim();
+
+      if (!cleanName) {
+        return res.status(400).json({
+          success: false,
+          message: "Name is required.",
+        });
+      }
+
+      user.name = cleanName;
     }
 
     if (email !== undefined) {
-      const normalizedEmail = email.toLowerCase().trim();
+      const normalizedEmail = String(email).toLowerCase().trim();
+
+      if (!normalizedEmail) {
+        return res.status(400).json({
+          success: false,
+          message: "Email address is required.",
+        });
+      }
 
       const existingUser = await User.findOne({
         email: normalizedEmail,
@@ -220,36 +279,152 @@ export const updateProfile = async (req, res) => {
     }
 
     if (phone !== undefined) {
-      user.phone = phone;
+      user.phone = String(phone).trim();
     }
 
     if (company !== undefined) {
-      user.company = company;
-    }
-
-    if (timezone !== undefined) {
-      user.timezone = timezone;
-    }
-
-    if (language !== undefined) {
-      user.language = language;
+      user.company = String(company).trim();
     }
 
     /* ---------------------------------------------
-       Update avatar
+       LANGUAGE & TIMEZONE
+    --------------------------------------------- */
+
+    if (timezone !== undefined) {
+      user.timezone = String(timezone).trim();
+    }
+
+    if (language !== undefined) {
+      user.language = String(language).trim();
+    }
+
+    /* ---------------------------------------------
+       THEME
+    --------------------------------------------- */
+
+    if (theme !== undefined) {
+      const allowedThemes = ["light", "dark", "system"];
+
+      if (!allowedThemes.includes(theme)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid theme. Allowed values: light, dark, system.",
+        });
+      }
+
+      user.theme = theme;
+    }
+
+    /* ---------------------------------------------
+       PREFERRED SUPPORT CHANNEL
+    --------------------------------------------- */
+
+    if (preferredChannel !== undefined) {
+      const allowedChannels = ["chat", "email", "both"];
+
+      if (!allowedChannels.includes(preferredChannel)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid preferred channel. Allowed values: chat, email, both.",
+        });
+      }
+
+      user.preferredChannel = preferredChannel;
+    }
+
+    /* ---------------------------------------------
+       NOTIFICATION PREFERENCES
+    --------------------------------------------- */
+
+    if (notificationPreferences !== undefined) {
+      if (
+        typeof notificationPreferences !== "object" ||
+        Array.isArray(notificationPreferences)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid notification preferences.",
+        });
+      }
+
+      if (!user.notificationPreferences) {
+        user.notificationPreferences = {};
+      }
+
+      if (notificationPreferences.email !== undefined) {
+        user.notificationPreferences.email = Boolean(
+          notificationPreferences.email,
+        );
+      }
+
+      if (notificationPreferences.ticketUpdates !== undefined) {
+        user.notificationPreferences.ticketUpdates = Boolean(
+          notificationPreferences.ticketUpdates,
+        );
+      }
+
+      if (notificationPreferences.newMessages !== undefined) {
+        user.notificationPreferences.newMessages = Boolean(
+          notificationPreferences.newMessages,
+        );
+      }
+
+      if (notificationPreferences.ticketResolved !== undefined) {
+        user.notificationPreferences.ticketResolved = Boolean(
+          notificationPreferences.ticketResolved,
+        );
+      }
+    }
+
+    /* ---------------------------------------------
+       AI SUPPORT PREFERENCES
+    --------------------------------------------- */
+
+    if (aiSupport !== undefined) {
+      if (typeof aiSupport !== "object" || Array.isArray(aiSupport)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid AI support preferences.",
+        });
+      }
+
+      if (!user.aiSupport) {
+        user.aiSupport = {};
+      }
+
+      if (aiSupport.enabled !== undefined) {
+        user.aiSupport.enabled = Boolean(aiSupport.enabled);
+      }
+
+      if (aiSupport.allowAutoResponse !== undefined) {
+        user.aiSupport.allowAutoResponse = Boolean(aiSupport.allowAutoResponse);
+      }
+    }
+
+    /* ---------------------------------------------
+       UPDATE AVATAR
     --------------------------------------------- */
 
     if (req.file) {
       user.avatar = `/avatars/${req.file.filename}`;
     }
 
+    /* ---------------------------------------------
+       SAVE
+    --------------------------------------------- */
+
     await user.save();
+
+    /* ---------------------------------------------
+       RETURN UPDATED USER
+    --------------------------------------------- */
 
     const updatedUser = await User.findById(user._id).select("-password");
 
     return res.status(200).json({
       success: true,
-      message: "Profile updated successfully.",
+      message: "Profile and preferences updated successfully.",
       user: updatedUser,
     });
   } catch (error) {
