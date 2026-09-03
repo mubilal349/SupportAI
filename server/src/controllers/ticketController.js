@@ -1,13 +1,21 @@
 import fs from "fs";
 import path from "path";
 import mongoose from "mongoose";
-import { fileURLToPath } from "url";
+
 import Ticket from "../models/Ticket.js";
+import User from "../models/User.js";
+
 import { generateAIResponse } from "../services/aiService.js";
+
 import {
   notifyAIReply,
   notifyTicketCreated,
 } from "../services/notificationService.js";
+
+import {
+  sendTicketCreatedEmail,
+  sendTicketResolvedEmail,
+} from "../services/emailService.js";
 
 /*
  * =========================================================
@@ -186,6 +194,12 @@ export const createTicket = async (req, res) => {
   try {
     const { subject, description, category, priority } = req.body;
 
+    /*
+     * =====================================================
+     * VALIDATE SUBJECT
+     * =====================================================
+     */
+
     if (!subject?.trim()) {
       return res.status(400).json({
         success: false,
@@ -193,12 +207,24 @@ export const createTicket = async (req, res) => {
       });
     }
 
+    /*
+     * =====================================================
+     * VALIDATE DESCRIPTION
+     * =====================================================
+     */
+
     if (!description?.trim()) {
       return res.status(400).json({
         success: false,
         message: "Ticket description is required.",
       });
     }
+
+    /*
+     * =====================================================
+     * GENERATE TICKET NUMBER
+     * =====================================================
+     */
 
     const ticketNumber = await generateTicketNumber();
 
@@ -222,6 +248,12 @@ export const createTicket = async (req, res) => {
       createdAt: now,
     };
 
+    /*
+     * =====================================================
+     * CREATE TICKET
+     * =====================================================
+     */
+
     const ticket = await Ticket.create({
       ticketNumber,
 
@@ -240,9 +272,13 @@ export const createTicket = async (req, res) => {
       statusHistory: [
         {
           status: "open",
+
           changedBy: req.user.id,
+
           changedByRole: "customer",
+
           note: "Ticket created by customer.",
+
           createdAt: now,
         },
       ],
@@ -254,10 +290,50 @@ export const createTicket = async (req, res) => {
       lastReplyAt: now,
     });
 
-    await notifyTicketCreated({
-      req,
-      ticket,
-    });
+    /*
+     * =====================================================
+     * IN-APP NOTIFICATION
+     * =====================================================
+     */
+
+    try {
+      await notifyTicketCreated({
+        req,
+        ticket,
+      });
+    } catch (notificationError) {
+      console.error("TICKET CREATED NOTIFICATION ERROR:", notificationError);
+    }
+
+    /*
+     * =====================================================
+     * EMAIL NOTIFICATION
+     * =====================================================
+     *
+     * Customer receives an email when the ticket is created.
+     *
+     * Email failure must NOT fail ticket creation.
+     * =====================================================
+     */
+
+    try {
+      const customer = await User.findById(req.user.id).select("name email");
+
+      if (customer?.email) {
+        await sendTicketCreatedEmail({
+          customer,
+          ticket,
+        });
+
+        console.log(`Ticket creation email sent to ${customer.email}`);
+      } else {
+        console.warn(
+          "Ticket creation email skipped: customer email not found.",
+        );
+      }
+    } catch (emailError) {
+      console.error("TICKET CREATED EMAIL ERROR:", emailError);
+    }
 
     /*
      * =====================================================
@@ -266,15 +342,28 @@ export const createTicket = async (req, res) => {
      */
 
     try {
+      /*
+       * IMPORTANT:
+       * Your aiService.js expects:
+       *
+       * generateAIResponse({
+       *   messages: [...]
+       * })
+       */
+
       const aiResponse = await generateAIResponse({
-        message: description.trim(),
-        ticket,
+        messages: [
+          {
+            role: "user",
+            content: description.trim(),
+          },
+        ],
       });
 
       /*
-       * Support both possible AI service formats:
+       * Support both:
        *
-       * "plain string"
+       * string
        *
        * OR
        *
@@ -302,8 +391,30 @@ export const createTicket = async (req, res) => {
         ticket.lastReplyAt = new Date();
 
         await ticket.save();
+
+        /*
+         * Notify customer through existing
+         * in-app notification system.
+         */
+
+        try {
+          await notifyAIReply({
+            req,
+            ticket,
+          });
+        } catch (notificationError) {
+          console.error(
+            "INITIAL AI REPLY NOTIFICATION ERROR:",
+            notificationError,
+          );
+        }
       }
     } catch (aiError) {
+      /*
+       * Ticket creation must continue even if
+       * Ollama is unavailable.
+       */
+
       console.error("INITIAL AI RESPONSE ERROR:", aiError);
     }
 
@@ -388,6 +499,12 @@ export const getCustomerTicket = async (req, res) => {
   try {
     const { id } = req.params;
 
+    /*
+     * =====================================================
+     * VALIDATE ID
+     * =====================================================
+     */
+
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
@@ -395,6 +512,12 @@ export const getCustomerTicket = async (req, res) => {
         message: "Invalid ticket ID.",
       });
     }
+
+    /*
+     * =====================================================
+     * FIND CUSTOMER TICKET
+     * =====================================================
+     */
 
     const ticket = await Ticket.findOne({
       _id: id,
@@ -433,27 +556,13 @@ export const getCustomerTicket = async (req, res) => {
 /*
  * =========================================================
  * ADD CUSTOMER REPLY + OLLAMA AI RESPONSE
- *
- * CUSTOMER
- *    ↓
- * Save customer message
- *    ↓
- * Broadcast customer message
- *    ↓
- * Generate AI response
- *    ↓
- * Save AI response
- *    ↓
- * Broadcast AI response
- *    ↓
- * Return updated ticket
- *
  * =========================================================
  */
 
 export const addTicketReply = async (req, res) => {
   try {
     const { id } = req.params;
+
     const { message } = req.body;
 
     console.log("==========================================");
@@ -482,6 +591,7 @@ export const addTicketReply = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
+
         message: "Invalid ticket ID.",
       });
     }
@@ -495,6 +605,7 @@ export const addTicketReply = async (req, res) => {
     if (!message?.trim()) {
       return res.status(400).json({
         success: false,
+
         message: "Message is required.",
       });
     }
@@ -507,12 +618,14 @@ export const addTicketReply = async (req, res) => {
 
     const ticket = await Ticket.findOne({
       _id: id,
+
       customer: req.user.id,
     });
 
     if (!ticket) {
       return res.status(404).json({
         success: false,
+
         message: "Ticket not found.",
       });
     }
@@ -526,6 +639,7 @@ export const addTicketReply = async (req, res) => {
     if (ticket.status === "closed") {
       return res.status(400).json({
         success: false,
+
         message: "This ticket is closed. Please create a new ticket.",
       });
     }
@@ -571,7 +685,7 @@ export const addTicketReply = async (req, res) => {
     });
 
     /*
-     * Keep an exact reference to the customer message.
+     * Exact reference to customer message.
      */
 
     const customerMessage = ticket.conversation[ticket.conversation.length - 1];
@@ -587,9 +701,6 @@ export const addTicketReply = async (req, res) => {
     /*
      * =====================================================
      * RESOLVED → OPEN
-     *
-     * Customer replies to a resolved ticket.
-     * This automatically reopens the ticket.
      * =====================================================
      */
 
@@ -614,13 +725,12 @@ export const addTicketReply = async (req, res) => {
 
       console.log(`TICKET STATUS CHANGED: ${previousStatus} → open`);
     } else if (ticket.status === "waiting") {
-      /*
-       * =====================================================
-       * WAITING → OPEN
-       *
-       * Customer has responded with the requested information.
-       * =====================================================
-       */
+
+    /*
+     * =====================================================
+     * WAITING → OPEN
+     * =====================================================
+     */
       ticket.status = "open";
 
       ticket.statusHistory.push({
@@ -650,7 +760,7 @@ export const addTicketReply = async (req, res) => {
 
     /*
      * =====================================================
-     * SAVE CUSTOMER MESSAGE + STATUS HISTORY
+     * SAVE CUSTOMER MESSAGE + STATUS
      * =====================================================
      */
 
@@ -676,9 +786,7 @@ export const addTicketReply = async (req, res) => {
 
     /*
      * =====================================================
-     * BROADCAST STATUS HISTORY UPDATE
-     *
-     * This allows TicketDetails.jsx to update immediately.
+     * BROADCAST STATUS CHANGE
      * =====================================================
      */
 
@@ -710,34 +818,37 @@ export const addTicketReply = async (req, res) => {
       .filter((item) => item.message && item.message.trim())
       .map((item) => {
         /*
-         * Customer messages → user
+         * Customer → user
          */
 
         if (item.senderRole === "customer") {
           return {
             role: "user",
+
             content: item.message,
           };
         }
 
         /*
-         * AI messages → assistant
+         * AI → assistant
          */
 
         if (item.senderRole === "ai") {
           return {
             role: "assistant",
+
             content: item.message,
           };
         }
 
         /*
-         * Agent/admin messages → assistant context
+         * Agent/admin → assistant
          */
 
         if (item.senderRole === "agent" || item.senderRole === "admin") {
           return {
             role: "assistant",
+
             content: item.message,
           };
         }
@@ -770,6 +881,7 @@ Status: ${ticket.status || "open"}
     const aiMessages = [
       {
         role: "user",
+
         content: ticketContext,
       },
 
@@ -787,7 +899,7 @@ Status: ${ticket.status || "open"}
     try {
       console.log("==========================================");
       console.log("CALLING OLLAMA");
-      console.log("MODEL:", process.env.OLLAMA_MODEL || "llama3.2");
+      console.log("MODEL:", process.env.OLLAMA_MODEL || "gemma4:31b-cloud");
       console.log("URL:", process.env.OLLAMA_URL || "http://localhost:11434");
       console.log("==========================================");
 
@@ -801,10 +913,7 @@ Status: ${ticket.status || "open"}
       console.error("OLLAMA RESPONSE ERROR:", aiError);
 
       /*
-       * Customer message has already been saved.
-       *
-       * We intentionally don't fail the request
-       * when Ollama is unavailable.
+       * Customer message is already saved.
        */
 
       aiResult = null;
@@ -838,7 +947,7 @@ Status: ${ticket.status || "open"}
       });
 
       /*
-       * Exact reference to AI message.
+       * Exact AI message reference.
        */
 
       const aiMessage = ticket.conversation[ticket.conversation.length - 1];
@@ -861,7 +970,7 @@ Status: ${ticket.status || "open"}
 
       /*
        * ===================================================
-       * BROADCAST UPDATED TICKET
+       * BROADCAST TICKET UPDATE
        * ===================================================
        */
 
@@ -869,17 +978,18 @@ Status: ${ticket.status || "open"}
 
       /*
        * ===================================================
-       * NOTIFY CUSTOMER ABOUT AI REPLY
-       *
-       * This is intentionally AFTER the AI response
-       * has actually been generated and saved.
+       * IN-APP AI NOTIFICATION
        * ===================================================
        */
 
-      await notifyAIReply({
-        req,
-        ticket,
-      });
+      try {
+        await notifyAIReply({
+          req,
+          ticket,
+        });
+      } catch (notificationError) {
+        console.error("AI REPLY NOTIFICATION ERROR:", notificationError);
+      }
     } else {
       console.log("NO AI RESPONSE WAS GENERATED.");
     }
@@ -932,20 +1042,6 @@ Status: ${ticket.status || "open"}
  * =========================================================
  * CUSTOMER MARK TICKET AS RESOLVED
  * =========================================================
- *
- * Customer
- *    ↓
- * Mark ticket as resolved
- *    ↓
- * Save resolvedAt
- *    ↓
- * Add status history
- *    ↓
- * Broadcast status change
- *
- * This allows the customer to rate the ticket afterward.
- *
- * =========================================================
  */
 
 export const resolveCustomerTicket = async (req, res) => {
@@ -961,6 +1057,7 @@ export const resolveCustomerTicket = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
+
         message: "Invalid ticket ID.",
       });
     }
@@ -973,25 +1070,28 @@ export const resolveCustomerTicket = async (req, res) => {
 
     const ticket = await Ticket.findOne({
       _id: id,
+
       customer: req.user.id,
     });
 
     if (!ticket) {
       return res.status(404).json({
         success: false,
+
         message: "Ticket not found.",
       });
     }
 
     /*
      * =====================================================
-     * CHECK CURRENT STATUS
+     * CHECK STATUS
      * =====================================================
      */
 
     if (ticket.status === "closed") {
       return res.status(400).json({
         success: false,
+
         message: "This ticket is already closed.",
       });
     }
@@ -999,6 +1099,7 @@ export const resolveCustomerTicket = async (req, res) => {
     if (ticket.status === "resolved") {
       return res.status(400).json({
         success: false,
+
         message: "This ticket is already resolved.",
       });
     }
@@ -1045,11 +1146,37 @@ export const resolveCustomerTicket = async (req, res) => {
 
     /*
      * =====================================================
-     * SAVE TICKET
+     * SAVE
      * =====================================================
      */
 
     await ticket.save();
+
+    /*
+     * =====================================================
+     * SEND RESOLVED EMAIL
+     * =====================================================
+     *
+     * Email failure must not fail the resolve action.
+     * =====================================================
+     */
+
+    try {
+      const customer = await User.findById(req.user.id).select("name email");
+
+      if (customer?.email) {
+        await sendTicketResolvedEmail({
+          customer,
+          ticket,
+        });
+
+        console.log(`Ticket resolved email sent to ${customer.email}`);
+      } else {
+        console.warn("Resolved email skipped: customer email not found.");
+      }
+    } catch (emailError) {
+      console.error("TICKET RESOLVED EMAIL ERROR:", emailError);
+    }
 
     /*
      * =====================================================
@@ -1103,7 +1230,7 @@ export const resolveCustomerTicket = async (req, res) => {
 
     /*
      * =====================================================
-     * GET UPDATED / POPULATED TICKET
+     * GET UPDATED TICKET
      * =====================================================
      */
 
@@ -1245,10 +1372,6 @@ export const uploadTicketAttachments = async (req, res) => {
      * =====================================================
      * BROADCAST ATTACHMENT UPDATE
      * =====================================================
-     *
-     * This lets the customer's other connected
-     * session know the ticket has changed.
-     * =====================================================
      */
 
     broadcastTicketUpdate(req, ticket);
@@ -1305,6 +1428,7 @@ export const deleteTicketAttachment = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
+
         message: "Invalid ticket ID.",
       });
     }
@@ -1312,6 +1436,7 @@ export const deleteTicketAttachment = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(attachmentId)) {
       return res.status(400).json({
         success: false,
+
         message: "Invalid attachment ID.",
       });
     }
@@ -1324,12 +1449,14 @@ export const deleteTicketAttachment = async (req, res) => {
 
     const ticket = await Ticket.findOne({
       _id: id,
+
       customer: req.user.id,
     });
 
     if (!ticket) {
       return res.status(404).json({
         success: false,
+
         message: "Ticket not found.",
       });
     }
@@ -1347,17 +1474,10 @@ export const deleteTicketAttachment = async (req, res) => {
     if (!attachment) {
       return res.status(404).json({
         success: false,
+
         message: "Attachment not found.",
       });
     }
-
-    console.log("Attachment found:");
-    console.log({
-      id: attachment._id,
-      filename: attachment.filename,
-      originalName: attachment.originalName,
-      path: attachment.path,
-    });
 
     /*
      * =====================================================
@@ -1373,9 +1493,6 @@ export const deleteTicketAttachment = async (req, res) => {
         attachment.filename,
       );
 
-      console.log("Physical file path:");
-      console.log(filePath);
-
       try {
         await fs.promises.access(filePath);
 
@@ -1383,37 +1500,23 @@ export const deleteTicketAttachment = async (req, res) => {
 
         console.log("Physical attachment deleted successfully:", filePath);
       } catch (fileError) {
-        /*
-         * If the file does not exist, we still remove
-         * the database record.
-         */
-
         if (fileError.code === "ENOENT") {
           console.warn("Physical file was already missing:", filePath);
         } else {
           console.error("Failed to delete physical attachment:", fileError);
-
-          /*
-           * Do NOT return 500 here.
-           *
-           * We can still remove the MongoDB attachment
-           * record.
-           */
         }
       }
     }
 
     /*
      * =====================================================
-     * REMOVE ATTACHMENT FROM MONGODB
+     * REMOVE ATTACHMENT FROM DATABASE
      * =====================================================
      */
 
     ticket.attachments.pull(attachmentId);
 
     await ticket.save();
-
-    console.log("Attachment removed from MongoDB:", attachmentId);
 
     /*
      * =====================================================
@@ -1431,25 +1534,31 @@ export const deleteTicketAttachment = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+
       message: "Attachment deleted successfully.",
+
       attachmentId,
+
       attachments: ticket.attachments,
+
       ticket,
     });
   } catch (error) {
-    console.error("==========================================");
-    console.error("DELETE TICKET ATTACHMENT ERROR");
-    console.error(error);
-    console.error("MESSAGE:", error?.message);
-    console.error("STACK:", error?.stack);
-    console.error("==========================================");
+    console.error("DELETE TICKET ATTACHMENT ERROR:", error);
 
     return res.status(500).json({
       success: false,
+
       message: error?.message || "Failed to delete attachment.",
     });
   }
 };
+
+/*
+ * =========================================================
+ * GET TICKET STATUS HISTORY
+ * =========================================================
+ */
 
 export const getTicketStatusHistory = async (req, res) => {
   try {
@@ -1458,12 +1567,14 @@ export const getTicketStatusHistory = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
+
         message: "Invalid ticket ID.",
       });
     }
 
     const ticket = await Ticket.findOne({
       _id: id,
+
       customer: req.user.id,
     })
       .select(
@@ -1475,19 +1586,28 @@ export const getTicketStatusHistory = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({
         success: false,
+
         message: "Ticket not found.",
       });
     }
 
     return res.status(200).json({
       success: true,
+
       ticketId: ticket._id,
+
       ticketNumber: ticket.ticketNumber,
+
       currentStatus: ticket.status,
+
       createdAt: ticket.createdAt,
+
       resolvedAt: ticket.resolvedAt || null,
+
       reopenedAt: ticket.reopenedAt || null,
+
       closedAt: ticket.closedAt || null,
+
       statusHistory: ticket.statusHistory || [],
     });
   } catch (error) {
@@ -1495,6 +1615,7 @@ export const getTicketStatusHistory = async (req, res) => {
 
     return res.status(500).json({
       success: false,
+
       message: "Failed to load ticket status history.",
     });
   }
@@ -1504,31 +1625,12 @@ export const getTicketStatusHistory = async (req, res) => {
  * =========================================================
  * SUBMIT TICKET RATING & FEEDBACK
  * =========================================================
- *
- * CUSTOMER
- *    ↓
- * Validate ticket ID
- *    ↓
- * Find customer's ticket
- *    ↓
- * Check ticket is resolved/closed
- *    ↓
- * Validate rating
- *    ↓
- * Prevent duplicate rating
- *    ↓
- * Save rating + feedback
- *    ↓
- * Broadcast rating event
- *    ↓
- * Return result
- *
- * =========================================================
  */
 
 export const submitTicketRating = async (req, res) => {
   try {
     const { id } = req.params;
+
     const { rating, feedback } = req.body;
 
     /*
@@ -1540,6 +1642,7 @@ export const submitTicketRating = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
+
         message: "Invalid ticket ID.",
       });
     }
@@ -1559,6 +1662,7 @@ export const submitTicketRating = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
+
         message: "Rating must be between 1 and 5.",
       });
     }
@@ -1574,6 +1678,7 @@ export const submitTicketRating = async (req, res) => {
     if (cleanFeedback.length > 2000) {
       return res.status(400).json({
         success: false,
+
         message: "Feedback cannot exceed 2000 characters.",
       });
     }
@@ -1582,37 +1687,32 @@ export const submitTicketRating = async (req, res) => {
      * =====================================================
      * FIND CUSTOMER TICKET
      * =====================================================
-     *
-     * The customer can only rate their own ticket.
-     *
-     * =====================================================
      */
 
     const ticket = await Ticket.findOne({
       _id: id,
+
       customer: req.user.id,
     });
 
     if (!ticket) {
       return res.status(404).json({
         success: false,
+
         message: "Ticket not found.",
       });
     }
 
     /*
      * =====================================================
-     * CHECK TICKET STATUS
-     * =====================================================
-     *
-     * Customers can rate only completed tickets.
-     *
+     * CHECK STATUS
      * =====================================================
      */
 
     if (!["resolved", "closed"].includes(ticket.status)) {
       return res.status(400).json({
         success: false,
+
         message: "You can only rate a resolved or closed ticket.",
       });
     }
@@ -1626,9 +1726,13 @@ export const submitTicketRating = async (req, res) => {
     if (ticket.customerRating !== null || ticket.ratedAt) {
       return res.status(400).json({
         success: false,
+
         message: "This ticket has already been rated.",
+
         rating: ticket.customerRating,
+
         feedback: ticket.customerFeedback || "",
+
         ratedAt: ticket.ratedAt || null,
       });
     }
@@ -1642,7 +1746,9 @@ export const submitTicketRating = async (req, res) => {
     const ratedAt = new Date();
 
     ticket.customerRating = numericRating;
+
     ticket.customerFeedback = cleanFeedback;
+
     ticket.ratedAt = ratedAt;
 
     await ticket.save();
@@ -1651,9 +1757,6 @@ export const submitTicketRating = async (req, res) => {
      * =====================================================
      * SOCKET.IO
      * =====================================================
-     *
-     * Notify clients currently viewing the ticket.
-     * =====================================================
      */
 
     const io = getSocketIO(req);
@@ -1661,9 +1764,13 @@ export const submitTicketRating = async (req, res) => {
     if (io) {
       io.to(getTicketRoom(ticket._id)).emit("ticket:rating-submitted", {
         ticketId: String(ticket._id),
+
         ticketNumber: ticket.ticketNumber,
+
         rating: ticket.customerRating,
+
         feedback: ticket.customerFeedback || "",
+
         ratedAt: ticket.ratedAt,
       });
     }
@@ -1676,9 +1783,13 @@ export const submitTicketRating = async (req, res) => {
 
     return res.status(201).json({
       success: true,
+
       message: "Thank you for your feedback.",
+
       rating: ticket.customerRating,
+
       feedback: ticket.customerFeedback || "",
+
       ratedAt: ticket.ratedAt,
     });
   } catch (error) {
@@ -1686,6 +1797,7 @@ export const submitTicketRating = async (req, res) => {
 
     return res.status(500).json({
       success: false,
+
       message: "Failed to submit ticket rating.",
     });
   }
@@ -1694,11 +1806,6 @@ export const submitTicketRating = async (req, res) => {
 /*
  * =========================================================
  * GET TICKET RATING
- * =========================================================
- *
- * Returns the rating belonging to the authenticated
- * customer for the requested ticket.
- *
  * =========================================================
  */
 
@@ -1715,6 +1822,7 @@ export const getTicketRating = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
+
         message: "Invalid ticket ID.",
       });
     }
@@ -1727,6 +1835,7 @@ export const getTicketRating = async (req, res) => {
 
     const ticket = await Ticket.findOne({
       _id: id,
+
       customer: req.user.id,
     })
       .select("_id ticketNumber status customerRating customerFeedback ratedAt")
@@ -1735,6 +1844,7 @@ export const getTicketRating = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({
         success: false,
+
         message: "Ticket not found.",
       });
     }
@@ -1776,58 +1886,105 @@ export const getTicketRating = async (req, res) => {
 
     return res.status(500).json({
       success: false,
+
       message: "Failed to load ticket rating.",
     });
   }
 };
 
-// =========================================================
-// CUSTOMER DASHBOARD ANALYTICS
-// GET /api/tickets/analytics?period=7d
-// =========================================================
+/*
+ * =========================================================
+ * CUSTOMER DASHBOARD ANALYTICS
+ * GET /api/tickets/analytics?period=7d
+ * =========================================================
+ */
 
 export const getCustomerAnalytics = async (req, res) => {
   try {
     const customerId = req.user?.id;
 
+    /*
+     * =====================================================
+     * AUTHENTICATION
+     * =====================================================
+     */
+
     if (!customerId) {
       return res.status(401).json({
         success: false,
+
         message: "Authentication required.",
       });
     }
 
+    /*
+     * =====================================================
+     * VALIDATE CUSTOMER ID
+     * =====================================================
+     */
+
     if (!mongoose.Types.ObjectId.isValid(customerId)) {
       return res.status(400).json({
         success: false,
+
         message: "Invalid customer ID.",
       });
     }
 
-    // -----------------------------------------------------
-    // PERIOD
-    // -----------------------------------------------------
+    /*
+     * =====================================================
+     * PERIOD
+     * =====================================================
+     */
 
     const requestedPeriod = req.query.period || "7d";
 
     if (!["7d", "30d", "90d"].includes(requestedPeriod)) {
       return res.status(400).json({
         success: false,
+
         message: "Invalid analytics period. Use 7d, 30d, or 90d.",
       });
     }
 
-    const { period, days, now, currentStart, previousStart } =
-      getAnalyticsPeriod(requestedPeriod);
+    /*
+     * =====================================================
+     * PERIOD CALCULATION
+     * =====================================================
+     */
 
-    // -----------------------------------------------------
-    // CURRENT PERIOD TICKETS
-    // -----------------------------------------------------
+    const now = new Date();
+
+    const daysMap = {
+      "7d": 7,
+
+      "30d": 30,
+
+      "90d": 90,
+    };
+
+    const days = daysMap[requestedPeriod];
+
+    const currentStart = new Date(now);
+
+    currentStart.setDate(currentStart.getDate() - days);
+
+    const previousStart = new Date(currentStart);
+
+    previousStart.setDate(previousStart.getDate() - days);
+
+    /*
+     * =====================================================
+     * CURRENT PERIOD
+     * =====================================================
+     */
 
     const currentTickets = await Ticket.find({
       customer: customerId,
+
       createdAt: {
         $gte: currentStart,
+
         $lte: now,
       },
     })
@@ -1856,14 +2013,18 @@ export const getCustomerAnalytics = async (req, res) => {
       )
       .lean();
 
-    // -----------------------------------------------------
-    // PREVIOUS PERIOD TICKETS
-    // -----------------------------------------------------
+    /*
+     * =====================================================
+     * PREVIOUS PERIOD
+     * =====================================================
+     */
 
     const previousTickets = await Ticket.find({
       customer: customerId,
+
       createdAt: {
         $gte: previousStart,
+
         $lt: currentStart,
       },
     })
@@ -1889,11 +2050,11 @@ export const getCustomerAnalytics = async (req, res) => {
       )
       .lean();
 
-    // -----------------------------------------------------
-    // ALL CUSTOMER TICKETS
-    //
-    // Used for current status overview.
-    // -----------------------------------------------------
+    /*
+     * =====================================================
+     * ALL CUSTOMER TICKETS
+     * =====================================================
+     */
 
     const allCustomerTickets = await Ticket.find({
       customer: customerId,
@@ -1920,27 +2081,35 @@ export const getCustomerAnalytics = async (req, res) => {
       )
       .lean();
 
-    // =====================================================
-    // BASIC COUNTS
-    // =====================================================
+    /*
+     * =====================================================
+     * BASIC COUNTS
+     * =====================================================
+     */
 
     const totalTickets = currentTickets.length;
 
-    // The existing UI calls these "conversations".
-    // In this schema each ticket owns one conversation.
+    const totalHistoricalTickets = allCustomerTickets.length;
+
     const totalConversations = totalTickets;
 
     const previousConversations = previousTickets.length;
 
-    // =====================================================
-    // STATUS COUNTS - CURRENT PERIOD
-    // =====================================================
+    /*
+     * =====================================================
+     * STATUS COUNTS
+     * =====================================================
+     */
 
     const statusCounts = {
       open: 0,
+
       "in-progress": 0,
+
       waiting: 0,
+
       resolved: 0,
+
       closed: 0,
     };
 
@@ -1950,17 +2119,21 @@ export const getCustomerAnalytics = async (req, res) => {
       }
     });
 
-    // =====================================================
-    // ALL-TIME CURRENT STATUS
-    //
-    // Useful for the Ticket Overview section.
-    // =====================================================
+    /*
+     * =====================================================
+     * ALL-TIME STATUS COUNTS
+     * =====================================================
+     */
 
     const allStatusCounts = {
       open: 0,
+
       "in-progress": 0,
+
       waiting: 0,
+
       resolved: 0,
+
       closed: 0,
     };
 
@@ -1972,22 +2145,45 @@ export const getCustomerAnalytics = async (req, res) => {
       }
     });
 
-    // =====================================================
-    // RESOLUTION
-    // =====================================================
+    /*
+     * =====================================================
+     * RESOLUTION
+     * =====================================================
+     */
 
     const resolvedCurrentCount = statusCounts.resolved + statusCounts.closed;
 
-    const resolutionRate = calculatePercentage(
-      resolvedCurrentCount,
-      totalTickets,
-    );
+    const resolutionRate =
+      totalTickets > 0
+        ? Math.round((resolvedCurrentCount / totalTickets) * 100)
+        : 0;
 
-    // =====================================================
-    // AI VS HUMAN RESOLUTION
-    // =====================================================
+    /*
+     * =====================================================
+     * ALL-TIME STATUS
+     * =====================================================
+     */
+
+    const openTickets =
+      allStatusCounts.open +
+      allStatusCounts["in-progress"] +
+      allStatusCounts.waiting;
+
+    const resolvedTickets = allStatusCounts.resolved + allStatusCounts.closed;
+
+    const historicalResolutionRate =
+      totalHistoricalTickets > 0
+        ? Math.round((resolvedTickets / totalHistoricalTickets) * 100)
+        : 0;
+
+    /*
+     * =====================================================
+     * AI VS HUMAN RESOLUTION
+     * =====================================================
+     */
 
     let aiResolved = 0;
+
     let humanResolved = 0;
 
     currentTickets.forEach((ticket) => {
@@ -2012,24 +2208,27 @@ export const getCustomerAnalytics = async (req, res) => {
       }
     });
 
-    // Some older tickets might not have a resolution history.
-    // Don't artificially classify them as AI or human.
-
     const totalResolvedByMethod = aiResolved + humanResolved;
 
-    const aiResolutionRate = calculatePercentage(
-      aiResolved,
-      totalResolvedByMethod,
-    );
+    const aiResolutionRate =
+      totalResolvedByMethod > 0
+        ? Math.round((aiResolved / totalResolvedByMethod) * 100)
+        : 0;
 
-    // =====================================================
-    // MESSAGE ANALYTICS
-    // =====================================================
+    /*
+     * =====================================================
+     * MESSAGE ANALYTICS
+     * =====================================================
+     */
 
     let totalMessages = 0;
+
     let customerMessages = 0;
+
     let aiMessages = 0;
+
     let agentMessages = 0;
+
     let systemMessages = 0;
 
     currentTickets.forEach((ticket) => {
@@ -2048,6 +2247,7 @@ export const getCustomerAnalytics = async (req, res) => {
             break;
 
           case "agent":
+
           case "admin":
             agentMessages++;
             break;
@@ -2062,13 +2262,17 @@ export const getCustomerAnalytics = async (req, res) => {
       });
     });
 
-    // =====================================================
-    // TICKET PRIORITY
-    // =====================================================
+    /*
+     * =====================================================
+     * PRIORITY ANALYTICS
+     * =====================================================
+     */
 
     const priorityCounts = {
       low: 0,
+
       medium: 0,
+
       high: 0,
     };
 
@@ -2080,15 +2284,21 @@ export const getCustomerAnalytics = async (req, res) => {
       }
     });
 
-    // =====================================================
-    // TICKET CATEGORY
-    // =====================================================
+    /*
+     * =====================================================
+     * CATEGORY ANALYTICS
+     * =====================================================
+     */
 
     const categoryCounts = {
       Billing: 0,
+
       Technical: 0,
+
       Account: 0,
+
       Subscription: 0,
+
       General: 0,
     };
 
@@ -2100,9 +2310,11 @@ export const getCustomerAnalytics = async (req, res) => {
       }
     });
 
-    // =====================================================
-    // SATISFACTION
-    // =====================================================
+    /*
+     * =====================================================
+     * SATISFACTION
+     * =====================================================
+     */
 
     const currentRatings = currentTickets
       .filter(
@@ -2142,7 +2354,6 @@ export const getCustomerAnalytics = async (req, res) => {
           )
         : 0;
 
-    // Convert 1-5 rating into percentage.
     const satisfactionPercentage =
       averageRating > 0 ? Math.round((averageRating / 5) * 100) : 0;
 
@@ -2154,15 +2365,21 @@ export const getCustomerAnalytics = async (req, res) => {
     const satisfactionChange =
       satisfactionPercentage - previousSatisfactionPercentage;
 
-    // =====================================================
-    // RATING DISTRIBUTION
-    // =====================================================
+    /*
+     * =====================================================
+     * RATING DISTRIBUTION
+     * =====================================================
+     */
 
     const ratingDistribution = {
       1: 0,
+
       2: 0,
+
       3: 0,
+
       4: 0,
+
       5: 0,
     };
 
@@ -2170,11 +2387,11 @@ export const getCustomerAnalytics = async (req, res) => {
       ratingDistribution[rating]++;
     });
 
-    // =====================================================
-    // RESPONSE TIME
-    //
-    // First AI/agent/admin response after ticket creation.
-    // =====================================================
+    /*
+     * =====================================================
+     * RESPONSE TIME
+     * =====================================================
+     */
 
     const responseTimes = [];
 
@@ -2206,9 +2423,11 @@ export const getCustomerAnalytics = async (req, res) => {
           responseTimes.length
         : 0;
 
-    // =====================================================
-    // PREVIOUS RESPONSE TIME
-    // =====================================================
+    /*
+     * =====================================================
+     * PREVIOUS RESPONSE TIME
+     * =====================================================
+     */
 
     const previousResponseTimes = [];
 
@@ -2243,11 +2462,63 @@ export const getCustomerAnalytics = async (req, res) => {
     const responseTimeDifference =
       averageResponseTimeMs - previousAverageResponseTimeMs;
 
-    // =====================================================
-    // RESOLUTION TIME
-    //
-    // resolvedAt - createdAt
-    // =====================================================
+    let responseTimeChange = 0;
+
+    if (averageResponseTimeMs > 0 && previousAverageResponseTimeMs > 0) {
+      responseTimeChange = Math.round(
+        ((averageResponseTimeMs - previousAverageResponseTimeMs) /
+          previousAverageResponseTimeMs) *
+          100,
+      );
+    }
+
+    /*
+     * =====================================================
+     * FORMAT RESPONSE TIME
+     * =====================================================
+     */
+
+    const formatDuration = (milliseconds) => {
+      if (!milliseconds || milliseconds <= 0) {
+        return "0s";
+      }
+
+      const totalSeconds = Math.round(milliseconds / 1000);
+
+      const days = Math.floor(totalSeconds / 86400);
+
+      const hours = Math.floor((totalSeconds % 86400) / 3600);
+
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+
+      const seconds = totalSeconds % 60;
+
+      const parts = [];
+
+      if (days > 0) {
+        parts.push(`${days}d`);
+      }
+
+      if (hours > 0) {
+        parts.push(`${hours}h`);
+      }
+
+      if (minutes > 0) {
+        parts.push(`${minutes}m`);
+      }
+
+      if (seconds > 0 || parts.length === 0) {
+        parts.push(`${seconds}s`);
+      }
+
+      return parts.join(" ");
+    };
+
+    /*
+     * =====================================================
+     * RESOLUTION TIME
+     * =====================================================
+     */
 
     const resolutionTimes = [];
 
@@ -2269,10 +2540,6 @@ export const getCustomerAnalytics = async (req, res) => {
           resolutionTimes.length
         : 0;
 
-    // =====================================================
-    // PREVIOUS RESOLUTION TIME
-    // =====================================================
-
     const previousResolutionTimes = [];
 
     previousTickets.forEach((ticket) => {
@@ -2293,21 +2560,39 @@ export const getCustomerAnalytics = async (req, res) => {
           previousResolutionTimes.length
         : 0;
 
-    // =====================================================
-    // ESCALATIONS
-    // =====================================================
+    let resolutionTimeChange = 0;
+
+    if (averageResolutionTimeMs > 0 && previousAverageResolutionTimeMs > 0) {
+      resolutionTimeChange = Math.round(
+        ((averageResolutionTimeMs - previousAverageResolutionTimeMs) /
+          previousAverageResolutionTimeMs) *
+          100,
+      );
+    }
+
+    /*
+     * =====================================================
+     * ESCALATIONS
+     * =====================================================
+     */
 
     const escalatedTickets = currentTickets.filter(
       (ticket) => ticket.isEscalated === true,
     ).length;
 
-    const escalationRate = calculatePercentage(escalatedTickets, totalTickets);
+    const escalationRate =
+      totalTickets > 0
+        ? Math.round((escalatedTickets / totalTickets) * 100)
+        : 0;
 
-    // =====================================================
-    // ATTACHMENTS
-    // =====================================================
+    /*
+     * =====================================================
+     * ATTACHMENTS
+     * =====================================================
+     */
 
     let ticketAttachments = 0;
+
     let conversationAttachments = 0;
 
     currentTickets.forEach((ticket) => {
@@ -2324,9 +2609,11 @@ export const getCustomerAnalytics = async (req, res) => {
 
     const totalAttachments = ticketAttachments + conversationAttachments;
 
-    // =====================================================
-    // ACTIVITY DATA
-    // =====================================================
+    /*
+     * =====================================================
+     * ACTIVITY DATA
+     * =====================================================
+     */
 
     const activityMap = new Map();
 
@@ -2350,14 +2637,20 @@ export const getCustomerAnalytics = async (req, res) => {
       if (!activityMap.has(key)) {
         activityMap.set(key, {
           date: key,
+
           conversations: 0,
+
           tickets: 0,
+
           resolved: 0,
+
           messages: 0,
         });
       }
 
-      activityMap.get(key)[field]++;
+      const current = activityMap.get(key);
+
+      current[field]++;
     };
 
     currentTickets.forEach((ticket) => {
@@ -2369,16 +2662,16 @@ export const getCustomerAnalytics = async (req, res) => {
         addActivity(ticket.resolvedAt, "resolved");
       }
 
-      const messages = ticket.conversation || [];
-
-      messages.forEach((message) => {
+      (ticket.conversation || []).forEach((message) => {
         addActivity(message.createdAt, "messages");
       });
     });
 
-    // =====================================================
-    // BUILD CHART DATA
-    // =====================================================
+    /*
+     * =====================================================
+     * BUILD ACTIVITY
+     * =====================================================
+     */
 
     const activity = [];
 
@@ -2421,6 +2714,7 @@ export const getCustomerAnalytics = async (req, res) => {
         activity.push({
           label: date.toLocaleDateString("en-US", {
             month: "short",
+
             day: "numeric",
           }),
 
@@ -2436,7 +2730,10 @@ export const getCustomerAnalytics = async (req, res) => {
         });
       }
     } else {
-      // 90 days: group by month.
+      /*
+       * 90 days → monthly groups
+       */
+
       const monthlyMap = new Map();
 
       for (let i = 0; i < 90; i++) {
@@ -2451,9 +2748,13 @@ export const getCustomerAnalytics = async (req, res) => {
         if (!monthlyMap.has(monthKey)) {
           monthlyMap.set(monthKey, {
             date: monthKey,
+
             conversations: 0,
+
             tickets: 0,
+
             resolved: 0,
+
             messages: 0,
           });
         }
@@ -2488,79 +2789,122 @@ export const getCustomerAnalytics = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // RECENT SUPPORT ACTIVITY
-    // =====================================================
+    /*
+     * =====================================================
+     * RECENT ACTIVITY
+     * =====================================================
+     */
 
     const recentActivity = [];
 
     currentTickets.forEach((ticket) => {
-      // Ticket created
+      const ticketRef = ticket.ticketNumber || ticket._id;
+
+      /*
+       * Ticket created
+       */
+
       recentActivity.push({
         id: `${ticket._id}-created`,
+
         type: "ticket_created",
-        title: `Ticket #${ticket.ticketNumber || ticket._id} was created`,
-        description: ticket.subject,
+
+        title: `Ticket #${ticketRef} was created`,
+
+        description: ticket.subject || "",
+
         timestamp: ticket.createdAt,
       });
 
-      // Ticket resolved
+      /*
+       * Resolved
+       */
+
       if (ticket.resolvedAt) {
         recentActivity.push({
           id: `${ticket._id}-resolved`,
+
           type: "resolved",
-          title: `Ticket #${ticket.ticketNumber || ticket._id} was resolved`,
-          description: ticket.subject,
+
+          title: `Ticket #${ticketRef} was resolved`,
+
+          description: ticket.subject || "",
+
           timestamp: ticket.resolvedAt,
         });
       }
 
-      // Ticket closed
+      /*
+       * Closed
+       */
+
       if (ticket.closedAt) {
         recentActivity.push({
           id: `${ticket._id}-closed`,
+
           type: "closed",
-          title: `Ticket #${ticket.ticketNumber || ticket._id} was closed`,
-          description: ticket.subject,
+
+          title: `Ticket #${ticketRef} was closed`,
+
+          description: ticket.subject || "",
+
           timestamp: ticket.closedAt,
         });
       }
 
-      // Escalated
+      /*
+       * Escalated
+       */
+
       if (ticket.escalatedAt) {
         recentActivity.push({
           id: `${ticket._id}-escalated`,
+
           type: "escalated",
-          title: `Ticket #${ticket.ticketNumber || ticket._id} was escalated`,
-          description: ticket.escalationReason || ticket.subject,
+
+          title: `Ticket #${ticketRef} was escalated`,
+
+          description: ticket.escalationReason || ticket.subject || "",
+
           timestamp: ticket.escalatedAt,
         });
       }
 
-      // Conversation activity
+      /*
+       * Conversation messages
+       */
+
       (ticket.conversation || []).forEach((message) => {
         let type = "message";
+
         let title = "New support message";
 
         if (message.senderRole === "ai") {
           type = "ai";
+
           title = "AI Support replied";
         } else if (
           message.senderRole === "agent" ||
           message.senderRole === "admin"
         ) {
           type = "agent";
+
           title = "Support agent replied";
         } else if (message.senderRole === "customer") {
           type = "customer";
+
           title = "You replied to a ticket";
         }
 
         recentActivity.push({
           id: `${ticket._id}-message-${message._id}`,
+
           type,
+
           title,
+
           description: message.message?.slice(0, 120) || "",
+
           timestamp: message.createdAt,
         });
       });
@@ -2572,108 +2916,97 @@ export const getCustomerAnalytics = async (req, res) => {
 
     const limitedRecentActivity = recentActivity.slice(0, 10);
 
-    // =====================================================
-    // OPEN TICKETS
-    // =====================================================
+    /*
+     * =====================================================
+     * MESSAGE PERCENTAGES
+     * =====================================================
+     */
 
-    const openTickets =
-      allStatusCounts.open +
-      allStatusCounts["in-progress"] +
-      allStatusCounts.waiting;
+    const aiMessagePercentage =
+      totalMessages > 0 ? Math.round((aiMessages / totalMessages) * 100) : 0;
 
-    const resolvedTickets = allStatusCounts.resolved + allStatusCounts.closed;
+    const agentMessagePercentage =
+      totalMessages > 0 ? Math.round((agentMessages / totalMessages) * 100) : 0;
 
-    const totalHistoricalTickets = allCustomerTickets.length;
+    const customerMessagePercentage =
+      totalMessages > 0
+        ? Math.round((customerMessages / totalMessages) * 100)
+        : 0;
 
-    const historicalResolutionRate = calculatePercentage(
-      resolvedTickets,
-      totalHistoricalTickets,
-    );
-
-    // =====================================================
-    // MESSAGE PERCENTAGES
-    // =====================================================
-
-    const aiMessagePercentage = calculatePercentage(aiMessages, totalMessages);
-
-    const agentMessagePercentage = calculatePercentage(
-      agentMessages,
-      totalMessages,
-    );
-
-    const customerMessagePercentage = calculatePercentage(
-      customerMessages,
-      totalMessages,
-    );
-
-    // =====================================================
-    // RESPONSE TIME CHANGE
-    // =====================================================
-
-    let responseTimeChange = 0;
-
-    if (averageResponseTimeMs > 0 && previousAverageResponseTimeMs > 0) {
-      responseTimeChange = Math.round(
-        ((averageResponseTimeMs - previousAverageResponseTimeMs) /
-          previousAverageResponseTimeMs) *
-          100,
-      );
-    }
-
-    // =====================================================
-    // RESOLUTION TIME CHANGE
-    // =====================================================
-
-    let resolutionTimeChange = 0;
-
-    if (averageResolutionTimeMs > 0 && previousAverageResolutionTimeMs > 0) {
-      resolutionTimeChange = Math.round(
-        ((averageResolutionTimeMs - previousAverageResolutionTimeMs) /
-          previousAverageResolutionTimeMs) *
-          100,
-      );
-    }
-
-    // =====================================================
-    // RESPONSE
-    // =====================================================
+    /*
+     * =====================================================
+     * RESPONSE
+     * =====================================================
+     */
 
     return res.status(200).json({
       success: true,
 
       period: {
-        value: period,
+        value: requestedPeriod,
+
         days,
+
         currentStart,
+
         currentEnd: now,
+
         previousStart,
+
         previousEnd: currentStart,
       },
 
       overview: {
-        totalTickets,
+        /*
+         * IMPORTANT:
+         *
+         * totalTickets is all-time,
+         * while conversations are
+         * selected-period data.
+         */
+
+        totalTickets: totalHistoricalTickets,
+
         totalConversations,
 
         previousTickets: previousTickets.length,
 
         previousConversations,
 
-        ticketChange: calculateChange(totalTickets, previousTickets.length),
+        ticketChange:
+          previousTickets.length > 0
+            ? Math.round(
+                ((totalTickets - previousTickets.length) /
+                  previousTickets.length) *
+                  100,
+              )
+            : totalTickets > 0
+              ? 100
+              : 0,
 
-        conversationChange: calculateChange(
-          totalConversations,
-          previousConversations,
-        ),
+        conversationChange:
+          previousConversations > 0
+            ? Math.round(
+                ((totalConversations - previousConversations) /
+                  previousConversations) *
+                  100,
+              )
+            : totalConversations > 0
+              ? 100
+              : 0,
 
         openTickets,
+
         resolvedTickets,
 
         resolutionRate,
+
         historicalResolutionRate,
       },
 
       status: {
         current: statusCounts,
+
         allTime: allStatusCounts,
       },
 
@@ -2681,6 +3014,7 @@ export const getCustomerAnalytics = async (req, res) => {
         resolved: resolvedCurrentCount,
 
         aiResolved,
+
         humanResolved,
 
         aiResolutionRate,
@@ -2692,8 +3026,11 @@ export const getCustomerAnalytics = async (req, res) => {
         total: totalMessages,
 
         customer: customerMessages,
+
         ai: aiMessages,
+
         agents: agentMessages,
+
         system: systemMessages,
 
         customerPercentage: customerMessagePercentage,
@@ -2732,11 +3069,15 @@ export const getCustomerAnalytics = async (req, res) => {
 
         changePercentage: resolutionTimeChange,
 
-        improved: resolutionTimeChange < 0,
+        improved:
+          averageResolutionTimeMs > 0 &&
+          previousAverageResolutionTimeMs > 0 &&
+          averageResolutionTimeMs < previousAverageResolutionTimeMs,
       },
 
       satisfaction: {
         averageRating,
+
         previousAverageRating,
 
         percentage: satisfactionPercentage,
@@ -2757,8 +3098,11 @@ export const getCustomerAnalytics = async (req, res) => {
 
         data: Object.entries(priorityCounts).map(([name, count]) => ({
           name,
+
           count,
-          percentage: calculatePercentage(count, totalTickets),
+
+          percentage:
+            totalTickets > 0 ? Math.round((count / totalTickets) * 100) : 0,
         })),
       },
 
@@ -2767,19 +3111,25 @@ export const getCustomerAnalytics = async (req, res) => {
 
         data: Object.entries(categoryCounts).map(([name, count]) => ({
           name,
+
           count,
-          percentage: calculatePercentage(count, totalTickets),
+
+          percentage:
+            totalTickets > 0 ? Math.round((count / totalTickets) * 100) : 0,
         })),
       },
 
       escalations: {
         total: escalatedTickets,
+
         percentage: escalationRate,
       },
 
       attachments: {
         ticketAttachments,
+
         conversationAttachments,
+
         total: totalAttachments,
       },
 
@@ -2792,6 +3142,7 @@ export const getCustomerAnalytics = async (req, res) => {
 
     return res.status(500).json({
       success: false,
+
       message: error?.message || "Failed to load customer analytics.",
     });
   }

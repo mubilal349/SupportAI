@@ -19,6 +19,7 @@ import SupportLayout from "../pages/customer/SupportLayout";
 import TicketDetails from "../pages/customer/tickets/TicketDetails";
 import AITicketCreation from "../pages/customer/tickets/AITicketCreation";
 import Notifications from "../pages/customer/notification/Notifications";
+import KnowledgeBase from "../pages/customer/knowledge-base/KnowledgeBase";
 
 // Route Protection
 import ProtectedRoute from "./ProtectedRoute";
@@ -97,6 +98,8 @@ const AppRoutes = () => {
 
           {/* notifications */}
           <Route path="notifications" element={<Notifications />} />
+          {/* knowledege-base */}
+          <Route path="/support/knowledge-base" element={<KnowledgeBase />} />
         </Route>
       </Route>
 

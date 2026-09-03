@@ -55,7 +55,7 @@ const SupportLayout = () => {
     },
     {
       name: "Knowledge Base",
-      path: "/support/help",
+      path: "/support/knowledge-base",
       icon: BookOpen,
     },
     {
