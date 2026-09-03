@@ -101,33 +101,64 @@ const formatDuration = (milliseconds) => {
 
 // =========================================================
 // GET FIRST SUPPORT RESPONSE
+// Customer message → first AI / Agent / Admin response
 // =========================================================
 
 const getFirstSupportResponse = (ticket) => {
-  if (!ticket?.conversation?.length) {
+  const conversation = Array.isArray(ticket?.conversation)
+    ? ticket.conversation
+    : [];
+
+  if (!conversation.length) {
     return null;
   }
 
-  const ticketCreatedAt = new Date(ticket.createdAt);
+  // -------------------------------------------------------
+  // Find the first customer message
+  // -------------------------------------------------------
 
-  const supportReply = ticket.conversation
+  const customerMessage = conversation
     .filter(
-      (message) =>
-        message?.senderRole === "agent" ||
-        message?.senderRole === "admin" ||
-        message?.senderRole === "ai",
+      (message) => message?.senderRole === "customer" && message?.createdAt,
     )
     .sort(
       (a, b) =>
         new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
     )[0];
 
-  if (!supportReply?.createdAt) {
+  if (!customerMessage) {
     return null;
   }
 
-  const responseTime =
-    new Date(supportReply.createdAt).getTime() - ticketCreatedAt.getTime();
+  // -------------------------------------------------------
+  // Find the first support response after customer message
+  // -------------------------------------------------------
+
+  const customerMessageTime = new Date(customerMessage.createdAt).getTime();
+
+  const supportReply = conversation
+    .filter(
+      (message) =>
+        ["agent", "admin", "ai"].includes(message?.senderRole) &&
+        message?.createdAt &&
+        new Date(message.createdAt).getTime() > customerMessageTime,
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    )[0];
+
+  if (!supportReply) {
+    return null;
+  }
+
+  // -------------------------------------------------------
+  // Calculate response time in milliseconds
+  // -------------------------------------------------------
+
+  const supportReplyTime = new Date(supportReply.createdAt).getTime();
+
+  const responseTime = supportReplyTime - customerMessageTime;
 
   if (responseTime < 0) {
     return null;
@@ -504,12 +535,11 @@ export const getCustomerAnalytics = async (req, res) => {
       customer: customerId,
       createdAt: {
         $gte: previousStart,
-        $lt: previousStart > previousEnd ? previousStart : currentStart,
+        $lt: currentStart,
       },
     })
       .select(fields)
       .lean();
-
     // =====================================================
     // ALL CUSTOMER TICKETS
     //
@@ -722,10 +752,14 @@ export const getCustomerAnalytics = async (req, res) => {
     const responseTimeDifference =
       averageResponseTime - previousAverageResponseTime;
 
-    const responseTimeChangePercentage = calculateChange(
-      averageResponseTime,
-      previousAverageResponseTime,
-    );
+    const responseTimeChangePercentage =
+      previousAverageResponseTime > 0
+        ? Math.round(
+            ((averageResponseTime - previousAverageResponseTime) /
+              previousAverageResponseTime) *
+              100,
+          )
+        : 0;
 
     // Lower response time is better.
     const responseTimeImproved =
