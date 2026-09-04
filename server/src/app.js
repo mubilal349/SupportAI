@@ -16,6 +16,11 @@ import aiTicketRoutes from "./routes/aiTicketRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import analyticsRoutes from "./routes/analyticsRoutes.js";
 
+// ==========
+//  AGENT ROUTES
+// ==========
+import agentRoutes from "./routes/agentRoutes.js";
+
 const app = express();
 
 app.use(
@@ -46,5 +51,8 @@ app.use("/api/customer", customerRoutes);
 app.use("/api/ai-tickets", aiTicketRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/analytics", analyticsRoutes);
+
+// Agent routes
+app.use("/api/agent", agentRoutes);
 
 export default app;

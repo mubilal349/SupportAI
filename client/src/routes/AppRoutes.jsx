@@ -21,10 +21,19 @@ import AITicketCreation from "../pages/customer/tickets/AITicketCreation";
 import Notifications from "../pages/customer/notification/Notifications";
 import KnowledgeBase from "../pages/customer/knowledge-base/KnowledgeBase";
 
+// Agent
+import AgentLayout from "../pages/agent/AgentLayout";
+import AgentDashboard from "../pages/agent/AgentDashboard";
+
+import TicketQueue from "../pages/agent/tickets/TicketQueue";
+import AssignedTickets from "../pages/agent/tickets/AssignedTickets";
+import AgentTicketDetails from "../pages/agent/tickets/AgentTicketDetails";
+
 // Route Protection
 import ProtectedRoute from "./ProtectedRoute";
 import Help from "../pages/customer/Help";
 import CustomerAnalytics from "../pages/customer/CustomerAnalytics";
+import AgentProfile from "../pages/agent/AgentProfile";
 
 const AppRoutes = () => {
   return (
@@ -51,15 +60,27 @@ const AppRoutes = () => {
           AGENT ROUTES
       ======================================== */}
 
-      <Route element={<ProtectedRoute allowedRoles={["agent"]} />}>
-        <Route
-          path="/agent"
-          element={
-            <div className="min-h-screen bg-slate-950 p-10 text-white">
-              Agent Dashboard
-            </div>
-          }
-        />
+      <Route
+        path="/agent"
+        element={
+          <ProtectedRoute allowedRoles={["agent", "admin"]}>
+            <AgentLayout />
+          </ProtectedRoute>
+        }
+      >
+        {/* Agent Dashboard */}
+        <Route index element={<AgentDashboard />} />
+
+        {/* All available tickets */}
+        <Route path="queue" element={<TicketQueue />} />
+
+        {/* Tickets assigned to the logged-in agent */}
+        <Route path="tickets" element={<AssignedTickets />} />
+
+        {/* Individual ticket */}
+        <Route path="tickets/:ticketId" element={<AgentTicketDetails />} />
+        {/* Agent Profile */}
+        <Route path="profile" element={<AgentProfile />} />
       </Route>
 
       {/* ========================================

@@ -135,10 +135,11 @@ SupportAI Support Team
 
   const html = `
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>SupportAI Ticket Created</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SupportAI - Ticket Created</title>
 </head>
 
 <body
@@ -150,116 +151,486 @@ SupportAI Support Team
     color:#0f172a;
   "
 >
-  <div style="max-width:600px;margin:0 auto;padding:30px 20px;">
+  <div
+    style="
+      width:100%;
+      background:#f1f5f9;
+      padding:40px 16px;
+      box-sizing:border-box;
+    "
+  >
 
+    <!-- EMAIL CONTAINER -->
     <div
       style="
+        max-width:620px;
+        margin:0 auto;
         background:#ffffff;
-        border-radius:16px;
-        overflow:hidden;
         border:1px solid #e2e8f0;
+        border-radius:20px;
+        overflow:hidden;
+        box-shadow:0 10px 35px rgba(15,23,42,0.08);
       "
     >
 
+      <!-- HEADER -->
       <div
         style="
-          background:#2563eb;
+          background:linear-gradient(135deg,#2563eb,#1d4ed8);
+          padding:32px 32px 30px;
           color:#ffffff;
-          padding:24px;
         "
       >
-        <h1
-          style="
-            margin:0;
-            font-size:22px;
-          "
+        <table
+          width="100%"
+          cellpadding="0"
+          cellspacing="0"
+          border="0"
         >
-          SupportAI
-        </h1>
+          <tr>
+            <td>
+              <div
+                style="
+                  font-size:26px;
+                  font-weight:700;
+                  letter-spacing:-0.5px;
+                "
+              >
+                SupportAI
+              </div>
 
-        <p
-          style="
-            margin:8px 0 0;
-            font-size:14px;
-            opacity:.9;
-          "
-        >
-          Support ticket created
-        </p>
+              <div
+                style="
+                  margin-top:6px;
+                  font-size:14px;
+                  color:#dbeafe;
+                "
+              >
+                Customer Support
+              </div>
+            </td>
+
+            <td
+              align="right"
+              valign="middle"
+            >
+              <div
+                style="
+                  display:inline-block;
+                  background:rgba(255,255,255,0.14);
+                  border:1px solid rgba(255,255,255,0.20);
+                  padding:8px 12px;
+                  border-radius:999px;
+                  font-size:11px;
+                  font-weight:600;
+                  color:#ffffff;
+                "
+              >
+                TICKET CREATED
+              </div>
+            </td>
+          </tr>
+        </table>
       </div>
 
-      <div style="padding:24px;">
+      <!-- CONTENT -->
+      <div style="padding:32px;">
 
-        <p style="margin:0 0 16px;">
-          Hello <strong>${customerName}</strong>,
+        <!-- GREETING -->
+        <p
+          style="
+            margin:0;
+            font-size:18px;
+            line-height:1.5;
+            font-weight:600;
+            color:#0f172a;
+          "
+        >
+          Hello ${customerName},
         </p>
 
         <p
           style="
-            margin:0 0 20px;
-            line-height:1.6;
+            margin:10px 0 0;
+            font-size:14px;
+            line-height:1.7;
             color:#475569;
           "
         >
-          Your SupportAI ticket has been created successfully.
-          Our support system has received your request.
+          Thanks for contacting SupportAI. Your support request has been
+          successfully received and a ticket has been created.
         </p>
 
+        <!-- SUCCESS MESSAGE -->
         <div
           style="
-            background:#f8fafc;
-            border:1px solid #e2e8f0;
+            margin-top:24px;
+            padding:16px 18px;
+            border:1px solid #bbf7d0;
+            background:#f0fdf4;
             border-radius:12px;
-            padding:18px;
+          "
+        >
+          <table
+            width="100%"
+            cellpadding="0"
+            cellspacing="0"
+            border="0"
+          >
+            <tr>
+              <td
+                width="38"
+                valign="top"
+              >
+                <div
+                  style="
+                    width:30px;
+                    height:30px;
+                    line-height:30px;
+                    text-align:center;
+                    border-radius:50%;
+                    background:#dcfce7;
+                    color:#16a34a;
+                    font-size:16px;
+                    font-weight:700;
+                  "
+                >
+                  ✓
+                </div>
+              </td>
+
+              <td valign="middle">
+                <div
+                  style="
+                    font-size:14px;
+                    font-weight:700;
+                    color:#166534;
+                  "
+                >
+                  Your ticket is now in our system
+                </div>
+
+                <div
+                  style="
+                    margin-top:4px;
+                    font-size:12px;
+                    line-height:1.5;
+                    color:#4d7c5f;
+                  "
+                >
+                  Our support team can now review and respond to your request.
+                </div>
+              </td>
+            </tr>
+          </table>
+        </div>
+
+        <!-- TICKET DETAILS -->
+        <div
+          style="
+            margin-top:28px;
+            border:1px solid #e2e8f0;
+            border-radius:16px;
+            overflow:hidden;
           "
         >
 
-          <p style="margin:0 0 10px;">
-            <strong>Ticket:</strong>
-            ${ticketNumber}
-          </p>
+          <div
+            style="
+              padding:16px 18px;
+              background:#f8fafc;
+              border-bottom:1px solid #e2e8f0;
+            "
+          >
+            <div
+              style="
+                font-size:13px;
+                font-weight:700;
+                color:#0f172a;
+              "
+            >
+              Ticket details
+            </div>
 
-          <p style="margin:0 0 10px;">
-            <strong>Subject:</strong>
-            ${ticket?.subject || "N/A"}
-          </p>
+            <div
+              style="
+                margin-top:4px;
+                font-size:11px;
+                color:#64748b;
+              "
+            >
+              Keep this information for future reference.
+            </div>
+          </div>
 
-          <p style="margin:0 0 10px;">
-            <strong>Category:</strong>
-            ${ticket?.category || "General"}
-          </p>
+          <div style="padding:20px;">
 
-          <p style="margin:0 0 10px;">
-            <strong>Priority:</strong>
-            ${ticket?.priority || "medium"}
-          </p>
+            <!-- TICKET NUMBER -->
+            <div
+              style="
+                padding-bottom:16px;
+                border-bottom:1px solid #f1f5f9;
+              "
+            >
+              <div
+                style="
+                  font-size:11px;
+                  font-weight:600;
+                  text-transform:uppercase;
+                  letter-spacing:0.08em;
+                  color:#94a3b8;
+                "
+              >
+                Ticket number
+              </div>
 
-          <p style="margin:0;">
-            <strong>Status:</strong>
-            ${ticket?.status || "open"}
-          </p>
+              <div
+                style="
+                  margin-top:6px;
+                  font-size:17px;
+                  font-weight:700;
+                  color:#2563eb;
+                "
+              >
+                ${ticketNumber}
+              </div>
+            </div>
 
+            <!-- SUBJECT -->
+            <div
+              style="
+                padding:16px 0;
+                border-bottom:1px solid #f1f5f9;
+              "
+            >
+              <div
+                style="
+                  font-size:11px;
+                  font-weight:600;
+                  text-transform:uppercase;
+                  letter-spacing:0.08em;
+                  color:#94a3b8;
+                "
+              >
+                Subject
+              </div>
+
+              <div
+                style="
+                  margin-top:6px;
+                  font-size:14px;
+                  line-height:1.5;
+                  font-weight:600;
+                  color:#334155;
+                "
+              >
+                ${ticket?.subject || "N/A"}
+              </div>
+            </div>
+
+            <!-- CATEGORY / PRIORITY -->
+            <table
+              width="100%"
+              cellpadding="0"
+              cellspacing="0"
+              border="0"
+              style="
+                padding:16px 0;
+                border-bottom:1px solid #f1f5f9;
+              "
+            >
+              <tr>
+                <td width="50%" valign="top">
+                  <div
+                    style="
+                      font-size:11px;
+                      font-weight:600;
+                      text-transform:uppercase;
+                      letter-spacing:0.08em;
+                      color:#94a3b8;
+                    "
+                  >
+                    Category
+                  </div>
+
+                  <div
+                    style="
+                      margin-top:6px;
+                      font-size:13px;
+                      font-weight:600;
+                      color:#334155;
+                    "
+                  >
+                    ${ticket?.category || "General"}
+                  </div>
+                </td>
+
+                <td width="50%" valign="top">
+                  <div
+                    style="
+                      font-size:11px;
+                      font-weight:600;
+                      text-transform:uppercase;
+                      letter-spacing:0.08em;
+                      color:#94a3b8;
+                    "
+                  >
+                    Priority
+                  </div>
+
+                  <div
+                    style="
+                      margin-top:6px;
+                      font-size:13px;
+                      font-weight:600;
+                      color:#334155;
+                      text-transform:capitalize;
+                    "
+                  >
+                    ${ticket?.priority || "medium"}
+                  </div>
+                </td>
+              </tr>
+            </table>
+
+            <!-- STATUS -->
+            <div style="padding-top:16px;">
+              <div
+                style="
+                  font-size:11px;
+                  font-weight:600;
+                  text-transform:uppercase;
+                  letter-spacing:0.08em;
+                  color:#94a3b8;
+                "
+              >
+                Current status
+              </div>
+
+              <div style="margin-top:8px;">
+                <span
+                  style="
+                    display:inline-block;
+                    padding:7px 11px;
+                    border-radius:999px;
+                    background:#dbeafe;
+                    color:#1d4ed8;
+                    font-size:11px;
+                    font-weight:700;
+                    text-transform:capitalize;
+                  "
+                >
+                  ${ticket?.status || "open"}
+                </span>
+              </div>
+            </div>
+
+          </div>
         </div>
 
+        <!-- NEXT STEP -->
+        <div
+          style="
+            margin-top:28px;
+            padding:20px;
+            background:#eff6ff;
+            border:1px solid #bfdbfe;
+            border-radius:14px;
+          "
+        >
+          <div
+            style="
+              font-size:14px;
+              font-weight:700;
+              color:#1e40af;
+            "
+          >
+            What happens next?
+          </div>
+
+          <p
+            style="
+              margin:8px 0 0;
+              font-size:13px;
+              line-height:1.7;
+              color:#475569;
+            "
+          >
+            You can view your ticket, follow its status, and respond to
+            support from your SupportAI account. We'll notify you when there
+            is a new reply or important update.
+          </p>
+        </div>
+
+        <!-- CTA -->
+        <div
+          style="
+            margin-top:28px;
+            text-align:center;
+          "
+        >
+          <a
+            href="http://localhost:5173/support/tickets"
+            style="
+              display:inline-block;
+              padding:13px 22px;
+              background:#2563eb;
+              color:#ffffff;
+              text-decoration:none;
+              border-radius:10px;
+              font-size:13px;
+              font-weight:700;
+            "
+          >
+            View My Tickets
+          </a>
+        </div>
+
+        <!-- SUPPORT NOTE -->
         <p
           style="
-            margin:20px 0 0;
+            margin:26px 0 0;
+            text-align:center;
+            font-size:11px;
             line-height:1.6;
+            color:#94a3b8;
+          "
+        >
+          Need more help? You can continue the conversation through
+          SupportAI at any time.
+        </p>
+
+      </div>
+
+      <!-- FOOTER -->
+      <div
+        style="
+          padding:22px 32px;
+          background:#f8fafc;
+          border-top:1px solid #e2e8f0;
+          text-align:center;
+        "
+      >
+        <p
+          style="
+            margin:0;
+            font-size:12px;
+            font-weight:700;
             color:#475569;
           "
         >
-          You can log in to SupportAI to view your ticket,
-          review replies, and track its progress.
+          SupportAI Support Team
         </p>
 
         <p
           style="
-            margin:24px 0 0;
-            color:#64748b;
+            margin:6px 0 0;
+            font-size:10px;
+            color:#94a3b8;
           "
         >
-          Regards,<br />
-          <strong>SupportAI Support Team</strong>
+          This is an automated notification from SupportAI.
+          Please do not reply directly to this email.
         </p>
 
       </div>
@@ -317,10 +688,11 @@ SupportAI Support Team
 
   const html = `
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>New SupportAI Reply</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SupportAI - New Reply</title>
 </head>
 
 <body
@@ -332,104 +704,428 @@ SupportAI Support Team
     color:#0f172a;
   "
 >
-  <div style="max-width:600px;margin:0 auto;padding:30px 20px;">
+  <div
+    style="
+      width:100%;
+      background:#f1f5f9;
+      padding:40px 16px;
+      box-sizing:border-box;
+    "
+  >
 
+    <!-- EMAIL CONTAINER -->
     <div
       style="
+        max-width:620px;
+        margin:0 auto;
         background:#ffffff;
-        border-radius:16px;
-        overflow:hidden;
         border:1px solid #e2e8f0;
+        border-radius:20px;
+        overflow:hidden;
+        box-shadow:0 10px 35px rgba(15,23,42,0.08);
       "
     >
 
+      <!-- HEADER -->
       <div
         style="
-          background:#2563eb;
+          background:linear-gradient(135deg,#2563eb,#1d4ed8);
+          padding:32px;
           color:#ffffff;
-          padding:24px;
         "
       >
-        <h1 style="margin:0;font-size:22px;">
-          SupportAI
-        </h1>
-
-        <p
-          style="
-            margin:8px 0 0;
-            font-size:14px;
-            opacity:.9;
-          "
+        <table
+          width="100%"
+          cellpadding="0"
+          cellspacing="0"
+          border="0"
         >
-          New ticket reply
-        </p>
+          <tr>
+            <td valign="middle">
+
+              <div
+                style="
+                  font-size:26px;
+                  font-weight:700;
+                  letter-spacing:-0.5px;
+                "
+              >
+                SupportAI
+              </div>
+
+              <div
+                style="
+                  margin-top:6px;
+                  font-size:14px;
+                  color:#dbeafe;
+                "
+              >
+                Customer Support
+              </div>
+
+            </td>
+
+            <td
+              align="right"
+              valign="middle"
+            >
+              <div
+                style="
+                  display:inline-block;
+                  background:rgba(255,255,255,0.14);
+                  border:1px solid rgba(255,255,255,0.20);
+                  padding:8px 12px;
+                  border-radius:999px;
+                  font-size:10px;
+                  font-weight:700;
+                  color:#ffffff;
+                "
+              >
+                NEW REPLY
+              </div>
+            </td>
+          </tr>
+        </table>
       </div>
 
-      <div style="padding:24px;">
+      <!-- CONTENT -->
+      <div style="padding:32px;">
 
-        <p>
-          Hello <strong>${customerName}</strong>,
+        <!-- GREETING -->
+        <p
+          style="
+            margin:0;
+            font-size:18px;
+            line-height:1.5;
+            font-weight:600;
+            color:#0f172a;
+          "
+        >
+          Hello ${customerName},
         </p>
 
         <p
           style="
-            line-height:1.6;
+            margin:10px 0 0;
+            font-size:14px;
+            line-height:1.7;
             color:#475569;
           "
         >
-          A new reply has been added to your ticket.
+          There's a new reply waiting for you regarding your
+          support ticket.
         </p>
 
+        <!-- NOTIFICATION -->
         <div
           style="
-            margin-top:20px;
-            background:#f8fafc;
-            border:1px solid #e2e8f0;
+            margin-top:24px;
+            padding:16px 18px;
+            border:1px solid #bfdbfe;
+            background:#eff6ff;
             border-radius:12px;
-            padding:18px;
+          "
+        >
+          <table
+            width="100%"
+            cellpadding="0"
+            cellspacing="0"
+            border="0"
+          >
+            <tr>
+
+              <td
+                width="42"
+                valign="top"
+              >
+                <div
+                  style="
+                    width:32px;
+                    height:32px;
+                    line-height:32px;
+                    text-align:center;
+                    border-radius:50%;
+                    background:#dbeafe;
+                    color:#2563eb;
+                    font-size:16px;
+                    font-weight:700;
+                  "
+                >
+                  ↗
+                </div>
+              </td>
+
+              <td valign="middle">
+
+                <div
+                  style="
+                    font-size:14px;
+                    font-weight:700;
+                    color:#1e40af;
+                  "
+                >
+                  Your support ticket has a new reply
+                </div>
+
+                <div
+                  style="
+                    margin-top:4px;
+                    font-size:12px;
+                    line-height:1.5;
+                    color:#64748b;
+                  "
+                >
+                  Sign in to SupportAI to continue the conversation.
+                </div>
+
+              </td>
+
+            </tr>
+          </table>
+        </div>
+
+        <!-- TICKET DETAILS -->
+        <div
+          style="
+            margin-top:28px;
+            border:1px solid #e2e8f0;
+            border-radius:16px;
+            overflow:hidden;
           "
         >
 
-          <p style="margin:0 0 10px;">
-            <strong>Ticket:</strong>
-            ${ticketNumber}
-          </p>
+          <div
+            style="
+              padding:16px 18px;
+              background:#f8fafc;
+              border-bottom:1px solid #e2e8f0;
+            "
+          >
+            <div
+              style="
+                font-size:13px;
+                font-weight:700;
+                color:#0f172a;
+              "
+            >
+              Ticket details
+            </div>
 
-          <p style="margin:0;">
-            <strong>Subject:</strong>
-            ${ticket?.subject || "N/A"}
-          </p>
+            <div
+              style="
+                margin-top:4px;
+                font-size:11px;
+                color:#64748b;
+              "
+            >
+              Conversation reference
+            </div>
+          </div>
+
+          <div style="padding:20px;">
+
+            <!-- TICKET -->
+            <div
+              style="
+                padding-bottom:16px;
+                border-bottom:1px solid #f1f5f9;
+              "
+            >
+
+              <div
+                style="
+                  font-size:11px;
+                  font-weight:600;
+                  text-transform:uppercase;
+                  letter-spacing:0.08em;
+                  color:#94a3b8;
+                "
+              >
+                Ticket number
+              </div>
+
+              <div
+                style="
+                  margin-top:6px;
+                  font-size:17px;
+                  font-weight:700;
+                  color:#2563eb;
+                "
+              >
+                ${ticketNumber}
+              </div>
+
+            </div>
+
+            <!-- SUBJECT -->
+            <div style="padding-top:16px;">
+
+              <div
+                style="
+                  font-size:11px;
+                  font-weight:600;
+                  text-transform:uppercase;
+                  letter-spacing:0.08em;
+                  color:#94a3b8;
+                "
+              >
+                Subject
+              </div>
+
+              <div
+                style="
+                  margin-top:6px;
+                  font-size:14px;
+                  line-height:1.5;
+                  font-weight:600;
+                  color:#334155;
+                "
+              >
+                ${ticket?.subject || "N/A"}
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+
+        <!-- REPLY BOX -->
+        <div style="margin-top:28px;">
+
+          <div
+            style="
+              margin-bottom:10px;
+              font-size:12px;
+              font-weight:700;
+              color:#475569;
+            "
+          >
+            Latest reply
+          </div>
+
+          <div
+            style="
+              padding:20px;
+              background:#f8fafc;
+              border:1px solid #e2e8f0;
+              border-left:4px solid #2563eb;
+              border-radius:12px;
+            "
+          >
+
+            <p
+              style="
+                margin:0;
+                font-size:14px;
+                line-height:1.8;
+                color:#334155;
+                white-space:pre-wrap;
+              "
+            >
+              ${safeReply}
+            </p>
+
+          </div>
 
         </div>
 
+        <!-- CTA -->
         <div
           style="
-            margin-top:20px;
-            padding:18px;
-            background:#eff6ff;
-            border-left:4px solid #2563eb;
-            border-radius:8px;
+            margin-top:30px;
+            text-align:center;
           "
         >
+          <a
+            href="${process.env.CLIENT_URL || "http://localhost:5173"}/support/tickets"
+            style="
+              display:inline-block;
+              padding:13px 24px;
+              background:#2563eb;
+              color:#ffffff;
+              text-decoration:none;
+              border-radius:10px;
+              font-size:13px;
+              font-weight:700;
+            "
+          >
+            View & Reply to Ticket
+          </a>
+        </div>
+
+        <!-- EXTRA MESSAGE -->
+        <div
+          style="
+            margin-top:28px;
+            padding-top:22px;
+            border-top:1px solid #e2e8f0;
+          "
+        >
+
           <p
             style="
               margin:0;
-              white-space:pre-wrap;
-              line-height:1.6;
+              font-size:12px;
+              line-height:1.7;
+              color:#64748b;
+              text-align:center;
             "
           >
-            ${safeReply}
+            You can continue your conversation with SupportAI or
+            your support specialist directly from your customer dashboard.
           </p>
+
         </div>
 
+        <!-- SIGNATURE -->
         <p
           style="
-            margin-top:24px;
+            margin:24px 0 0;
+            text-align:center;
+            font-size:12px;
+            line-height:1.6;
             color:#64748b;
           "
         >
           Regards,<br />
-          <strong>SupportAI Support Team</strong>
+          <strong style="color:#334155;">
+            SupportAI Support Team
+          </strong>
+        </p>
+
+      </div>
+
+      <!-- FOOTER -->
+      <div
+        style="
+          padding:22px 32px;
+          background:#f8fafc;
+          border-top:1px solid #e2e8f0;
+          text-align:center;
+        "
+      >
+
+        <p
+          style="
+            margin:0;
+            font-size:12px;
+            font-weight:700;
+            color:#475569;
+          "
+        >
+          SupportAI
+        </p>
+
+        <p
+          style="
+            margin:6px 0 0;
+            font-size:10px;
+            line-height:1.5;
+            color:#94a3b8;
+          "
+        >
+          This is an automated notification from SupportAI.
+          Please manage your email preferences from your account settings.
         </p>
 
       </div>
