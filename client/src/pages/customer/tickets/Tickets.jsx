@@ -17,12 +17,16 @@ import {
   UserRound,
   X,
   XCircle,
+  FolderOpen,
+  ChevronDown,
+  Flag,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { createTicket, getTickets } from "../../../services/ticketService";
 
 const Tickets = () => {
+  const navigate = useNavigate();
   // =========================================================
   // STATE
   // =========================================================
@@ -436,11 +440,8 @@ const Tickets = () => {
 
             <button
               type="button"
-              onClick={() => {
-                setError("");
-                setShowCreateModal(true);
-              }}
-              className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold transition hover:bg-blue-700"
+              onClick={() => navigate("/support/tickets/create")}
+              className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold transition hover:bg-blue-700 cursor-pointer"
             >
               <Plus className="h-4 w-4" />
               Create ticket
@@ -984,161 +985,6 @@ const Tickets = () => {
                 <X className="h-5 w-5" />
               </button>
             </div>
-
-            {/* Form */}
-
-            <form onSubmit={handleCreateTicket} className="space-y-5">
-              {/* Subject */}
-
-              <div>
-                <label className="mb-2 block text-sm font-medium">
-                  Subject
-                </label>
-
-                <input
-                  type="text"
-                  value={newTicket.subject}
-                  onChange={(e) =>
-                    setNewTicket((previous) => ({
-                      ...previous,
-                      subject: e.target.value,
-                    }))
-                  }
-                  placeholder="What do you need help with?"
-                  disabled={creating}
-                  maxLength={150}
-                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-700 focus:border-blue-500 disabled:opacity-50"
-                />
-
-                <p className="mt-1 text-right text-[10px] text-slate-700">
-                  {newTicket.subject.length}/150
-                </p>
-              </div>
-
-              {/* Description */}
-
-              <div>
-                <label className="mb-2 block text-sm font-medium">
-                  Describe your issue
-                </label>
-
-                <textarea
-                  value={newTicket.description}
-                  onChange={(e) =>
-                    setNewTicket((previous) => ({
-                      ...previous,
-                      description: e.target.value,
-                    }))
-                  }
-                  rows={6}
-                  maxLength={3000}
-                  placeholder="Describe what happened, what you expected, and any relevant details..."
-                  disabled={creating}
-                  className="w-full resize-none rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-700 focus:border-blue-500 disabled:opacity-50"
-                />
-
-                <p className="mt-1 text-right text-[10px] text-slate-700">
-                  {newTicket.description.length}/3000
-                </p>
-              </div>
-
-              {/* Category + Priority */}
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                {/* Category */}
-
-                <div>
-                  <label className="mb-2 block text-sm font-medium">
-                    Category
-                  </label>
-
-                  <select
-                    value={newTicket.category}
-                    onChange={(e) =>
-                      setNewTicket((previous) => ({
-                        ...previous,
-                        category: e.target.value,
-                      }))
-                    }
-                    disabled={creating}
-                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-400 outline-none focus:border-blue-500 disabled:opacity-50"
-                  >
-                    {categories.map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Priority */}
-
-                <div>
-                  <label className="mb-2 block text-sm font-medium">
-                    Priority
-                  </label>
-
-                  <select
-                    value={newTicket.priority}
-                    onChange={(e) =>
-                      setNewTicket((previous) => ({
-                        ...previous,
-                        priority: e.target.value,
-                      }))
-                    }
-                    disabled={creating}
-                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-400 outline-none focus:border-blue-500 disabled:opacity-50"
-                  >
-                    <option value="low">Low</option>
-
-                    <option value="medium">Medium</option>
-
-                    <option value="high">High</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Error */}
-
-              {error && (
-                <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
-
-                  <p className="text-sm text-red-400">{error}</p>
-                </div>
-              )}
-
-              {/* Actions */}
-
-              <div className="flex justify-end gap-3 border-t border-slate-800 pt-5">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  disabled={creating}
-                  className="rounded-xl border border-slate-800 px-5 py-3 text-sm text-slate-400 transition hover:bg-slate-800 hover:text-white disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {creating ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Creating...
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="h-4 w-4" />
-                      Create ticket
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

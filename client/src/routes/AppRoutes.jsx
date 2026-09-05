@@ -22,6 +22,8 @@ import Notifications from "../pages/customer/notification/Notifications";
 import KnowledgeBase from "../pages/customer/knowledge-base/KnowledgeBase";
 import Help from "../pages/customer/Help";
 import CustomerAnalytics from "../pages/customer/CustomerAnalytics";
+import CreateTicket from "../pages/customer/tickets/CreateTicket";
+import CreateTicketForm from "../pages/customer/tickets/CreateTicketForm";
 
 // Agent
 import AgentLayout from "../pages/agent/AgentLayout";
@@ -100,6 +102,11 @@ const AppRoutes = () => {
 
           {/* /support/tickets */}
           <Route path="tickets" element={<Tickets />} />
+
+          {/* /tickets/create */}
+          <Route path="tickets/create" element={<CreateTicket />} />
+
+          <Route path="tickets/create-form" element={<CreateTicketForm />} />
 
           {/* /support/tickets/create-ai */}
           <Route path="tickets/create-ai" element={<AITicketCreation />} />

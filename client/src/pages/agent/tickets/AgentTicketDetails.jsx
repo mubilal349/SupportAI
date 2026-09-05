@@ -4,27 +4,26 @@ import {
   AlertCircle,
   ArrowLeft,
   Check,
-  ChevronDown,
-  Clock,
+  CheckCircle2,
+  Clock3,
   Download,
   File,
-  FileImage,
   FileText,
-  History,
   Image as ImageIcon,
   Loader2,
-  Mail,
-  MessageCircle,
+  MessageSquare,
   Paperclip,
   RefreshCw,
   Send,
-  ShieldCheck,
   User,
   UserCheck,
   X,
+  ChevronDown,
 } from "lucide-react";
 
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { io } from "socket.io-client";
+
+import { useNavigate, useParams } from "react-router-dom";
 
 import {
   assignTicketToMe,
@@ -34,334 +33,202 @@ import {
   updateAgentTicketStatus,
 } from "../../../services/agentService";
 
-/*
- * =========================================================
- * CONSTANTS
- * =========================================================
- */
-
-const BACKEND_URL = "http://localhost:8000";
-
-const MAX_FILES = 5;
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
-
-const STATUS_OPTIONS = [
-  {
-    value: "open",
-    label: "Open",
-  },
-  {
-    value: "in-progress",
-    label: "In Progress",
-  },
-  {
-    value: "waiting",
-    label: "Waiting",
-  },
-  {
-    value: "resolved",
-    label: "Resolved",
-  },
-  {
-    value: "closed",
-    label: "Closed",
-  },
-];
-
-const PRIORITY_OPTIONS = [
-  {
-    value: "low",
-    label: "Low",
-  },
-  {
-    value: "medium",
-    label: "Medium",
-  },
-  {
-    value: "high",
-    label: "High",
-  },
-];
+import { useAuth } from "../../../context/AuthContext";
 
 /*
- * =========================================================
- * HELPERS
- * =========================================================
- */
+|--------------------------------------------------------------------------
+| Helpers
+|--------------------------------------------------------------------------
+*/
+
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+
+const SERVER_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, "");
+
+const SOCKET_BASE_URL = SERVER_BASE_URL;
 
 const getId = (value) => {
-  if (!value) return "";
+  if (!value) return null;
 
   if (typeof value === "string") {
     return value;
   }
 
-  return (value._id || value.id || value.$oid || "").toString();
-};
-
-const formatDate = (value) => {
-  if (!value) return "—";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "—";
+  if (typeof value === "object") {
+    return value._id || value.id || value.userId || null;
   }
 
-  return date.toLocaleDateString([], {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return null;
 };
 
-const formatTime = (value) => {
-  if (!value) return "—";
+const getAvatarUrl = (avatar) => {
+  if (!avatar) return "";
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-
-  return date.toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-};
-
-const formatDateTime = (value) => {
-  if (!value) return "—";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-
-  return `${date.toLocaleDateString([], {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  })} at ${date.toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  })}`;
-};
-
-const formatFileSize = (bytes) => {
-  if (!bytes || bytes <= 0) {
-    return "0 KB";
-  }
-
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-};
-
-const getInitials = (name = "") => {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-
-  if (!words.length) {
-    return "CU";
-  }
-
-  if (words.length === 1) {
-    return words[0].slice(0, 2).toUpperCase();
-  }
-
-  return `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase();
-};
-
-const getCustomerName = (customer) => {
-  return customer?.name || customer?.fullName || customer?.email || "Customer";
-};
-
-const getAgentName = (agent) => {
-  return agent?.name || agent?.fullName || agent?.email || "Agent";
-};
-
-const getStatusLabel = (status) => {
-  const option = STATUS_OPTIONS.find((item) => item.value === status);
-
-  return option?.label || status || "Unknown";
-};
-
-const getPriorityLabel = (priority) => {
-  const option = PRIORITY_OPTIONS.find((item) => item.value === priority);
-
-  return option?.label || priority || "Unknown";
-};
-
-const getStatusClasses = (status) => {
-  switch (status) {
-    case "open":
-      return "border-blue-500/20 bg-blue-500/10 text-blue-400";
-
-    case "in-progress":
-      return "border-indigo-500/20 bg-indigo-500/10 text-indigo-400";
-
-    case "waiting":
-      return "border-amber-500/20 bg-amber-500/10 text-amber-400";
-
-    case "resolved":
-      return "border-emerald-500/20 bg-emerald-500/10 text-emerald-400";
-
-    case "closed":
-      return "border-slate-500/20 bg-slate-500/10 text-slate-400";
-
-    default:
-      return "border-slate-700 bg-slate-800 text-slate-300";
-  }
-};
-
-const getPriorityClasses = (priority) => {
-  switch (priority) {
-    case "high":
-      return "border-red-500/20 bg-red-500/10 text-red-400";
-
-    case "medium":
-      return "border-amber-500/20 bg-amber-500/10 text-amber-400";
-
-    case "low":
-      return "border-emerald-500/20 bg-emerald-500/10 text-emerald-400";
-
-    default:
-      return "border-slate-700 bg-slate-800 text-slate-300";
-  }
-};
-
-const getSenderLabel = (message) => {
-  switch (message?.senderRole) {
-    case "customer":
-      return "Customer";
-
-    case "agent":
-      return "Agent";
-
-    case "admin":
-      return "Admin";
-
-    case "ai":
-      return "AI Assistant";
-
-    case "system":
-      return "System";
-
-    default:
-      return "Support";
-  }
-};
-
-/*
- * =========================================================
- * CUSTOMER AVATAR
- * =========================================================
- */
-
-const getCustomerAvatarUrl = (customer) => {
-  const avatar = customer?.avatar?.trim();
-
-  if (!avatar) {
-    return "";
-  }
-
-  if (
-    avatar.startsWith("http://") ||
-    avatar.startsWith("https://") ||
-    avatar.startsWith("data:")
-  ) {
+  if (/^(https?:\/\/|data:|blob:)/i.test(avatar)) {
     return avatar;
   }
 
-  return `${BACKEND_URL}${avatar.startsWith("/") ? avatar : `/${avatar}`}`;
+  return `${SERVER_BASE_URL}/${String(avatar).replace(/^\/+/, "")}`;
 };
 
-/*
- * =========================================================
- * FILE URL
- * =========================================================
- */
-
-const getAttachmentUrl = (attachment) => {
-  if (!attachment) {
-    return "";
-  }
+const getFileUrl = (file) => {
+  if (!file) return "";
 
   const filePath =
-    attachment.path || attachment.url || attachment.filename || "";
+    file.path || file.url || file.filePath || file.filename || "";
 
-  if (!filePath) {
-    return "";
-  }
+  if (!filePath) return "";
 
-  if (
-    filePath.startsWith("http://") ||
-    filePath.startsWith("https://") ||
-    filePath.startsWith("data:")
-  ) {
+  if (/^(https?:\/\/|blob:|data:)/i.test(filePath)) {
     return filePath;
   }
 
-  return `${BACKEND_URL}${
-    filePath.startsWith("/") ? filePath : `/${filePath}`
-  }`;
+  return `${SERVER_BASE_URL}/${String(filePath).replace(/^\/+/, "")}`;
 };
 
-const isImageAttachment = (attachment) => {
-  return Boolean(attachment?.mimetype?.startsWith("image/"));
-};
+const formatDate = (date) => {
+  if (!date) return "";
 
-const isPdfAttachment = (attachment) => {
-  return (
-    attachment?.mimetype === "application/pdf" ||
-    attachment?.originalName?.toLowerCase().endsWith(".pdf")
-  );
-};
+  const parsed = new Date(date);
 
-const normalizeTicket = (rawTicket, fallbackId = "") => {
-  if (!rawTicket) {
-    return null;
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
   }
 
-  return {
-    ...rawTicket,
+  return parsed.toLocaleString([], {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+};
 
-    id: getId(rawTicket) || fallbackId,
+const formatFileSize = (bytes) => {
+  if (!bytes || Number(bytes) <= 0) {
+    return "";
+  }
 
-    conversation:
-      rawTicket.conversation ||
-      rawTicket.messages ||
-      rawTicket.repliesList ||
-      [],
+  const size = Number(bytes);
 
-    attachments: rawTicket.attachments || [],
+  if (size < 1024) {
+    return `${size} B`;
+  }
 
-    status: rawTicket.status || "open",
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
 
-    priority: rawTicket.priority || "medium",
-  };
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const getPriorityClasses = (priority) => {
+  switch (String(priority || "").toLowerCase()) {
+    case "high":
+      return "border-red-500/30 bg-red-500/10 text-red-400";
+
+    case "low":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-400";
+
+    default:
+      return "border-amber-500/30 bg-amber-500/10 text-amber-400";
+  }
+};
+
+const getStatusClasses = (status) => {
+  switch (String(status || "").toLowerCase()) {
+    case "open":
+      return "border-blue-500/30 bg-blue-500/10 text-blue-400";
+
+    case "in-progress":
+      return "border-violet-500/30 bg-violet-500/10 text-violet-400";
+
+    case "waiting":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-400";
+
+    case "resolved":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-400";
+
+    case "closed":
+      return "border-slate-600/80 bg-slate-800/80 text-slate-300";
+
+    default:
+      return "border-slate-700 bg-slate-800 text-slate-300";
+  }
+};
+
+const formatStatus = (status) => {
+  if (!status) return "Unknown";
+
+  return String(status)
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
+const getSenderName = (message, ticket) => {
+  if (message?.sender?.name) {
+    return message.sender.name;
+  }
+
+  if (message?.senderName) {
+    return message.senderName;
+  }
+
+  if (String(message?.senderRole || "").toLowerCase() === "customer") {
+    return ticket?.customer?.name || "Customer";
+  }
+
+  if (String(message?.senderRole || "").toLowerCase() === "agent") {
+    return "Agent";
+  }
+
+  if (String(message?.senderRole || "").toLowerCase() === "admin") {
+    return "Admin";
+  }
+
+  if (String(message?.senderRole || "").toLowerCase() === "ai") {
+    return "AI Assistant";
+  }
+
+  return "Support";
+};
+
+const isImageFile = (file) => {
+  const mime = String(file?.mimetype || "").toLowerCase();
+
+  if (mime.startsWith("image/")) {
+    return true;
+  }
+
+  const name = String(
+    file?.originalName || file?.filename || file?.name || "",
+  ).toLowerCase();
+
+  return /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(name);
+};
+
+const isPdfFile = (file) => {
+  const mime = String(file?.mimetype || "").toLowerCase();
+
+  if (mime === "application/pdf") {
+    return true;
+  }
+
+  const name = String(
+    file?.originalName || file?.filename || file?.name || "",
+  ).toLowerCase();
+
+  return name.endsWith(".pdf");
 };
 
 /*
- * =========================================================
- * COMPONENT
- * =========================================================
- */
+|--------------------------------------------------------------------------
+| Component
+|--------------------------------------------------------------------------
+*/
 
 const AgentTicketDetails = () => {
   const { ticketId } = useParams();
   const navigate = useNavigate();
-
-  const replyInputRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const conversationEndRef = useRef(null);
+  const { user } = useAuth();
 
   const [ticket, setTicket] = useState(null);
 
@@ -372,70 +239,61 @@ const AgentTicketDetails = () => {
   const [success, setSuccess] = useState("");
 
   const [reply, setReply] = useState("");
-
   const [selectedFiles, setSelectedFiles] = useState([]);
 
-  const [sending, setSending] = useState(false);
+  const [sendingReply, setSendingReply] = useState(false);
   const [assigning, setAssigning] = useState(false);
-
   const [updatingStatus, setUpdatingStatus] = useState(false);
-
   const [updatingPriority, setUpdatingPriority] = useState(false);
 
-  const [showCustomerDetails, setShowCustomerDetails] = useState(true);
-
-  const [showHistory, setShowHistory] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
 
   /*
-   * =======================================================
-   * DERIVED DATA
-   * =======================================================
-   */
+  |--------------------------------------------------------------------------
+  | Customer Typing Indicator
+  |--------------------------------------------------------------------------
+  */
 
-  const customer = ticket?.customer || null;
+  const [customerTyping, setCustomerTyping] = useState(false);
 
-  const assignedAgent = ticket?.assignedAgent || null;
+  const socketRef = useRef(null);
 
-  const customerName = getCustomerName(customer);
-
-  const customerAvatarUrl = getCustomerAvatarUrl(customer);
-
-  const conversation = ticket?.conversation || [];
-
-  const statusHistory = ticket?.statusHistory || [];
-
-  const ticketAttachments = ticket?.attachments || [];
-
-  const isClosed = ticket?.status === "closed";
-
-  const isResolved = ticket?.status === "resolved";
-
-  const isAssignedToCurrentAgent = Boolean(ticket?.assignedAgent);
-
-  const canReply = !isClosed;
+  const fileInputRef = useRef(null);
+  const conversationEndRef = useRef(null);
 
   /*
-   * =======================================================
-   * LOAD TICKET
-   * =======================================================
-   */
+  |--------------------------------------------------------------------------
+  | Load ticket
+  |--------------------------------------------------------------------------
+  */
 
   const loadTicket = useCallback(
-    async (showRefresh = false) => {
+    async (showLoader = true) => {
       if (!ticketId) {
+        setError("Ticket ID is missing.");
+        setLoading(false);
         return;
       }
 
       try {
-        if (showRefresh) {
-          setRefreshing(true);
-        } else {
+        if (showLoader) {
           setLoading(true);
+        } else {
+          setRefreshing(true);
         }
 
         setError("");
 
         const response = await getAgentTicketById(ticketId);
+
+        /*
+         * Support all common API response structures:
+         *
+         * { ticket: {...} }
+         * { data: {...} }
+         * { data: { ticket: {...} } }
+         * direct ticket object
+         */
 
         const rawTicket =
           response?.ticket ||
@@ -443,13 +301,47 @@ const AgentTicketDetails = () => {
           response?.data ||
           response;
 
-        const normalized = normalizeTicket(rawTicket, ticketId);
+        if (!rawTicket) {
+          throw new Error("Ticket data was not returned by the server.");
+        }
 
-        setTicket(normalized);
+        const normalizedTicket = {
+          ...rawTicket,
+
+          id: rawTicket.id || rawTicket._id || ticketId,
+
+          _id: rawTicket._id || rawTicket.id || ticketId,
+
+          conversation: Array.isArray(rawTicket.conversation)
+            ? rawTicket.conversation
+            : [],
+
+          attachments: Array.isArray(rawTicket.attachments)
+            ? rawTicket.attachments
+            : [],
+
+          statusHistory: Array.isArray(rawTicket.statusHistory)
+            ? rawTicket.statusHistory
+            : [],
+        };
+
+        console.log("========================================");
+        console.log("AGENT TICKET LOADED");
+        console.log("TICKET:", normalizedTicket);
+        console.log("DESCRIPTION:", normalizedTicket.description);
+        console.log("CONVERSATION:", normalizedTicket.conversation);
+        console.log("ATTACHMENTS:", normalizedTicket.attachments);
+        console.log("========================================");
+
+        setTicket(normalizedTicket);
       } catch (err) {
         console.error("LOAD AGENT TICKET ERROR:", err);
 
-        setError(err?.response?.data?.message || "Failed to load ticket.");
+        setError(
+          err?.response?.data?.message ||
+            err?.message ||
+            "Failed to load ticket.",
+        );
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -458,58 +350,317 @@ const AgentTicketDetails = () => {
     [ticketId],
   );
 
-  /*
-   * =======================================================
-   * INITIAL LOAD
-   * =======================================================
-   */
-
   useEffect(() => {
-    loadTicket();
+    loadTicket(true);
   }, [loadTicket]);
 
   /*
-   * =======================================================
-   * AUTO CLEAR SUCCESS
-   * =======================================================
-   */
+  |--------------------------------------------------------------------------
+  | Customer Typing Socket
+  |--------------------------------------------------------------------------
+  |
+  | Agent joins the current ticket room and listens for:
+  |
+  | ticket:typing
+  |
+  | Backend sends:
+  |
+  | {
+  |   ticketId,
+  |   userId,
+  |   role: "customer",
+  |   isTyping: true/false
+  | }
+  |
+  */
 
   useEffect(() => {
-    if (!success) {
+    if (!ticketId) {
       return;
     }
 
-    const timer = setTimeout(() => {
-      setSuccess("");
-    }, 3500);
+    const token = localStorage.getItem("supportai_token");
 
-    return () => clearTimeout(timer);
-  }, [success]);
+    if (!token) {
+      console.warn("AGENT TYPING SOCKET: No supportai_token found.");
+      return;
+    }
+
+    let socket;
+
+    try {
+      socket = io(SOCKET_BASE_URL, {
+        auth: {
+          token,
+        },
+        transports: ["websocket", "polling"],
+      });
+
+      socketRef.current = socket;
+
+      const handleConnect = () => {
+        console.log("AGENT TYPING SOCKET CONNECTED:", socket.id);
+
+        /*
+         * Join this ticket's room.
+         *
+         * Backend:
+         * ticket:join
+         */
+        socket.emit("ticket:join", {
+          ticketId,
+        });
+      };
+
+      const handleJoined = (data) => {
+        console.log("AGENT JOINED TICKET ROOM:", data);
+      };
+
+      const handleCustomerTyping = (data) => {
+        /*
+         * Make sure the event belongs to this ticket.
+         */
+        if (String(data?.ticketId || "") !== String(ticketId)) {
+          return;
+        }
+
+        /*
+         * We only want the CUSTOMER typing indicator.
+         *
+         * Ignore agent/admin typing events.
+         */
+        const role = String(data?.role || "").toLowerCase();
+
+        if (role !== "customer") {
+          return;
+        }
+
+        console.log("CUSTOMER TYPING:", data?.isTyping);
+
+        setCustomerTyping(Boolean(data?.isTyping));
+      };
+
+      const handleSocketError = (data) => {
+        console.warn("AGENT TYPING SOCKET ERROR:", data);
+      };
+
+      socket.on("connect", handleConnect);
+
+      socket.on("ticket:joined", handleJoined);
+
+      socket.on("ticket:typing", handleCustomerTyping);
+
+      socket.on("ticket:error", handleSocketError);
+
+      /*
+       * If the socket connects immediately,
+       * join the ticket room.
+       */
+      if (socket.connected) {
+        handleConnect();
+      }
+
+      return () => {
+        console.log("LEAVING AGENT TICKET SOCKET:", ticketId);
+
+        /*
+         * Stop showing typing indicator.
+         */
+        setCustomerTyping(false);
+
+        /*
+         * Leave ticket room.
+         */
+        if (socket.connected) {
+          socket.emit("ticket:leave", {
+            ticketId,
+          });
+        }
+
+        /*
+         * Remove listeners.
+         */
+        socket.off("connect", handleConnect);
+
+        socket.off("ticket:joined", handleJoined);
+
+        socket.off("ticket:typing", handleCustomerTyping);
+
+        socket.off("ticket:error", handleSocketError);
+
+        /*
+         * Disconnect this page's socket.
+         */
+        socket.disconnect();
+
+        if (socketRef.current === socket) {
+          socketRef.current = null;
+        }
+      };
+    } catch (socketError) {
+      console.error("AGENT TYPING SOCKET INITIALIZATION ERROR:", socketError);
+
+      setCustomerTyping(false);
+    }
+  }, [ticketId]);
 
   /*
-   * =======================================================
-   * AUTO SCROLL
-   * =======================================================
-   */
+  |--------------------------------------------------------------------------
+  | Build conversation with original customer ticket message
+  |--------------------------------------------------------------------------
+  */
+
+  const conversation = useMemo(() => {
+    if (!ticket) {
+      return [];
+    }
+
+    const existingConversation = Array.isArray(ticket.conversation)
+      ? ticket.conversation
+      : [];
+
+    /*
+     * The original customer issue is normally stored in:
+     *
+     * ticket.description
+     *
+     * It may NOT exist inside:
+     *
+     * ticket.conversation
+     *
+     * Therefore we create a frontend-only initial message.
+     */
+
+    const description = String(
+      ticket.description || ticket.initialMessage || ticket.message || "",
+    ).trim();
+
+    console.log("CONVERSATION BUILDER - DESCRIPTION:", description);
+
+    console.log("CONVERSATION BUILDER - EXISTING:", existingConversation);
+
+    /*
+     * If there is no description, simply use the existing
+     * conversation.
+     */
+
+    if (!description) {
+      return existingConversation;
+    }
+
+    /*
+     * Check whether backend already saved the original
+     * description as a customer message.
+     *
+     * This prevents duplicate messages.
+     */
+
+    const originalAlreadyExists = existingConversation.some((message) => {
+      const messageText = String(message?.message || "").trim();
+
+      const senderRole = String(
+        message?.senderRole || message?.sender?.role || "",
+      ).toLowerCase();
+
+      return messageText === description && senderRole === "customer";
+    });
+
+    if (originalAlreadyExists) {
+      return existingConversation;
+    }
+
+    /*
+     * Create the original customer message.
+     */
+
+    const originalTicketMessage = {
+      _id: `initial-ticket-${ticket.id || ticket._id}`,
+
+      id: `initial-ticket-${ticket.id || ticket._id}`,
+
+      sender: ticket.customer || {
+        name: "Customer",
+      },
+
+      senderRole: "customer",
+
+      message: description,
+
+      attachments: Array.isArray(ticket.attachments) ? ticket.attachments : [],
+
+      createdAt:
+        ticket.createdAt || ticket.updatedAt || new Date().toISOString(),
+
+      isRead: true,
+
+      isInitialTicketMessage: true,
+    };
+
+    /*
+     * IMPORTANT:
+     * Original ticket message goes FIRST.
+     */
+
+    return [originalTicketMessage, ...existingConversation];
+  }, [ticket]);
+
+  /*
+  |--------------------------------------------------------------------------
+  | Scroll to latest message
+  |--------------------------------------------------------------------------
+  */
 
   useEffect(() => {
     if (!conversation.length) {
       return;
     }
 
-    conversationEndRef.current?.scrollIntoView({
-      behavior: "smooth",
-    });
+    const timer = setTimeout(() => {
+      conversationEndRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "end",
+      });
+    }, 100);
+
+    return () => clearTimeout(timer);
   }, [conversation.length]);
 
   /*
-   * =======================================================
-   * ASSIGN TICKET
-   * =======================================================
-   */
+  |--------------------------------------------------------------------------
+  | File selection
+  |--------------------------------------------------------------------------
+  */
 
-  const handleAssignTicket = async () => {
-    if (!ticket?.id) {
+  const handleFileChange = (event) => {
+    const files = Array.from(event.target.files || []);
+
+    if (!files.length) {
+      return;
+    }
+
+    const availableSlots = Math.max(0, 5 - selectedFiles.length);
+
+    const filesToAdd = files.slice(0, availableSlots);
+
+    setSelectedFiles((previous) => [...previous, ...filesToAdd]);
+
+    event.target.value = "";
+  };
+
+  const removeSelectedFile = (index) => {
+    setSelectedFiles((previous) =>
+      previous.filter((_, fileIndex) => fileIndex !== index),
+    );
+  };
+
+  /*
+  |--------------------------------------------------------------------------
+  | Assign ticket
+  |--------------------------------------------------------------------------
+  */
+
+  const handleAssignToMe = async () => {
+    if (!ticket?.id && !ticket?._id) {
       return;
     }
 
@@ -518,69 +669,109 @@ const AgentTicketDetails = () => {
       setError("");
       setSuccess("");
 
-      const response = await assignTicketToMe(ticket.id);
+      const id = ticket.id || ticket._id;
+
+      const response = await assignTicketToMe(id);
 
       const updatedTicket =
         response?.ticket || response?.data?.ticket || response?.data || null;
 
       if (updatedTicket) {
-        setTicket(normalizeTicket(updatedTicket, ticket.id));
+        setTicket((previous) => ({
+          ...previous,
+          ...updatedTicket,
+
+          id: updatedTicket.id || updatedTicket._id || previous.id,
+
+          _id: updatedTicket._id || updatedTicket.id || previous._id,
+
+          conversation: Array.isArray(updatedTicket.conversation)
+            ? updatedTicket.conversation
+            : previous.conversation || [],
+
+          attachments: Array.isArray(updatedTicket.attachments)
+            ? updatedTicket.attachments
+            : previous.attachments || [],
+
+          statusHistory: Array.isArray(updatedTicket.statusHistory)
+            ? updatedTicket.statusHistory
+            : previous.statusHistory || [],
+        }));
       } else {
-        await loadTicket(true);
+        await loadTicket(false);
       }
 
       setSuccess("Ticket assigned to you successfully.");
     } catch (err) {
       console.error("ASSIGN TICKET ERROR:", err);
 
-      setError(err?.response?.data?.message || "Failed to assign ticket.");
+      setError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to assign ticket.",
+      );
     } finally {
       setAssigning(false);
     }
   };
 
   /*
-   * =======================================================
-   * UPDATE STATUS
-   * =======================================================
-   */
+  |--------------------------------------------------------------------------
+  | Status
+  |--------------------------------------------------------------------------
+  */
 
   const handleStatusChange = async (event) => {
     const newStatus = event.target.value;
 
-    if (!ticket?.id || !newStatus) {
+    if (!newStatus || !ticket) {
       return;
     }
+
+    const id = ticket.id || ticket._id;
 
     try {
       setUpdatingStatus(true);
       setError("");
       setSuccess("");
 
-      const response = await updateAgentTicketStatus(ticket.id, newStatus);
+      const response = await updateAgentTicketStatus(id, newStatus);
 
       const updatedTicket =
         response?.ticket || response?.data?.ticket || response?.data || null;
 
       if (updatedTicket) {
-        setTicket(normalizeTicket(updatedTicket, ticket.id));
+        setTicket((previous) => ({
+          ...previous,
+          ...updatedTicket,
+
+          conversation: Array.isArray(updatedTicket.conversation)
+            ? updatedTicket.conversation
+            : previous.conversation || [],
+
+          attachments: Array.isArray(updatedTicket.attachments)
+            ? updatedTicket.attachments
+            : previous.attachments || [],
+
+          statusHistory: Array.isArray(updatedTicket.statusHistory)
+            ? updatedTicket.statusHistory
+            : previous.statusHistory || [],
+        }));
       } else {
-        setTicket((prev) =>
-          prev
-            ? {
-                ...prev,
-                status: newStatus,
-              }
-            : prev,
-        );
+        setTicket((previous) => ({
+          ...previous,
+          status: newStatus,
+        }));
       }
 
-      setSuccess(`Ticket status changed to ${getStatusLabel(newStatus)}.`);
+      setSuccess("Ticket status updated.");
     } catch (err) {
       console.error("UPDATE STATUS ERROR:", err);
 
       setError(
-        err?.response?.data?.message || "Failed to update ticket status.",
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to update ticket status.",
       );
     } finally {
       setUpdatingStatus(false);
@@ -588,149 +779,128 @@ const AgentTicketDetails = () => {
   };
 
   /*
-   * =======================================================
-   * UPDATE PRIORITY
-   * =======================================================
-   */
+  |--------------------------------------------------------------------------
+  | Priority
+  |--------------------------------------------------------------------------
+  */
 
   const handlePriorityChange = async (event) => {
     const newPriority = event.target.value;
 
-    if (!ticket?.id || !newPriority) {
+    if (!newPriority || !ticket) {
       return;
     }
+
+    const id = ticket.id || ticket._id;
 
     try {
       setUpdatingPriority(true);
       setError("");
       setSuccess("");
 
-      const response = await updateAgentTicketPriority(ticket.id, newPriority);
+      const response = await updateAgentTicketPriority(id, newPriority);
 
       const updatedTicket =
         response?.ticket || response?.data?.ticket || response?.data || null;
 
       if (updatedTicket) {
-        setTicket(normalizeTicket(updatedTicket, ticket.id));
+        setTicket((previous) => ({
+          ...previous,
+          ...updatedTicket,
+
+          conversation: Array.isArray(updatedTicket.conversation)
+            ? updatedTicket.conversation
+            : previous.conversation || [],
+
+          attachments: Array.isArray(updatedTicket.attachments)
+            ? updatedTicket.attachments
+            : previous.attachments || [],
+
+          statusHistory: Array.isArray(updatedTicket.statusHistory)
+            ? updatedTicket.statusHistory
+            : previous.statusHistory || [],
+        }));
       } else {
-        setTicket((prev) =>
-          prev
-            ? {
-                ...prev,
-                priority: newPriority,
-              }
-            : prev,
-        );
+        setTicket((previous) => ({
+          ...previous,
+          priority: newPriority,
+        }));
       }
 
-      setSuccess(`Priority changed to ${getPriorityLabel(newPriority)}.`);
+      setSuccess("Ticket priority updated.");
     } catch (err) {
       console.error("UPDATE PRIORITY ERROR:", err);
 
-      setError(err?.response?.data?.message || "Failed to update priority.");
+      setError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to update ticket priority.",
+      );
     } finally {
       setUpdatingPriority(false);
     }
   };
 
   /*
-   * =======================================================
-   * FILE SELECTION
-   * =======================================================
-   */
+  |--------------------------------------------------------------------------
+  | Send reply
+  |--------------------------------------------------------------------------
+  */
 
-  const handleFileSelect = (event) => {
-    const files = Array.from(event.target.files || []);
+  const handleSendReply = async (event) => {
+    event?.preventDefault();
 
-    if (!files.length) {
-      return;
-    }
-
-    setError("");
-
-    const availableSlots = MAX_FILES - selectedFiles.length;
-
-    if (availableSlots <= 0) {
-      setError(`You can attach a maximum of ${MAX_FILES} files.`);
-
-      event.target.value = "";
-      return;
-    }
-
-    const filesToAdd = files.slice(0, availableSlots);
-
-    const validFiles = [];
-
-    for (const file of filesToAdd) {
-      if (file.size > MAX_FILE_SIZE) {
-        setError(`${file.name} is larger than 10 MB.`);
-
-        continue;
-      }
-
-      validFiles.push(file);
-    }
-
-    if (validFiles.length > 0) {
-      setSelectedFiles((prev) => [...prev, ...validFiles]);
-    }
-
-    if (files.length > availableSlots) {
-      setError(`Only ${MAX_FILES} attachments are allowed.`);
-    }
-
-    event.target.value = "";
-  };
-
-  /*
-   * =======================================================
-   * REMOVE SELECTED FILE
-   * =======================================================
-   */
-
-  const removeSelectedFile = (index) => {
-    setSelectedFiles((prev) =>
-      prev.filter((_, fileIndex) => fileIndex !== index),
-    );
-  };
-
-  /*
-   * =======================================================
-   * SEND REPLY
-   * =======================================================
-   */
-
-  const handleSendReply = async () => {
     const message = reply.trim();
 
     if (!message && selectedFiles.length === 0) {
+      setError("Please enter a message or attach a file.");
       return;
     }
 
-    if (!ticket?.id) {
+    if (!ticket) {
       return;
     }
 
-    if (!canReply) {
-      setError("This ticket is closed and cannot receive replies.");
-
-      return;
-    }
+    const id = ticket.id || ticket._id;
 
     try {
-      setSending(true);
+      setSendingReply(true);
       setError("");
       setSuccess("");
 
-      const response = await sendAgentReply(ticket.id, message, selectedFiles);
+      const response = await sendAgentReply(id, message, selectedFiles);
 
       const updatedTicket =
         response?.ticket || response?.data?.ticket || response?.data || null;
 
       if (updatedTicket) {
-        setTicket(normalizeTicket(updatedTicket, ticket.id));
+        setTicket((previous) => ({
+          ...previous,
+          ...updatedTicket,
+
+          id: updatedTicket.id || updatedTicket._id || previous.id,
+
+          _id: updatedTicket._id || updatedTicket.id || previous._id,
+
+          conversation: Array.isArray(updatedTicket.conversation)
+            ? updatedTicket.conversation
+            : previous.conversation || [],
+
+          attachments: Array.isArray(updatedTicket.attachments)
+            ? updatedTicket.attachments
+            : previous.attachments || [],
+
+          statusHistory: Array.isArray(updatedTicket.statusHistory)
+            ? updatedTicket.statusHistory
+            : previous.statusHistory || [],
+        }));
       } else {
-        await loadTicket(true);
+        /*
+         * If backend doesn't return the complete ticket,
+         * refresh it.
+         */
+
+        await loadTicket(false);
       }
 
       setReply("");
@@ -739,131 +909,140 @@ const AgentTicketDetails = () => {
       setSuccess("Reply sent successfully.");
 
       setTimeout(() => {
-        replyInputRef.current?.focus();
-      }, 100);
+        conversationEndRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "end",
+        });
+      }, 150);
     } catch (err) {
       console.error("SEND AGENT REPLY ERROR:", err);
 
-      setError(err?.response?.data?.message || "Failed to send reply.");
+      setError(
+        err?.response?.data?.message || err?.message || "Failed to send reply.",
+      );
     } finally {
-      setSending(false);
+      setSendingReply(false);
     }
   };
 
   /*
-   * =======================================================
-   * ENTER TO SEND
-   * =======================================================
-   */
+  |--------------------------------------------------------------------------
+  | Refresh
+  |--------------------------------------------------------------------------
+  */
 
-  const handleReplyKeyDown = (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-
-      handleSendReply();
-    }
+  const handleRefresh = async () => {
+    await loadTicket(false);
   };
 
   /*
-   * =======================================================
-   * MESSAGE AVATAR
-   * =======================================================
-   */
+  |--------------------------------------------------------------------------
+  | Attachment renderer
+  |--------------------------------------------------------------------------
+  */
 
-  const getMessageAvatar = (message) => {
-    const sender = message?.sender;
+  const renderAttachment = (file, index) => {
+    const url = getFileUrl(file);
 
-    if (message?.senderRole === "customer") {
-      return {
-        name: getCustomerName(customer),
-        avatar: getCustomerAvatarUrl(customer),
-      };
-    }
+    const filename =
+      file?.originalName ||
+      file?.filename ||
+      file?.name ||
+      `Attachment ${index + 1}`;
 
-    if (sender) {
-      return {
-        name: sender?.name || sender?.email || getSenderLabel(message),
-
-        avatar: sender?.avatar ? getCustomerAvatarUrl(sender) : "",
-      };
-    }
-
-    return {
-      name: getSenderLabel(message),
-
-      avatar: "",
-    };
-  };
-
-  /*
-   * =======================================================
-   * ATTACHMENT RENDERER
-   * =======================================================
-   */
-
-  const renderAttachment = (attachment, index) => {
-    const url = getAttachmentUrl(attachment);
+    const size = formatFileSize(file?.size);
 
     if (!url) {
-      return null;
+      return (
+        <div
+          key={`${filename}-${index}`}
+          className="flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/70 p-3"
+        >
+          <File className="h-5 w-5 text-slate-400" />
+
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-slate-200">
+              {filename}
+            </p>
+
+            {size && <p className="text-xs text-slate-500">{size}</p>}
+          </div>
+        </div>
+      );
     }
 
-    const image = isImageAttachment(attachment);
-
-    const pdf = isPdfAttachment(attachment);
-
-    const fileName =
-      attachment?.originalName || attachment?.filename || "Attachment";
-
-    if (image) {
+    if (isImageFile(file)) {
       return (
-        <a
-          key={attachment?._id || `${fileName}-${index}`}
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="group block overflow-hidden rounded-xl border border-slate-700 bg-slate-950"
+        <div
+          key={`${filename}-${index}`}
+          className="overflow-hidden rounded-xl border border-slate-700 bg-slate-950"
         >
-          <img
-            src={url}
-            alt={fileName}
-            className="max-h-96 w-auto max-w-full object-contain transition group-hover:opacity-90"
-            loading="lazy"
-          />
+          <button
+            type="button"
+            onClick={() =>
+              setPreviewImage({
+                url,
+                name: filename,
+              })
+            }
+            className="block w-full text-left"
+          >
+            <img
+              src={url}
+              alt={filename}
+              className="max-h-80 w-full object-contain"
+              onError={(event) => {
+                event.currentTarget.style.display = "none";
+              }}
+            />
+          </button>
 
-          <div className="flex items-center justify-between border-t border-slate-800 px-3 py-2">
-            <span className="truncate text-xs text-slate-400">{fileName}</span>
+          <div className="flex items-center justify-between gap-3 border-t border-slate-800 p-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <ImageIcon className="h-4 w-4 shrink-0 text-blue-400" />
 
-            <Download className="h-4 w-4 shrink-0 text-slate-500" />
+              <span className="truncate text-xs text-slate-300">
+                {filename}
+              </span>
+            </div>
+
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 text-xs font-medium text-blue-400 hover:text-blue-300"
+            >
+              Open
+            </a>
           </div>
-        </a>
+        </div>
       );
     }
 
     return (
       <a
-        key={attachment?._id || `${fileName}-${index}`}
+        key={`${filename}-${index}`}
         href={url}
         target="_blank"
-        rel="noopener noreferrer"
-        className="flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-950/70 p-3 transition hover:border-indigo-500/40 hover:bg-slate-800"
+        rel="noreferrer"
+        className="flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/70 p-3 transition hover:border-slate-600 hover:bg-slate-800"
       >
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10">
-          {pdf ? (
-            <FileText className="h-5 w-5 text-red-400" />
-          ) : (
-            <File className="h-5 w-5 text-indigo-400" />
-          )}
-        </div>
+        {isPdfFile(file) ? (
+          <FileText className="h-5 w-5 shrink-0 text-red-400" />
+        ) : (
+          <File className="h-5 w-5 shrink-0 text-blue-400" />
+        )}
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-white">{fileName}</p>
-
-          <p className="mt-0.5 text-xs text-slate-500">
-            {pdf ? "PDF Document" : attachment?.mimetype || "File"}
-
-            {attachment?.size ? ` • ${formatFileSize(attachment.size)}` : ""}
+          <p className="truncate text-sm font-medium text-slate-200">
+            {filename}
           </p>
+
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            {isPdfFile(file) && <span>PDF</span>}
+
+            {size && <span>{size}</span>}
+          </div>
         </div>
 
         <Download className="h-4 w-4 shrink-0 text-slate-500" />
@@ -872,157 +1051,153 @@ const AgentTicketDetails = () => {
   };
 
   /*
-   * =======================================================
-   * LOADING
-   * =======================================================
-   */
+  |--------------------------------------------------------------------------
+  | Loading
+  |--------------------------------------------------------------------------
+  */
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+      <div className="flex min-h-[70vh] items-center justify-center">
+        <div className="flex items-center gap-3 text-slate-400">
+          <Loader2 className="h-6 w-6 animate-spin" />
 
-          <p className="text-sm text-slate-400">Loading ticket...</p>
+          <span>Loading ticket...</span>
         </div>
       </div>
     );
   }
 
   /*
-   * =======================================================
-   * ERROR / NOT FOUND
-   * =======================================================
-   */
+  |--------------------------------------------------------------------------
+  | Error / no ticket
+  |--------------------------------------------------------------------------
+  */
 
   if (!ticket) {
     return (
-      <div className="min-h-screen bg-slate-950 px-4 py-10 text-white">
-        <div className="mx-auto max-w-2xl">
-          <Link
-            to="/agent/tickets"
-            className="mb-6 inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to My Tickets
-          </Link>
+      <div className="mx-auto max-w-4xl p-6">
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-6">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
 
-          <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-8 text-center">
-            <AlertCircle className="mx-auto mb-4 h-10 w-10 text-red-400" />
+            <div>
+              <h2 className="font-semibold text-red-300">
+                Unable to load ticket
+              </h2>
 
-            <h2 className="text-lg font-semibold text-white">
-              Unable to load ticket
-            </h2>
-
-            <p className="mt-2 text-sm text-slate-400">
-              {error || "The requested ticket could not be found."}
-            </p>
-
-            <button
-              type="button"
-              onClick={() => loadTicket(true)}
-              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-500"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Try Again
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  /*
-   * =======================================================
-   * MAIN PAGE
-   * =======================================================
-   */
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      {/* ===================================================
-          TOP HEADER
-      =================================================== */}
-
-      <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/95 backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex min-w-0 items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate("/agent/tickets")}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-400 transition hover:bg-slate-800 hover:text-white"
-              title="Back"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="truncate text-sm font-semibold text-white sm:text-base">
-                  {ticket.ticketNumber
-                    ? `#${ticket.ticketNumber}`
-                    : `Ticket #${ticket.id?.slice(-6)}`}
-                </span>
-
-                <span
-                  className={`hidden rounded-full border px-2.5 py-1 text-xs font-medium sm:inline-flex ${getStatusClasses(
-                    ticket.status,
-                  )}`}
-                >
-                  {getStatusLabel(ticket.status)}
-                </span>
-              </div>
-
-              <p className="mt-0.5 truncate text-xs text-slate-500 sm:text-sm">
-                {ticket.subject || "Untitled Ticket"}
+              <p className="mt-1 text-sm text-red-400">
+                {error || "Ticket not found."}
               </p>
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="mt-5 flex gap-3">
             <button
               type="button"
               onClick={() => loadTicket(true)}
-              disabled={refreshing}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-400 transition hover:bg-slate-800 hover:text-white disabled:opacity-50"
-              title="Refresh"
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
             >
-              <RefreshCw
-                className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
-              />
+              <RefreshCw className="h-4 w-4" />
+              Try Again
             </button>
 
-            {!isAssignedToCurrentAgent && !isClosed && (
-              <button
-                type="button"
-                onClick={handleAssignTicket}
-                disabled={assigning}
-                className="hidden items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50 sm:flex"
-              >
-                {assigning ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <UserCheck className="h-4 w-4" />
-                )}
-
-                {assigning ? "Assigning..." : "Assign to Me"}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
+            >
+              Go Back
+            </button>
           </div>
         </div>
-      </header>
+      </div>
+    );
+  }
 
-      {/* ===================================================
-          CONTENT
-      =================================================== */}
+  /*
+  |--------------------------------------------------------------------------
+  | Derived data
+  |--------------------------------------------------------------------------
+  */
 
-      <main className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 lg:px-8">
-        {/* =================================================
+  const ticketCustomer = ticket.customer || {};
+
+  const assignedAgent = ticket.assignedAgent || null;
+
+  const isAssignedToCurrentUser =
+    getId(assignedAgent) &&
+    getId(user) &&
+    String(getId(assignedAgent)) === String(getId(user));
+
+  const isClosed = String(ticket.status || "").toLowerCase() === "closed";
+
+  const isResolved = String(ticket.status || "").toLowerCase() === "resolved";
+
+  const canReply = !isClosed;
+
+  /*
+  |--------------------------------------------------------------------------
+  | Render
+  |--------------------------------------------------------------------------
+  */
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-white">
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        {/* =========================================================
+            HEADER
+        ========================================================= */}
+
+        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-3">
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-300 transition hover:border-slate-700 hover:bg-slate-800 hover:text-white"
+              title="Go back"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
+                  {ticket.subject || "Untitled Ticket"}
+                </h1>
+
+                {ticket.ticketNumber && (
+                  <span className="rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-400">
+                    #{ticket.ticketNumber}
+                  </span>
+                )}
+              </div>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Created {formatDate(ticket.createdAt)}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-slate-700 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </button>
+        </div>
+
+        {/* =========================================================
             ALERTS
-        ================================================= */}
+        ========================================================= */}
 
         {error && (
-          <div className="mb-4 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3">
+          <div className="mb-5 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
 
             <p className="flex-1 text-sm text-red-300">{error}</p>
@@ -1038,896 +1213,811 @@ const AgentTicketDetails = () => {
         )}
 
         {success && (
-          <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500/10">
-              <Check className="h-4 w-4 text-emerald-400" />
-            </div>
+          <div className="mb-5 flex items-center gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
+            <CheckCircle2 className="h-5 w-5 text-emerald-400" />
 
-            <p className="text-sm text-emerald-300">{success}</p>
+            <p className="flex-1 text-sm text-emerald-300">{success}</p>
+
+            <button
+              type="button"
+              onClick={() => setSuccess("")}
+              className="text-emerald-400 hover:text-emerald-300"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
         )}
 
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-          {/* =================================================
-              LEFT
-          ================================================= */}
+        {/* =========================================================
+            TICKET INFO
+        ========================================================= */}
 
-          <div className="min-w-0 space-y-5">
-            {/* ===============================================
-                TICKET CONTROLS
-            =============================================== */}
+        <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {/* Status */}
 
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`rounded-full border px-3 py-1 text-xs font-semibold ${getStatusClasses(
-                        ticket.status,
-                      )}`}
-                    >
-                      {getStatusLabel(ticket.status)}
-                    </span>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                Status
+              </span>
 
-                    <span
-                      className={`rounded-full border px-3 py-1 text-xs font-semibold ${getPriorityClasses(
-                        ticket.priority,
-                      )}`}
-                    >
-                      {getPriorityLabel(ticket.priority)} Priority
-                    </span>
+              <CheckCircle2 className="h-4 w-4 text-slate-500" />
+            </div>
+
+            <div className="relative">
+              <select
+                value={ticket.status || "open"}
+                onChange={handleStatusChange}
+                disabled={updatingStatus}
+                className="w-full appearance-none rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 pr-10 text-sm font-medium text-slate-200 outline-none transition focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="open" className="bg-slate-900 text-blue-400">
+                  Open
+                </option>
+
+                <option
+                  value="in-progress"
+                  className="bg-slate-900 text-violet-400"
+                >
+                  In Progress
+                </option>
+
+                <option value="waiting" className="bg-slate-900 text-amber-400">
+                  Waiting
+                </option>
+
+                <option
+                  value="resolved"
+                  className="bg-slate-900 text-emerald-400"
+                >
+                  Resolved
+                </option>
+
+                <option value="closed" className="bg-slate-900 text-slate-300">
+                  Closed
+                </option>
+              </select>
+
+              <ChevronDown
+                size={16}
+                strokeWidth={2}
+                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+            </div>
+          </div>
+
+          {/* Priority */}
+
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                Priority
+              </span>
+            </div>
+
+            <div className="relative">
+              <select
+                value={ticket.priority || "medium"}
+                onChange={handlePriorityChange}
+                disabled={updatingPriority}
+                className="w-full appearance-none rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 pr-10 text-sm font-medium text-slate-200 outline-none transition focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="low" className="bg-slate-900 text-emerald-400">
+                  Low
+                </option>
+
+                <option value="medium" className="bg-slate-900 text-amber-400">
+                  Medium
+                </option>
+
+                <option value="high" className="bg-slate-900 text-red-400">
+                  High
+                </option>
+              </select>
+
+              <ChevronDown
+                size={16}
+                strokeWidth={2}
+                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+            </div>
+          </div>
+
+          {/* Category */}
+
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+            <span className="text-xs font-medium uppercase tracking-wider text-slate-500">
+              Category
+            </span>
+
+            <p className="mt-2 text-sm font-semibold text-white">
+              {ticket.category || "General"}
+            </p>
+          </div>
+
+          {/* Assignment */}
+
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+            <span className="text-xs font-medium uppercase tracking-wider text-slate-500">
+              Assigned Agent
+            </span>
+
+            {assignedAgent ? (
+              <div className="mt-2 flex items-center gap-2">
+                {assignedAgent.avatar ? (
+                  <img
+                    src={getAvatarUrl(assignedAgent.avatar)}
+                    alt={assignedAgent.name || "Agent"}
+                    className="h-8 w-8 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800">
+                    <User className="h-4 w-4 text-slate-400" />
+                  </div>
+                )}
+
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-white">
+                    {assignedAgent.name || "Agent"}
+                  </p>
+
+                  {assignedAgent.email && (
+                    <p className="truncate text-xs text-slate-500">
+                      {assignedAgent.email}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-slate-500">Unassigned</p>
+            )}
+          </div>
+        </div>
+
+        {/* =========================================================
+            MAIN CONTENT
+        ========================================================= */}
+
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+          {/* =======================================================
+              CONVERSATION
+          ======================================================= */}
+
+          <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
+            {/* Conversation header */}
+
+            <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4 sm:px-6">
+              <div>
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5 text-blue-400" />
+
+                  <h2 className="font-semibold text-white">Conversation</h2>
+                </div>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  {conversation.length}{" "}
+                  {conversation.length === 1 ? "message" : "messages"}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 text-xs text-slate-500">
+                Ticket #{ticket.ticketNumber || ticket.id}
+              </div>
+            </div>
+
+            {/* Messages */}
+
+            <div className="max-h-[650px] overflow-y-auto p-4 sm:p-6">
+              {conversation.length === 0 ? (
+                <div className="flex min-h-[300px] flex-col items-center justify-center text-center">
+                  <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-800">
+                    <MessageSquare className="h-6 w-6 text-slate-500" />
                   </div>
 
-                  <h1 className="mt-3 text-xl font-bold tracking-tight text-white sm:text-2xl">
-                    {ticket.subject || "Untitled Ticket"}
-                  </h1>
+                  <h3 className="font-medium text-slate-300">
+                    No messages yet
+                  </h3>
 
-                  <p className="mt-1 text-sm text-slate-500">
-                    Created {formatDateTime(ticket.createdAt)}
+                  <p className="mt-1 max-w-sm text-sm text-slate-500">
+                    There are no conversation messages for this ticket.
                   </p>
                 </div>
+              ) : (
+                <div className="space-y-6">
+                  {conversation.map((message, index) => {
+                    const senderRole = String(
+                      message?.senderRole || message?.sender?.role || "",
+                    ).toLowerCase();
 
-                <div className="grid grid-cols-2 gap-2 sm:flex">
-                  {/* STATUS */}
-
-                  <div className="relative">
-                    <select
-                      value={ticket.status || "open"}
-                      onChange={handleStatusChange}
-                      disabled={updatingStatus}
-                      className="h-10 appearance-none rounded-xl border border-slate-700 bg-slate-950 py-0 pl-3 pr-9 text-sm font-medium text-white outline-none transition focus:border-indigo-500 disabled:opacity-60"
-                    >
-                      {STATUS_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-
-                    {updatingStatus ? (
-                      <Loader2 className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-500" />
-                    ) : (
-                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                    )}
-                  </div>
-
-                  {/* PRIORITY */}
-
-                  <div className="relative">
-                    <select
-                      value={ticket.priority || "medium"}
-                      onChange={handlePriorityChange}
-                      disabled={updatingPriority}
-                      className="h-10 appearance-none rounded-xl border border-slate-700 bg-slate-950 py-0 pl-3 pr-9 text-sm font-medium text-white outline-none transition focus:border-indigo-500 disabled:opacity-60"
-                    >
-                      {PRIORITY_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-
-                    {updatingPriority ? (
-                      <Loader2 className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-500" />
-                    ) : (
-                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* MOBILE ASSIGN */}
-
-              {!isAssignedToCurrentAgent && !isClosed && (
-                <button
-                  type="button"
-                  onClick={handleAssignTicket}
-                  disabled={assigning}
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50 sm:hidden"
-                >
-                  {assigning ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <UserCheck className="h-4 w-4" />
-                  )}
-
-                  {assigning ? "Assigning..." : "Assign to Me"}
-                </button>
-              )}
-            </section>
-
-            {/* ===============================================
-                ORIGINAL REQUEST
-            =============================================== */}
-
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70">
-              <div className="border-b border-slate-800 px-5 py-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/10">
-                    <FileText className="h-5 w-5 text-indigo-400" />
-                  </div>
-
-                  <div>
-                    <h2 className="text-sm font-semibold text-white">
-                      Original Request
-                    </h2>
-
-                    <p className="text-xs text-slate-500">Customer issue</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-5">
-                <p className="whitespace-pre-wrap text-sm leading-7 text-slate-300">
-                  {ticket.description || "No description provided."}
-                </p>
-
-                <div className="mt-5 flex flex-wrap gap-2">
-                  {ticket.category && (
-                    <span className="rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-1.5 text-xs text-slate-400">
-                      Category:{" "}
-                      <span className="font-medium text-slate-200">
-                        {ticket.category}
-                      </span>
-                    </span>
-                  )}
-
-                  {ticket.ticketNumber && (
-                    <span className="rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-1.5 text-xs text-slate-400">
-                      Ticket:{" "}
-                      <span className="font-medium text-slate-200">
-                        #{ticket.ticketNumber}
-                      </span>
-                    </span>
-                  )}
-                </div>
-              </div>
-            </section>
-
-            {/* ===============================================
-                CONVERSATION
-            =============================================== */}
-
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70">
-              <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/10">
-                    <MessageCircle className="h-5 w-5 text-indigo-400" />
-                  </div>
-
-                  <div>
-                    <h2 className="text-sm font-semibold text-white">
-                      Conversation
-                    </h2>
-
-                    <p className="text-xs text-slate-500">
-                      {conversation.length}{" "}
-                      {conversation.length === 1 ? "message" : "messages"}
-                    </p>
-                  </div>
-                </div>
-
-                {conversation.length > 0 && (
-                  <span className="hidden text-xs text-slate-500 sm:block">
-                    Latest{" "}
-                    {formatDateTime(
-                      conversation[conversation.length - 1]?.createdAt,
-                    )}
-                  </span>
-                )}
-              </div>
-
-              <div className="max-h-[700px] space-y-5 overflow-y-auto p-5">
-                {conversation.length === 0 ? (
-                  <div className="py-12 text-center">
-                    <MessageCircle className="mx-auto h-10 w-10 text-slate-700" />
-
-                    <p className="mt-3 text-sm font-medium text-slate-400">
-                      No conversation yet
-                    </p>
-
-                    <p className="mt-1 text-xs text-slate-600">
-                      Send the first reply to this ticket.
-                    </p>
-                  </div>
-                ) : (
-                  conversation.map((message, index) => {
-                    const senderInfo = getMessageAvatar(message);
-
-                    const isCustomer = message?.senderRole === "customer";
-
-                    const isAI = message?.senderRole === "ai";
-
-                    const isSystem = message?.senderRole === "system";
+                    const isCustomer = senderRole === "customer";
 
                     const isAgent =
-                      message?.senderRole === "agent" ||
-                      message?.senderRole === "admin";
+                      senderRole === "agent" || senderRole === "admin";
+
+                    const senderName = getSenderName(message, ticket);
+
+                    const senderAvatar =
+                      message?.sender?.avatar ||
+                      (isCustomer ? ticketCustomer.avatar : null);
+
+                    const attachments = Array.isArray(message?.attachments)
+                      ? message.attachments
+                      : [];
 
                     return (
                       <div
-                        key={message?._id || `${index}-${message?.createdAt}`}
+                        key={message?._id || message?.id || `message-${index}`}
                         className={`flex gap-3 ${
-                          isAgent ? "flex-row-reverse" : ""
+                          isAgent ? "justify-end" : "justify-start"
                         }`}
                       >
-                        {/* AVATAR */}
+                        {/* Customer avatar */}
 
-                        <div className="shrink-0">
-                          {senderInfo.avatar ? (
-                            <img
-                              src={senderInfo.avatar}
-                              alt={senderInfo.name}
-                              className="h-10 w-10 rounded-full object-cover ring-2 ring-slate-800"
-                              onError={(event) => {
-                                event.currentTarget.style.display = "none";
-
-                                const fallback =
-                                  event.currentTarget.nextElementSibling;
-
-                                if (fallback) {
-                                  fallback.classList.remove("hidden");
-                                  fallback.classList.add("flex");
-                                }
-                              }}
-                            />
-                          ) : null}
-
-                          <div
-                            className={`h-10 w-10 items-center justify-center rounded-full text-xs font-bold ${
-                              senderInfo.avatar ? "hidden" : "flex"
-                            } ${
-                              isCustomer
-                                ? "bg-slate-800 text-slate-300"
-                                : isAI
-                                  ? "bg-violet-500/10 text-violet-400"
-                                  : "bg-indigo-600 text-white"
-                            }`}
-                          >
-                            {isAI ? "AI" : getInitials(senderInfo.name)}
+                        {!isAgent && (
+                          <div className="shrink-0">
+                            {senderAvatar ? (
+                              <img
+                                src={getAvatarUrl(senderAvatar)}
+                                alt={senderName}
+                                className="h-9 w-9 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-800">
+                                <User className="h-4 w-4 text-slate-400" />
+                              </div>
+                            )}
                           </div>
-                        </div>
-
-                        {/* MESSAGE */}
+                        )}
 
                         <div
-                          className={`min-w-0 max-w-[85%] ${
+                          className={`max-w-[85%] ${
                             isAgent ? "items-end" : "items-start"
                           }`}
                         >
+                          {/* Name / badge */}
+
                           <div
-                            className={`mb-1 flex items-center gap-2 ${
-                              isAgent ? "justify-end" : ""
+                            className={`mb-1.5 flex flex-wrap items-center gap-2 ${
+                              isAgent ? "justify-end" : "justify-start"
                             }`}
                           >
                             <span className="text-xs font-semibold text-slate-300">
-                              {senderInfo.name}
+                              {senderName}
                             </span>
 
-                            <span className="text-[11px] text-slate-600">
-                              {formatDate(message?.createdAt)}{" "}
-                              {formatTime(message?.createdAt)}
-                            </span>
+                            {message?.isInitialTicketMessage && (
+                              <span className="rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-400">
+                                Original Ticket
+                              </span>
+                            )}
+
+                            {senderRole === "ai" && (
+                              <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold text-violet-400">
+                                AI
+                              </span>
+                            )}
                           </div>
+
+                          {/* Message */}
 
                           <div
                             className={`rounded-2xl border p-4 ${
-                              isCustomer
-                                ? "rounded-tl-md border-slate-700 bg-slate-800/80"
-                                : isAI
-                                  ? "rounded-tl-md border-violet-500/20 bg-violet-500/5"
-                                  : isSystem
-                                    ? "border-amber-500/20 bg-amber-500/5"
-                                    : "rounded-tr-md border-indigo-500/20 bg-indigo-600/10"
+                              isAgent
+                                ? "border-blue-500/20 bg-blue-500/10"
+                                : "border-slate-800 bg-slate-950"
                             }`}
                           >
-                            {message?.message && (
-                              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-200">
-                                {message.message}
-                              </p>
-                            )}
+                            <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-200">
+                              {message?.message || ""}
+                            </p>
 
-                            {/* MESSAGE ATTACHMENTS */}
+                            {/* Attachments */}
 
-                            {message?.attachments?.length > 0 && (
-                              <div className="mt-3 space-y-2">
-                                {message.attachments.map(
-                                  (attachment, attachmentIndex) =>
-                                    renderAttachment(
-                                      attachment,
-                                      attachmentIndex,
-                                    ),
+                            {attachments.length > 0 && (
+                              <div className="mt-4 space-y-2">
+                                {attachments.map((file, fileIndex) =>
+                                  renderAttachment(file, fileIndex),
                                 )}
                               </div>
                             )}
                           </div>
+
+                          {/* Date */}
+
+                          <div
+                            className={`mt-1.5 flex items-center gap-2 ${
+                              isAgent ? "justify-end" : "justify-start"
+                            }`}
+                          >
+                            <span className="text-[11px] text-slate-600">
+                              {formatDate(message?.createdAt)}
+                            </span>
+
+                            {isAgent && (
+                              <Check className="h-3 w-3 text-slate-600" />
+                            )}
+                          </div>
                         </div>
+
+                        {/* Agent avatar */}
+
+                        {isAgent && (
+                          <div className="shrink-0">
+                            {message?.sender?.avatar ? (
+                              <img
+                                src={getAvatarUrl(message.sender.avatar)}
+                                alt={senderName}
+                                className="h-9 w-9 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-500/10">
+                                <UserCheck className="h-4 w-4 text-blue-400" />
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
-                  })
-                )}
+                  })}
 
-                <div ref={conversationEndRef} />
-              </div>
-            </section>
+                  <div ref={conversationEndRef} />
+                </div>
+              )}
 
-            {/* ===============================================
-                REPLY COMPOSER
-            =============================================== */}
+              {/* =====================================================
+                  CUSTOMER TYPING INDICATOR
+              ===================================================== */}
 
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-5">
-              {isClosed ? (
-                <div className="flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-950/70 p-4">
-                  <ShieldCheck className="h-5 w-5 text-slate-500" />
+              {customerTyping && (
+                <div className="mt-4 flex items-center gap-3">
+                  {/* Customer avatar */}
 
+                  <div className="shrink-0">
+                    {ticketCustomer.avatar ? (
+                      <img
+                        src={getAvatarUrl(ticketCustomer.avatar)}
+                        alt={ticketCustomer.name || "Customer"}
+                        className="h-8 w-8 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800">
+                        <User className="h-4 w-4 text-slate-400" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Typing bubble */}
+
+                  <div className="flex items-center gap-2 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-2.5">
+                    <span className="text-xs font-medium text-slate-400">
+                      Customer is typing
+                    </span>
+
+                    <span className="flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.3s]" />
+
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.15s]" />
+
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-500" />
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* =====================================================
+                REPLY
+            ===================================================== */}
+
+            {canReply && (
+              <form
+                onSubmit={handleSendReply}
+                className="border-t border-slate-800 p-4 sm:p-6"
+              >
+                <div className="mb-3 flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-slate-300">
-                      This ticket is closed
-                    </p>
+                    <h3 className="text-sm font-semibold text-white">
+                      Reply to Customer
+                    </h3>
 
                     <p className="mt-0.5 text-xs text-slate-500">
-                      Closed tickets cannot receive new replies.
+                      Send a message or attach files.
                     </p>
                   </div>
                 </div>
-              ) : (
-                <>
-                  {/* SELECTED FILES */}
 
-                  {selectedFiles.length > 0 && (
-                    <div className="mb-4">
-                      <div className="mb-2 flex items-center justify-between">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                          Attachments ({selectedFiles.length}/{MAX_FILES})
-                        </p>
+                <textarea
+                  value={reply}
+                  onChange={(event) => setReply(event.target.value)}
+                  placeholder="Write your reply..."
+                  rows={5}
+                  disabled={sendingReply}
+                  className="w-full resize-none rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+
+                {/* Selected files */}
+
+                {selectedFiles.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {selectedFiles.map((file, index) => (
+                      <div
+                        key={`${file.name}-${index}`}
+                        className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950 p-3"
+                      >
+                        {isImageFile({
+                          name: file.name,
+                          mimetype: file.type,
+                        }) ? (
+                          <ImageIcon className="h-5 w-5 text-blue-400" />
+                        ) : (
+                          <FileText className="h-5 w-5 text-slate-400" />
+                        )}
+
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm text-slate-300">
+                            {file.name}
+                          </p>
+
+                          <p className="text-xs text-slate-600">
+                            {formatFileSize(file.size)}
+                          </p>
+                        </div>
 
                         <button
                           type="button"
-                          onClick={() => setSelectedFiles([])}
-                          className="text-xs text-slate-500 transition hover:text-red-400"
+                          onClick={() => removeSelectedFile(index)}
+                          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-800 hover:text-red-400"
                         >
-                          Remove all
+                          <X className="h-4 w-4" />
                         </button>
                       </div>
+                    ))}
+                  </div>
+                )}
 
-                      <div className="flex flex-wrap gap-2">
-                        {selectedFiles.map((file, index) => {
-                          const isImage = file.type?.startsWith("image/");
-
-                          return (
-                            <div
-                              key={`${file.name}-${index}`}
-                              className="flex min-w-0 max-w-full items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2"
-                            >
-                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10">
-                                {isImage ? (
-                                  <ImageIcon className="h-4 w-4 text-indigo-400" />
-                                ) : (
-                                  <FileText className="h-4 w-4 text-indigo-400" />
-                                )}
-                              </div>
-
-                              <div className="min-w-0">
-                                <p className="max-w-[180px] truncate text-xs font-medium text-white">
-                                  {file.name}
-                                </p>
-
-                                <p className="text-[11px] text-slate-600">
-                                  {formatFileSize(file.size)}
-                                </p>
-                              </div>
-
-                              <button
-                                type="button"
-                                onClick={() => removeSelectedFile(index)}
-                                className="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-800 hover:text-red-400"
-                                title="Remove attachment"
-                              >
-                                <X className="h-4 w-4" />
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* INPUT */}
-
-                  <textarea
-                    ref={replyInputRef}
-                    value={reply}
-                    onChange={(event) => setReply(event.target.value)}
-                    onKeyDown={handleReplyKeyDown}
-                    disabled={sending}
-                    rows={4}
-                    placeholder="Write a reply to the customer..."
-                    className="w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm leading-6 text-white outline-none transition placeholder:text-slate-600 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  />
-
-                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-2">
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        accept="
-                          image/*,
-                          application/pdf,
-                          .doc,
-                          .docx,
-                          .xls,
-                          .xlsx,
-                          .txt,
-                          .csv
-                        "
-                        onChange={handleFileSelect}
-                      />
-
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={sending || selectedFiles.length >= MAX_FILES}
-                        className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm font-medium text-slate-400 transition hover:border-slate-600 hover:bg-slate-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Paperclip className="h-4 w-4" />
-
-                        <span className="hidden sm:inline">Attach</span>
-                      </button>
-
-                      <span className="text-[11px] text-slate-600">
-                        Max 5 files • 10 MB each
-                      </span>
-                    </div>
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      hidden
+                      onChange={handleFileChange}
+                      accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx"
+                    />
 
                     <button
                       type="button"
-                      onClick={handleSendReply}
-                      disabled={
-                        sending || (!reply.trim() && selectedFiles.length === 0)
-                      }
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={sendingReply || selectedFiles.length >= 5}
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-slate-700 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {sending ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Sending...
-                        </>
-                      ) : (
-                        <>
-                          <Send className="h-4 w-4" />
-                          Send Reply
-                        </>
-                      )}
+                      <Paperclip className="h-4 w-4" />
+                      Attach File
                     </button>
+
+                    <span className="ml-3 text-xs text-slate-600">
+                      {selectedFiles.length}
+                      /5
+                    </span>
                   </div>
 
-                  <p className="mt-3 text-[11px] text-slate-600">
-                    Press Enter to send • Shift + Enter for a new line
-                  </p>
-                </>
-              )}
-            </section>
-          </div>
+                  <button
+                    type="submit"
+                    disabled={
+                      sendingReply ||
+                      (!reply.trim() && selectedFiles.length === 0)
+                    }
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {sendingReply ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4" />
+                        Send Reply
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
 
-          {/* =================================================
+            {/* Closed notice */}
+
+            {!canReply && (
+              <div className="border-t border-slate-800 p-5">
+                <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-500">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                  This ticket is closed and cannot receive new replies.
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* =======================================================
               RIGHT SIDEBAR
-          ================================================= */}
+          ======================================================= */}
 
           <aside className="space-y-5">
-            {/* ===============================================
-                CUSTOMER
-            =============================================== */}
+            {/* Customer */}
 
-            <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
-              <button
-                type="button"
-                onClick={() => setShowCustomerDetails((prev) => !prev)}
-                className="flex w-full items-center justify-between border-b border-slate-800 px-5 py-4 text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/10">
-                    <User className="h-5 w-5 text-indigo-400" />
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <User className="h-5 w-5 text-blue-400" />
+
+                <h2 className="font-semibold text-white">Customer</h2>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {ticketCustomer.avatar ? (
+                  <img
+                    src={getAvatarUrl(ticketCustomer.avatar)}
+                    alt={ticketCustomer.name || "Customer"}
+                    className="h-12 w-12 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-800">
+                    <User className="h-5 w-5 text-slate-400" />
                   </div>
+                )}
 
-                  <div>
-                    <h2 className="text-sm font-semibold text-white">
-                      Customer
-                    </h2>
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-white">
+                    {ticketCustomer.name || "Customer"}
+                  </p>
 
-                    <p className="text-xs text-slate-500">
-                      Customer information
+                  {ticketCustomer.email && (
+                    <p className="truncate text-xs text-slate-500">
+                      {ticketCustomer.email}
                     </p>
-                  </div>
-                </div>
-
-                <ChevronDown
-                  className={`h-4 w-4 text-slate-500 transition ${
-                    showCustomerDetails ? "rotate-180" : ""
-                  }`}
-                />
-              </button>
-
-              {showCustomerDetails && (
-                <div className="p-5">
-                  <div className="flex items-center gap-3">
-                    {/* CUSTOMER AVATAR */}
-
-                    {customerAvatarUrl ? (
-                      <img
-                        src={customerAvatarUrl}
-                        alt={customerName}
-                        className="h-12 w-12 shrink-0 rounded-full object-cover ring-2 ring-slate-800"
-                        onError={(event) => {
-                          event.currentTarget.style.display = "none";
-
-                          const fallback =
-                            event.currentTarget.nextElementSibling;
-
-                          if (fallback) {
-                            fallback.classList.remove("hidden");
-                            fallback.classList.add("flex");
-                          }
-                        }}
-                      />
-                    ) : null}
-
-                    <div
-                      className={`h-12 w-12 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-sm font-bold text-white ${
-                        customerAvatarUrl ? "hidden" : "flex"
-                      }`}
-                    >
-                      {getInitials(customerName)}
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-white">
-                        {customerName}
-                      </p>
-
-                      <p className="mt-0.5 truncate text-xs text-slate-500">
-                        {customer?.email || "No email"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 space-y-3">
-                    {customer?.email && (
-                      <div className="flex items-start gap-3">
-                        <Mail className="mt-0.5 h-4 w-4 shrink-0 text-slate-600" />
-
-                        <div className="min-w-0">
-                          <p className="text-[11px] uppercase tracking-wider text-slate-600">
-                            Email
-                          </p>
-
-                          <p className="mt-1 break-all text-sm text-slate-300">
-                            {customer.email}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {customer?.phone && (
-                      <div className="flex items-start gap-3">
-                        <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 text-slate-600" />
-
-                        <div>
-                          <p className="text-[11px] uppercase tracking-wider text-slate-600">
-                            Phone
-                          </p>
-
-                          <p className="mt-1 text-sm text-slate-300">
-                            {customer.phone}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {customer?.company && (
-                      <div className="flex items-start gap-3">
-                        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-slate-600" />
-
-                        <div>
-                          <p className="text-[11px] uppercase tracking-wider text-slate-600">
-                            Company
-                          </p>
-
-                          <p className="mt-1 text-sm text-slate-300">
-                            {customer.company}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </section>
-
-            {/* ===============================================
-                TICKET INFORMATION
-            =============================================== */}
-
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-              <div className="mb-4 flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800">
-                  <Clock className="h-5 w-5 text-slate-400" />
-                </div>
-
-                <div>
-                  <h2 className="text-sm font-semibold text-white">
-                    Ticket Information
-                  </h2>
-
-                  <p className="text-xs text-slate-500">Details & timestamps</p>
+                  )}
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-slate-600">
-                    Ticket ID
-                  </p>
-
-                  <p className="mt-1 break-all font-mono text-xs text-slate-400">
-                    {ticket.id}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-slate-600">
-                    Created
-                  </p>
-
-                  <p className="mt-1 text-sm text-slate-300">
-                    {formatDateTime(ticket.createdAt)}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-slate-600">
-                    Last Updated
-                  </p>
-
-                  <p className="mt-1 text-sm text-slate-300">
-                    {formatDateTime(ticket.updatedAt)}
-                  </p>
-                </div>
-
-                {ticket.lastReplyAt && (
+              <div className="mt-5 space-y-3">
+                {ticketCustomer.phone && (
                   <div>
                     <p className="text-[11px] uppercase tracking-wider text-slate-600">
-                      Last Reply
+                      Phone
                     </p>
 
                     <p className="mt-1 text-sm text-slate-300">
-                      {formatDateTime(ticket.lastReplyAt)}
+                      {ticketCustomer.phone}
+                    </p>
+                  </div>
+                )}
+
+                {ticketCustomer.company && (
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-slate-600">
+                      Company
+                    </p>
+
+                    <p className="mt-1 text-sm text-slate-300">
+                      {ticketCustomer.company}
                     </p>
                   </div>
                 )}
               </div>
             </section>
 
-            {/* ===============================================
-                ASSIGNED AGENT
-            =============================================== */}
+            {/* Assignment */}
 
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-              <div className="mb-4 flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/10">
-                  <UserCheck className="h-5 w-5 text-indigo-400" />
-                </div>
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <UserCheck className="h-5 w-5 text-violet-400" />
 
-                <div>
-                  <h2 className="text-sm font-semibold text-white">
-                    Assigned Agent
-                  </h2>
-
-                  <p className="text-xs text-slate-500">Ticket ownership</p>
-                </div>
+                <h2 className="font-semibold text-white">Assignment</h2>
               </div>
 
               {assignedAgent ? (
-                <div className="flex items-center gap-3">
-                  {assignedAgent.avatar ? (
-                    <img
-                      src={getCustomerAvatarUrl(assignedAgent)}
-                      alt={getAgentName(assignedAgent)}
-                      className="h-10 w-10 rounded-full object-cover ring-2 ring-slate-800"
-                    />
-                  ) : (
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">
-                      {getInitials(getAgentName(assignedAgent))}
+                <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+                  <div className="flex items-center gap-3">
+                    {assignedAgent.avatar ? (
+                      <img
+                        src={getAvatarUrl(assignedAgent.avatar)}
+                        alt={assignedAgent.name || "Agent"}
+                        className="h-10 w-10 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-800">
+                        <UserCheck className="h-5 w-5 text-slate-400" />
+                      </div>
+                    )}
+
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">
+                        {assignedAgent.name}
+                      </p>
+
+                      <p className="text-xs text-slate-500">
+                        {isAssignedToCurrentUser
+                          ? "Assigned to you"
+                          : "Assigned agent"}
+                      </p>
                     </div>
-                  )}
-
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-white">
-                      {getAgentName(assignedAgent)}
-                    </p>
-
-                    <p className="truncate text-xs text-slate-500">
-                      {assignedAgent.email || "Support Agent"}
-                    </p>
                   </div>
                 </div>
               ) : (
-                <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/50 p-4 text-center">
-                  <User className="mx-auto h-6 w-6 text-slate-700" />
+                <div>
+                  <div className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
+                    <p className="text-xs text-amber-400">
+                      This ticket is currently unassigned.
+                    </p>
+                  </div>
 
-                  <p className="mt-2 text-sm text-slate-500">
-                    No agent assigned
-                  </p>
+                  <button
+                    type="button"
+                    onClick={handleAssignToMe}
+                    disabled={assigning}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {assigning ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Assigning...
+                      </>
+                    ) : (
+                      <>
+                        <UserCheck className="h-4 w-4" />
+                        Assign to Me
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </section>
 
-                  {!isClosed && (
-                    <button
-                      type="button"
-                      onClick={handleAssignTicket}
-                      disabled={assigning}
-                      className="mt-3 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
-                    >
-                      {assigning ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <UserCheck className="h-3.5 w-3.5" />
+            {/* Original ticket */}
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <FileText className="h-5 w-5 text-blue-400" />
+
+                <h2 className="font-semibold text-white">Original Request</h2>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
+                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-300">
+                  {ticket.description || "No description provided."}
+                </p>
+              </div>
+
+              {/* Ticket attachments */}
+
+              {Array.isArray(ticket.attachments) &&
+                ticket.attachments.length > 0 && (
+                  <div className="mt-4">
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wider text-slate-600">
+                      Attachments
+                    </p>
+
+                    <div className="space-y-2">
+                      {ticket.attachments.map((file, index) =>
+                        renderAttachment(file, index),
                       )}
-                      Assign to Me
-                    </button>
-                  )}
-                </div>
-              )}
-            </section>
-
-            {/* ===============================================
-                TICKET ATTACHMENTS
-            =============================================== */}
-
-            {ticketAttachments.length > 0 && (
-              <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-                <div className="mb-4 flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800">
-                    <Paperclip className="h-5 w-5 text-slate-400" />
-                  </div>
-
-                  <div>
-                    <h2 className="text-sm font-semibold text-white">
-                      Ticket Attachments
-                    </h2>
-
-                    <p className="text-xs text-slate-500">
-                      {ticketAttachments.length}{" "}
-                      {ticketAttachments.length === 1 ? "file" : "files"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  {ticketAttachments.map((attachment, index) =>
-                    renderAttachment(attachment, index),
-                  )}
-                </div>
-              </section>
-            )}
-
-            {/* ===============================================
-                STATUS HISTORY
-            =============================================== */}
-
-            <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
-              <button
-                type="button"
-                onClick={() => setShowHistory((prev) => !prev)}
-                className="flex w-full items-center justify-between px-5 py-4 text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800">
-                    <History className="h-5 w-5 text-slate-400" />
-                  </div>
-
-                  <div>
-                    <h2 className="text-sm font-semibold text-white">
-                      Status History
-                    </h2>
-
-                    <p className="text-xs text-slate-500">
-                      {statusHistory.length} events
-                    </p>
-                  </div>
-                </div>
-
-                <ChevronDown
-                  className={`h-4 w-4 text-slate-500 transition ${
-                    showHistory ? "rotate-180" : ""
-                  }`}
-                />
-              </button>
-
-              {showHistory && (
-                <div className="border-t border-slate-800 p-5">
-                  {statusHistory.length === 0 ? (
-                    <p className="text-sm text-slate-500">
-                      No status history available.
-                    </p>
-                  ) : (
-                    <div className="space-y-4">
-                      {[...statusHistory].reverse().map((item, index) => (
-                        <div key={item?._id || index} className="relative pl-6">
-                          <div className="absolute left-0 top-1.5 h-2.5 w-2.5 rounded-full bg-indigo-500 ring-4 ring-indigo-500/10" />
-
-                          {index < statusHistory.length - 1 && (
-                            <div className="absolute bottom-[-18px] left-[5px] top-4 w-px bg-slate-800" />
-                          )}
-
-                          <p className="text-sm font-medium text-slate-300">
-                            {getStatusLabel(item?.status)}
-                          </p>
-
-                          <p className="mt-1 text-xs text-slate-600">
-                            {formatDateTime(item?.createdAt)}
-                          </p>
-
-                          {item?.note && (
-                            <p className="mt-2 text-xs leading-5 text-slate-500">
-                              {item.note}
-                            </p>
-                          )}
-                        </div>
-                      ))}
                     </div>
-                  )}
+                  </div>
+                )}
+            </section>
+
+            {/* Status history */}
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <Clock3 className="h-5 w-5 text-amber-400" />
+
+                <h2 className="font-semibold text-white">Status History</h2>
+              </div>
+
+              {Array.isArray(ticket.statusHistory) &&
+              ticket.statusHistory.length > 0 ? (
+                <div className="space-y-4">
+                  {ticket.statusHistory
+                    .slice()
+                    .reverse()
+                    .map((history, index) => (
+                      <div
+                        key={history?._id || `history-${index}`}
+                        className="relative pl-6"
+                      >
+                        {index !== ticket.statusHistory.length - 1 && (
+                          <div className="absolute left-[5px] top-3 h-full w-px bg-slate-800" />
+                        )}
+
+                        <div className="absolute left-0 top-1.5 h-3 w-3 rounded-full border-2 border-slate-700 bg-slate-950" />
+
+                        <p className="text-sm font-medium text-slate-300">
+                          {formatStatus(history.status)}
+                        </p>
+
+                        {history.note && (
+                          <p className="mt-1 text-xs leading-5 text-slate-500">
+                            {history.note}
+                          </p>
+                        )}
+
+                        <p className="mt-1 text-[11px] text-slate-600">
+                          {formatDate(history.createdAt)}
+                        </p>
+                      </div>
+                    ))}
                 </div>
+              ) : (
+                <p className="text-sm text-slate-500">
+                  No status history available.
+                </p>
               )}
             </section>
 
-            {/* ===============================================
-                RESOLUTION
-            =============================================== */}
+            {/* Resolution */}
 
-            {(isResolved || ticket.resolvedAt) && (
+            {(isResolved || isClosed) && (
               <section className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
                 <div className="flex items-start gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10">
-                    <Check className="h-5 w-5 text-emerald-400" />
-                  </div>
+                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
 
                   <div>
-                    <h2 className="text-sm font-semibold text-emerald-300">
-                      Ticket Resolved
+                    <h2 className="font-semibold text-emerald-300">
+                      Ticket {isClosed ? "Closed" : "Resolved"}
                     </h2>
 
-                    <p className="mt-1 text-xs text-emerald-400/70">
-                      {ticket.resolvedAt
-                        ? `Resolved ${formatDateTime(ticket.resolvedAt)}`
-                        : "This ticket has been resolved."}
-                    </p>
+                    {ticket.resolvedAt && (
+                      <p className="mt-1 text-xs text-emerald-500/70">
+                        Resolved {formatDate(ticket.resolvedAt)}
+                      </p>
+                    )}
+
+                    {ticket.closedAt && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Closed {formatDate(ticket.closedAt)}
+                      </p>
+                    )}
                   </div>
                 </div>
               </section>
             )}
           </aside>
         </div>
-      </main>
+      </div>
+
+      {/* =========================================================
+          IMAGE PREVIEW
+      ========================================================= */}
+
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div
+            className="relative max-h-[90vh] max-w-5xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 p-2"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setPreviewImage(null)}
+              className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/70 text-white hover:bg-black"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <img
+              src={previewImage.url}
+              alt={previewImage.name}
+              className="max-h-[85vh] max-w-full rounded-xl object-contain"
+            />
+
+            <div className="px-2 pb-1 pt-2 text-center text-xs text-slate-400">
+              {previewImage.name}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

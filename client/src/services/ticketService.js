@@ -95,6 +95,10 @@ export const uploadTicketAttachments = async (ticketId, files) => {
  */
 
 export const getTicketStatusHistory = async (ticketId) => {
+  if (!ticketId) {
+    throw new Error("Ticket ID is required.");
+  }
+
   const response = await api.get(`/tickets/${ticketId}/status-history`);
 
   return response.data;

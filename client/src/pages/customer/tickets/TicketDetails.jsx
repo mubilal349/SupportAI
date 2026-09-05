@@ -1010,9 +1010,9 @@ const TicketDetails = () => {
 
     socket.on("ticket:error", handleSocketError);
 
-    socket.on("ticket:new-message", handleNewMessage);
+    socket.on("ticket:message", handleNewMessage);
 
-    socket.on("ticket:updated", handleTicketUpdate);
+    socket.on("ticket:update", handleTicketUpdate);
 
     socket.on("ticket:status-changed", handleStatusChanged);
 
@@ -1061,9 +1061,9 @@ const TicketDetails = () => {
 
       socket.off("ticket:error", handleSocketError);
 
-      socket.off("ticket:new-message", handleNewMessage);
+      socket.off("ticket:message", handleNewMessage);
 
-      socket.off("ticket:updated", handleTicketUpdate);
+      socket.off("ticket:update", handleTicketUpdate);
 
       socket.off("ticket:status-changed", handleStatusChanged);
 
