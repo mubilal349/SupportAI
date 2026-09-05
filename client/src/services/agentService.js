@@ -105,15 +105,7 @@ export const sendAgentReply = async (ticketId, message, files = []) => {
     formData.append("attachments", file);
   });
 
-  const response = await api.post(
-    `/agent/tickets/${ticketId}/reply`,
-    formData,
-    {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    },
-  );
+  const response = await api.post(`/agent/tickets/${ticketId}/reply`, formData);
 
   return response.data;
 };

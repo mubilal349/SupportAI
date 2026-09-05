@@ -31,7 +31,12 @@ const storage = multer.diskStorage({
       .replace(/[^a-zA-Z0-9-_]/g, "-")
       .substring(0, 50);
 
-    const uniqueName = `ticket-${req.params.id}-${Date.now()}-${safeName}${extension}`;
+    // Supports both:
+    // Customer route: /tickets/:id/attachments
+    // Agent route:    /agent/tickets/:ticketId/reply
+    const ticketId = req.params.id || req.params.ticketId || "unknown";
+
+    const uniqueName = `ticket-${ticketId}-${Date.now()}-${safeName}${extension}`;
 
     cb(null, uniqueName);
   },

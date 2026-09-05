@@ -1,6 +1,19 @@
 import jwt from "jsonwebtoken";
 import Ticket from "../models/Ticket.js";
 
+// =========================================================
+// SOCKET.IO INSTANCE
+// =========================================================
+// Stores the initialized Socket.IO instance so controllers
+// can access it later for real-time ticket updates.
+// =========================================================
+
+let ioInstance = null;
+
+// =========================================================
+// USER HELPERS
+// =========================================================
+
 const getUserId = (user) => {
   return user?.id || user?._id || user?.userId || null;
 };
@@ -9,11 +22,9 @@ const getUserRole = (user) => {
   return user?.role || null;
 };
 
-/*
- * =========================================================
- * AUTHORIZE USER FOR TICKET
- * =========================================================
- */
+// =========================================================
+// AUTHORIZE USER FOR TICKET
+// =========================================================
 
 export const canAccessTicket = (ticket, user) => {
   if (!ticket || !user) {
@@ -51,28 +62,38 @@ export const canAccessTicket = (ticket, user) => {
   return false;
 };
 
-/*
- * =========================================================
- * TICKET ROOM
- * =========================================================
- */
+// =========================================================
+// TICKET ROOM
+// =========================================================
 
 export const getTicketRoom = (ticketId) => {
   return `ticket:${ticketId}`;
 };
 
-/*
- * =========================================================
- * INITIALIZE SOCKET.IO
- * =========================================================
- */
+// =========================================================
+// GET SOCKET.IO INSTANCE
+// =========================================================
+// Used by controllers such as agentController.js to emit
+// real-time events after database operations.
+// =========================================================
+
+export const getSocketIO = () => {
+  return ioInstance;
+};
+
+// =========================================================
+// INITIALIZE SOCKET.IO
+// =========================================================
 
 export const initializeSocket = (io) => {
-  /*
-   * -------------------------------------------------------
-   * SOCKET AUTHENTICATION
-   * -------------------------------------------------------
-   */
+  // Store Socket.IO instance for use by controllers
+  ioInstance = io;
+
+  console.log("Socket.IO initialized successfully.");
+
+  // =======================================================
+  // SOCKET AUTHENTICATION
+  // =======================================================
 
   io.use((socket, next) => {
     try {
@@ -96,11 +117,9 @@ export const initializeSocket = (io) => {
     }
   });
 
-  /*
-   * -------------------------------------------------------
-   * CONNECTION
-   * -------------------------------------------------------
-   */
+  // =======================================================
+  // CONNECTION
+  // =======================================================
 
   io.on("connection", (socket) => {
     const userId = getUserId(socket.user);
@@ -108,6 +127,7 @@ export const initializeSocket = (io) => {
 
     const userRoom = `user:${userId}`;
 
+    // Join personal user notification room
     socket.join(userRoom);
 
     console.log(
@@ -118,11 +138,9 @@ export const initializeSocket = (io) => {
       `Socket connected: ${socket.id} | User: ${userId} | Role: ${role}`,
     );
 
-    /*
-     * =====================================================
-     * JOIN TICKET
-     * =====================================================
-     */
+    // =====================================================
+    // JOIN TICKET
+    // =====================================================
 
     socket.on("ticket:join", async ({ ticketId }) => {
       try {
@@ -179,11 +197,9 @@ export const initializeSocket = (io) => {
       }
     });
 
-    /*
-     * =====================================================
-     * LEAVE TICKET
-     * =====================================================
-     */
+    // =====================================================
+    // LEAVE TICKET
+    // =====================================================
 
     socket.on("ticket:leave", ({ ticketId }) => {
       if (!ticketId) {
@@ -203,11 +219,9 @@ export const initializeSocket = (io) => {
       console.log(`Socket ${socket.id} left room ${room}`);
     });
 
-    /*
-     * =====================================================
-     * TYPING START
-     * =====================================================
-     */
+    // =====================================================
+    // TYPING START
+    // =====================================================
 
     socket.on("ticket:typing:start", ({ ticketId }) => {
       if (!ticketId) {
@@ -224,11 +238,9 @@ export const initializeSocket = (io) => {
       });
     });
 
-    /*
-     * =====================================================
-     * TYPING STOP
-     * =====================================================
-     */
+    // =====================================================
+    // TYPING STOP
+    // =====================================================
 
     socket.on("ticket:typing:stop", ({ ticketId }) => {
       if (!ticketId) {
@@ -245,11 +257,9 @@ export const initializeSocket = (io) => {
       });
     });
 
-    /*
-     * =====================================================
-     * MESSAGE READ
-     * =====================================================
-     */
+    // =====================================================
+    // MESSAGE READ
+    // =====================================================
 
     socket.on("ticket:message:read", async ({ ticketId, messageId }) => {
       try {
@@ -289,11 +299,9 @@ export const initializeSocket = (io) => {
       }
     });
 
-    /*
-     * =====================================================
-     * DISCONNECT
-     * =====================================================
-     */
+    // =====================================================
+    // DISCONNECT
+    // =====================================================
 
     socket.on("disconnect", (reason) => {
       console.log(`Socket disconnected: ${socket.id} | Reason: ${reason}`);

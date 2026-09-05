@@ -20,20 +20,19 @@ import TicketDetails from "../pages/customer/tickets/TicketDetails";
 import AITicketCreation from "../pages/customer/tickets/AITicketCreation";
 import Notifications from "../pages/customer/notification/Notifications";
 import KnowledgeBase from "../pages/customer/knowledge-base/KnowledgeBase";
+import Help from "../pages/customer/Help";
+import CustomerAnalytics from "../pages/customer/CustomerAnalytics";
 
 // Agent
 import AgentLayout from "../pages/agent/AgentLayout";
 import AgentDashboard from "../pages/agent/AgentDashboard";
-
 import TicketQueue from "../pages/agent/tickets/TicketQueue";
 import AssignedTickets from "../pages/agent/tickets/AssignedTickets";
 import AgentTicketDetails from "../pages/agent/tickets/AgentTicketDetails";
+import AgentProfile from "../pages/agent/AgentProfile";
 
 // Route Protection
 import ProtectedRoute from "./ProtectedRoute";
-import Help from "../pages/customer/Help";
-import CustomerAnalytics from "../pages/customer/CustomerAnalytics";
-import AgentProfile from "../pages/agent/AgentProfile";
 
 const AppRoutes = () => {
   return (
@@ -68,18 +67,19 @@ const AppRoutes = () => {
           </ProtectedRoute>
         }
       >
-        {/* Agent Dashboard */}
+        {/* /agent */}
         <Route index element={<AgentDashboard />} />
 
-        {/* All available tickets */}
+        {/* /agent/queue */}
         <Route path="queue" element={<TicketQueue />} />
 
-        {/* Tickets assigned to the logged-in agent */}
+        {/* /agent/tickets */}
         <Route path="tickets" element={<AssignedTickets />} />
 
-        {/* Individual ticket */}
+        {/* /agent/tickets/:ticketId */}
         <Route path="tickets/:ticketId" element={<AgentTicketDetails />} />
-        {/* Agent Profile */}
+
+        {/* /agent/profile */}
         <Route path="profile" element={<AgentProfile />} />
       </Route>
 
@@ -101,26 +101,26 @@ const AppRoutes = () => {
           {/* /support/tickets */}
           <Route path="tickets" element={<Tickets />} />
 
-          <Route
-            path="/support/tickets/create-ai"
-            element={<AITicketCreation />}
-          />
+          {/* /support/tickets/create-ai */}
+          <Route path="tickets/create-ai" element={<AITicketCreation />} />
 
-          <Route path="/support/tickets/:id" element={<TicketDetails />} />
+          {/* /support/tickets/:id */}
+          <Route path="tickets/:id" element={<TicketDetails />} />
 
           {/* /support/profile */}
           <Route path="profile" element={<CustomerProfile />} />
 
           {/* /support/help */}
-          <Route path="/support/help" element={<Help />} />
+          <Route path="help" element={<Help />} />
 
           {/* /support/analytics */}
-          <Route path="/support/analytics" element={<CustomerAnalytics />} />
+          <Route path="analytics" element={<CustomerAnalytics />} />
 
-          {/* notifications */}
+          {/* /support/notifications */}
           <Route path="notifications" element={<Notifications />} />
-          {/* knowledege-base */}
-          <Route path="/support/knowledge-base" element={<KnowledgeBase />} />
+
+          {/* /support/knowledge-base */}
+          <Route path="knowledge-base" element={<KnowledgeBase />} />
         </Route>
       </Route>
 

@@ -1,4 +1,5 @@
 import Ticket from "../models/Ticket.js";
+import { getSocketIO, getTicketRoom } from "../socket/socket.js";
 
 /*
  * =========================================================
@@ -1104,7 +1105,7 @@ export const sendAgentReply = async (req, res) => {
      * =======================================================
      */
 
-    const io = getSocketIO(req);
+    const io = getSocketIO();
 
     if (io) {
       const room = getTicketRoom(ticket._id);
@@ -1131,7 +1132,12 @@ export const sendAgentReply = async (req, res) => {
       ticket,
     });
   } catch (error) {
-    console.error("SEND AGENT REPLY ERROR:", error);
+    console.error("========================================");
+    console.error("SEND AGENT REPLY ERROR");
+    console.error("MESSAGE:", error.message);
+    console.error("NAME:", error.name);
+    console.error("STACK:", error.stack);
+    console.error("========================================");
 
     return res.status(500).json({
       success: false,
