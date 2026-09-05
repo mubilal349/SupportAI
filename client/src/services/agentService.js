@@ -96,11 +96,24 @@ export const updateAgentTicketPriority = async (ticketId, priority) => {
  * =========================================================
  */
 
-export const sendAgentReply = async (ticketId, message, attachments = []) => {
-  const response = await api.post(`/agent/tickets/${ticketId}/reply`, {
-    message,
-    attachments,
+export const sendAgentReply = async (ticketId, message, files = []) => {
+  const formData = new FormData();
+
+  formData.append("message", message || "");
+
+  files.forEach((file) => {
+    formData.append("attachments", file);
   });
+
+  const response = await api.post(
+    `/agent/tickets/${ticketId}/reply`,
+    formData,
+    {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    },
+  );
 
   return response.data;
 };

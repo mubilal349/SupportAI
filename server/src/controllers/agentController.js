@@ -937,25 +937,20 @@ export const updateTicketPriority = async (req, res) => {
 
 export const sendAgentReply = async (req, res) => {
   try {
-    const agentId = getUserId(req);
-    const role = getUserRole(req);
-
     const { ticketId } = req.params;
+    const { message = "" } = req.body;
 
-    const { message = "", attachments = [] } = req.body;
+    const userId = getUserId(req);
+    const userRole = getUserRole(req);
 
-    const cleanMessage = String(message).trim();
+    const cleanMessage = String(message || "").trim();
 
-    /*
-     * A reply must contain either text or attachments.
-     */
-    if (
-      !cleanMessage &&
-      (!Array.isArray(attachments) || attachments.length === 0)
-    ) {
+    const files = Array.isArray(req.files) ? req.files : [];
+
+    if (!cleanMessage && files.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "Message or attachment is required",
+        message: "Reply message or attachment is required.",
       });
     }
 
@@ -964,135 +959,175 @@ export const sendAgentReply = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({
         success: false,
-        message: "Ticket not found",
+        message: "Ticket not found.",
       });
     }
 
     /*
-     * Access control
+     * =======================================================
+     * ACCESS CONTROL
+     * =======================================================
      */
-    const assignedAgentId = normalizeId(ticket.assignedAgent);
 
-    const currentAgentId = normalizeId(agentId);
+    const agentId = normalizeId(ticket.assignedAgent);
+    const currentUserId = normalizeId(userId);
 
-    const hasAccess =
-      role === "admin" ||
-      !ticket.assignedAgent ||
-      assignedAgentId === currentAgentId;
+    const isAdmin = userRole === "admin";
+    const isAssignedAgent = agentId && currentUserId === agentId;
 
-    if (!hasAccess) {
+    const isUnassigned = !ticket.assignedAgent;
+
+    if (!isAdmin && !isAssignedAgent && !isUnassigned) {
       return res.status(403).json({
         success: false,
-        message: "You cannot reply to another agent's ticket",
+        message: "You are not allowed to reply to this ticket.",
       });
     }
 
     /*
-     * Automatically assign unassigned ticket
+     * =======================================================
+     * AUTO ASSIGN
+     * =======================================================
      */
-    if (!ticket.assignedAgent) {
-      ticket.assignedAgent = agentId;
+
+    if (!ticket.assignedAgent && userId) {
+      ticket.assignedAgent = userId;
+
+      await addStatusHistory(
+        ticket,
+        "in-progress",
+        userId,
+        userRole === "admin" ? "admin" : "agent",
+        "Ticket automatically assigned when agent replied.",
+      );
     }
 
-    const previousStatus = ticket.status;
+    /*
+     * =======================================================
+     * BUILD ATTACHMENTS
+     * =======================================================
+     */
+
+    const attachments = files.map((file) => ({
+      filename: file.filename || file.originalname || "",
+      originalName: file.originalname || file.filename || "",
+      mimetype: file.mimetype || "",
+      size: file.size || 0,
+      path: file.path || file.filename || "",
+      uploadedAt: new Date(),
+    }));
 
     /*
-     * Normalize attachments.
-     *
-     * This supports attachment objects coming from
-     * your existing attachment upload functionality.
+     * =======================================================
+     * ADD CONVERSATION MESSAGE
+     * =======================================================
      */
-    const normalizedAttachments = Array.isArray(attachments)
-      ? attachments.map((attachment) => ({
-          filename: attachment?.filename || "",
-          originalName: attachment?.originalName || attachment?.name || "",
-          mimetype: attachment?.mimetype || attachment?.type || "",
-          size: Number(attachment?.size) || 0,
-          path: attachment?.path || attachment?.url || "",
-          uploadedAt: attachment?.uploadedAt || new Date(),
-        }))
-      : [];
 
-    /*
-     * Add message to the ACTUAL Ticket schema:
-     *
-     * ticket.conversation
-     *
-     * NOT ticket.messages
-     */
     ticket.conversation.push({
-      sender: agentId,
-      senderRole: role === "admin" ? "admin" : "agent",
+      sender: userId,
+      senderRole: userRole === "admin" ? "admin" : "agent",
       message: cleanMessage || "Attachment",
-      attachments: normalizedAttachments,
+      attachments,
       isRead: false,
       createdAt: new Date(),
     });
 
     /*
-     * Maintain reply counters
+     * =======================================================
+     * UPDATE REPLY COUNTER
+     * =======================================================
      */
+
     ticket.replies = Number(ticket.replies || 0) + 1;
 
     ticket.lastReplyAt = new Date();
 
     /*
-     * Agent response means the ticket is actively
-     * being handled.
-     *
-     * If it was resolved/closed, this reopens it.
+     * =======================================================
+     * STATUS
+     * =======================================================
      */
-    if (["open", "waiting", "resolved", "closed"].includes(ticket.status)) {
+
+    if (
+      ticket.status === "open" ||
+      ticket.status === "waiting" ||
+      ticket.status === "resolved" ||
+      ticket.status === "closed"
+    ) {
+      const previousStatus = ticket.status;
+
       ticket.status = "in-progress";
+
+      updateLifecycleTimestamps(ticket, previousStatus, "in-progress");
+
+      await addStatusHistory(
+        ticket,
+        "in-progress",
+        userId,
+        userRole === "admin" ? "admin" : "agent",
+        "Ticket moved to In Progress after agent reply.",
+      );
     }
 
     /*
-     * Lifecycle handling
+     * =======================================================
+     * SAVE
+     * =======================================================
      */
-    if (previousStatus !== ticket.status) {
-      updateLifecycleTimestamps(ticket, previousStatus, ticket.status);
-
-      addStatusHistory({
-        ticket,
-        status: ticket.status,
-        changedBy: agentId,
-        changedByRole: role,
-        note:
-          previousStatus === "resolved" || previousStatus === "closed"
-            ? "Ticket reopened by agent reply"
-            : "Agent replied to ticket",
-      });
-    }
 
     await ticket.save();
 
     /*
-     * Populate response
+     * =======================================================
+     * POPULATE
+     * =======================================================
      */
-    await ticket.populate("customer", "name email avatar profileImage phone");
 
-    await ticket.populate("assignedAgent", "name email avatar profileImage");
-
-    await ticket.populate(
-      "conversation.sender",
-      "name email avatar profileImage role",
-    );
+    await ticket.populate([
+      {
+        path: "customer",
+        select: "name email avatar phone company",
+      },
+      {
+        path: "assignedAgent",
+        select: "name email avatar phone",
+      },
+      {
+        path: "conversation.sender",
+        select: "name email avatar role",
+      },
+    ]);
 
     /*
-     * Get latest conversation message
+     * =======================================================
+     * SOCKET.IO
+     * =======================================================
      */
-    const latestMessage = ticket.conversation[ticket.conversation.length - 1];
 
-    return res.status(201).json({
+    const io = getSocketIO(req);
+
+    if (io) {
+      const room = getTicketRoom(ticket._id);
+
+      io.to(room).emit("ticket:message", {
+        ticketId: ticket._id.toString(),
+        message: ticket.conversation[ticket.conversation.length - 1],
+      });
+
+      io.to(room).emit("ticket:update", {
+        ticket,
+      });
+    }
+
+    /*
+     * =======================================================
+     * RESPONSE
+     * =======================================================
+     */
+
+    return res.status(200).json({
       success: true,
-      message: "Reply sent successfully",
-
-      /*
-       * Return both names to make frontend integration
-       * easier.
-       */
-      reply: latestMessage,
-      conversation: ticket.conversation,
+      message: "Reply sent successfully.",
       ticket,
     });
   } catch (error) {
@@ -1100,7 +1135,7 @@ export const sendAgentReply = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to send agent reply",
+      message: "Failed to send agent reply.",
       error: error.message,
     });
   }
