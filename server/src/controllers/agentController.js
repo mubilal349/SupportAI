@@ -6,6 +6,13 @@ import { getSocketIO, getTicketRoom } from "../socket/socket.js";
  * HELPERS
  * =========================================================
  */
+const isTicketAssignedToUser = (ticket, userId) => {
+  if (!ticket?.assignedAgent || !userId) {
+    return false;
+  }
+
+  return normalizeId(ticket.assignedAgent) === normalizeId(userId);
+};
 
 const getUserId = (req) => {
   return req.user?._id || req.user?.id;
@@ -519,8 +526,11 @@ export const getAgentTicketById = async (req, res) => {
   try {
     const agentId = getUserId(req);
     const role = getUserRole(req);
-
     const { ticketId } = req.params;
+
+    // =======================================================
+    // AUTHENTICATION
+    // =======================================================
 
     if (!agentId) {
       return res.status(401).json({
@@ -529,9 +539,24 @@ export const getAgentTicketById = async (req, res) => {
       });
     }
 
+    // =======================================================
+    // VALIDATE TICKET ID
+    // =======================================================
+
+    if (!ticketId || !mongoose.Types.ObjectId.isValid(ticketId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID",
+      });
+    }
+
+    // =======================================================
+    // FIND TICKET
+    // =======================================================
+
     const ticket = await Ticket.findById(ticketId)
-      .populate("customer", "name email avatar profileImage phone")
-      .populate("assignedAgent", "name email avatar profileImage")
+      .populate("customer", "name email avatar profileImage phone company")
+      .populate("assignedAgent", "name email avatar profileImage role")
       .populate("conversation.sender", "name email avatar profileImage role");
 
     if (!ticket) {
@@ -541,13 +566,10 @@ export const getAgentTicketById = async (req, res) => {
       });
     }
 
-    /*
-     * =======================================================
-     * ADMIN ACCESS
-     * =======================================================
-     *
-     * Admins can view any ticket.
-     */
+    // =======================================================
+    // ADMIN ACCESS
+    // =======================================================
+
     if (role === "admin") {
       return res.status(200).json({
         success: true,
@@ -555,25 +577,20 @@ export const getAgentTicketById = async (req, res) => {
       });
     }
 
-    /*
-     * =======================================================
-     * AGENT ACCESS
-     * =======================================================
-     *
-     * Agents can ONLY view tickets assigned to them.
-     */
+    // =======================================================
+    // AGENT OWNERSHIP CHECK
+    // =======================================================
+
     const assignedAgentId = normalizeId(
       ticket.assignedAgent?._id || ticket.assignedAgent,
     );
 
     const currentAgentId = normalizeId(agentId);
 
-    /*
-     * Ticket is not assigned to anyone.
-     *
-     * Do not allow a normal agent to access it
-     * from the Assigned Tickets details route.
-     */
+    // -------------------------------------------------------
+    // TICKET IS UNASSIGNED
+    // -------------------------------------------------------
+
     if (!assignedAgentId) {
       return res.status(403).json({
         success: false,
@@ -581,9 +598,10 @@ export const getAgentTicketById = async (req, res) => {
       });
     }
 
-    /*
-     * Ticket belongs to another agent.
-     */
+    // -------------------------------------------------------
+    // TICKET BELONGS TO ANOTHER AGENT
+    // -------------------------------------------------------
+
     if (assignedAgentId !== currentAgentId) {
       return res.status(403).json({
         success: false,
@@ -591,11 +609,9 @@ export const getAgentTicketById = async (req, res) => {
       });
     }
 
-    /*
-     * =======================================================
-     * CURRENT AGENT OWNS THE TICKET
-     * =======================================================
-     */
+    // =======================================================
+    // CURRENT AGENT OWNS THE TICKET
+    // =======================================================
 
     return res.status(200).json({
       success: true,
@@ -729,6 +745,21 @@ export const updateTicketStatus = async (req, res) => {
     const { ticketId } = req.params;
     const { status } = req.body;
 
+    // =======================================================
+    // AUTHENTICATION
+    // =======================================================
+
+    if (!agentId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    // =======================================================
+    // VALIDATE STATUS
+    // =======================================================
+
     const allowedStatuses = [
       "open",
       "in-progress",
@@ -746,98 +777,167 @@ export const updateTicketStatus = async (req, res) => {
       });
     }
 
+    // =======================================================
+    // FIND TICKET
+    // =======================================================
+
     const ticket = await Ticket.findById(ticketId);
 
     if (!ticket) {
       return res.status(404).json({
         success: false,
-        message: "Ticket not found",
+        message: "Ticket not found.",
       });
     }
 
-    /*
-     * Agents can only modify:
-     * - their own assigned tickets
-     * - unassigned tickets
-     *
-     * Admin can modify any ticket.
-     */
-    const assignedAgentId = normalizeId(ticket.assignedAgent);
+    // =======================================================
+    // OWNERSHIP / ACCESS CONTROL
+    // =======================================================
 
+    const assignedAgentId = normalizeId(ticket.assignedAgent);
     const currentAgentId = normalizeId(agentId);
 
-    const hasAccess =
-      role === "admin" ||
-      !ticket.assignedAgent ||
-      assignedAgentId === currentAgentId;
+    const isAdmin = role === "admin";
+    const isUnassigned = !assignedAgentId;
+    const isAssignedAgent = assignedAgentId === currentAgentId;
 
-    if (!hasAccess) {
+    /*
+     * ADMIN
+     * Can update any ticket.
+     *
+     * CURRENT AGENT
+     * Can update their own ticket.
+     *
+     * UNASSIGNED
+     * Agent can update it and will automatically become
+     * the assigned agent.
+     *
+     * ANOTHER AGENT
+     * Cannot update the ticket.
+     */
+    if (!isAdmin && !isAssignedAgent && !isUnassigned) {
       return res.status(403).json({
         success: false,
-        message: "You cannot update another agent's ticket",
+        message: "You cannot update another agent's ticket.",
       });
     }
 
-    /*
-     * Automatically assign when agent updates
-     * an unassigned ticket.
-     */
-    if (!ticket.assignedAgent) {
+    // =======================================================
+    // AUTO ASSIGN UNASSIGNED TICKET
+    // =======================================================
+
+    if (isUnassigned) {
       ticket.assignedAgent = agentId;
     }
 
+    // =======================================================
+    // PREVIOUS STATUS
+    // =======================================================
+
     const previousStatus = ticket.status;
 
-    /*
-     * Nothing changed
-     */
-    if (previousStatus === status) {
-      await ticket.populate("customer", "name email avatar profileImage");
+    // =======================================================
+    // STATUS UNCHANGED
+    // =======================================================
 
-      await ticket.populate("assignedAgent", "name email avatar profileImage");
+    if (previousStatus === status) {
+      await ticket.populate([
+        {
+          path: "customer",
+          select: "name email avatar profileImage phone company",
+        },
+        {
+          path: "assignedAgent",
+          select: "name email avatar profileImage phone role",
+        },
+      ]);
 
       return res.status(200).json({
         success: true,
-        message: "Ticket status unchanged",
+        message: "Ticket status unchanged.",
         ticket,
       });
     }
 
+    // =======================================================
+    // UPDATE STATUS
+    // =======================================================
+
     ticket.status = status;
 
-    /*
-     * Lifecycle timestamps
-     */
+    // =======================================================
+    // LIFECYCLE TIMESTAMPS
+    // =======================================================
+
     updateLifecycleTimestamps(ticket, previousStatus, status);
 
-    /*
-     * Status history
-     */
+    // =======================================================
+    // STATUS HISTORY
+    // =======================================================
+
     addStatusHistory({
       ticket,
       status,
       changedBy: agentId,
-      changedByRole: role,
+      changedByRole: isAdmin ? "admin" : "agent",
       note: `Status changed from ${previousStatus} to ${status}`,
     });
 
+    // =======================================================
+    // SAVE
+    // =======================================================
+
     await ticket.save();
 
-    await ticket.populate("customer", "name email avatar profileImage");
+    // =======================================================
+    // POPULATE
+    // =======================================================
 
-    await ticket.populate("assignedAgent", "name email avatar profileImage");
+    await ticket.populate([
+      {
+        path: "customer",
+        select: "name email avatar profileImage phone company",
+      },
+      {
+        path: "assignedAgent",
+        select: "name email avatar profileImage phone role",
+      },
+    ]);
+
+    // =======================================================
+    // SOCKET.IO
+    // =======================================================
+
+    const io = getSocketIO();
+
+    if (io) {
+      const room = getTicketRoom(ticket._id);
+
+      io.to(room).emit("ticket:update", {
+        ticket,
+      });
+    }
+
+    // =======================================================
+    // RESPONSE
+    // =======================================================
 
     return res.status(200).json({
       success: true,
-      message: "Ticket status updated successfully",
+      message: "Ticket status updated successfully.",
       ticket,
     });
   } catch (error) {
-    console.error("UPDATE TICKET STATUS ERROR:", error);
+    console.error("========================================");
+    console.error("UPDATE TICKET STATUS ERROR");
+    console.error("MESSAGE:", error.message);
+    console.error("NAME:", error.name);
+    console.error("STACK:", error.stack);
+    console.error("========================================");
 
     return res.status(500).json({
       success: false,
-      message: "Failed to update ticket status",
+      message: "Failed to update ticket status.",
       error: error.message,
     });
   }
@@ -857,7 +957,20 @@ export const updateTicketPriority = async (req, res) => {
     const { ticketId } = req.params;
     const { priority } = req.body;
 
-    const allowedPriorities = ["low", "medium", "high"];
+    /*
+     * Authentication check
+     */
+    if (!agentId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    /*
+     * Validate priority
+     */
+    const allowedPriorities = ["low", "medium", "high", "urgent"];
 
     if (!allowedPriorities.includes(priority)) {
       return res.status(400).json({
@@ -868,79 +981,174 @@ export const updateTicketPriority = async (req, res) => {
       });
     }
 
+    /*
+     * Find ticket
+     */
     const ticket = await Ticket.findById(ticketId);
 
     if (!ticket) {
       return res.status(404).json({
         success: false,
-        message: "Ticket not found",
+        message: "Ticket not found.",
       });
     }
 
     /*
-     * Access control
+     * =========================================================
+     * ACCESS CONTROL
+     * =========================================================
+     *
+     * Admin:
+     *   Can update any ticket.
+     *
+     * Assigned agent:
+     *   Can update their own ticket.
+     *
+     * Unassigned:
+     *   Current agent can update it and it will automatically
+     *   become assigned to them.
+     *
+     * Another agent:
+     *   Access denied.
      */
-    const assignedAgentId = normalizeId(ticket.assignedAgent);
 
+    const assignedAgentId = normalizeId(ticket.assignedAgent);
     const currentAgentId = normalizeId(agentId);
 
-    const hasAccess =
-      role === "admin" ||
-      !ticket.assignedAgent ||
-      assignedAgentId === currentAgentId;
+    const isAdmin = role === "admin";
+    const isUnassigned = !assignedAgentId;
+    const isAssignedAgent = assignedAgentId === currentAgentId;
 
-    if (!hasAccess) {
+    if (!isAdmin && !isAssignedAgent && !isUnassigned) {
       return res.status(403).json({
         success: false,
-        message: "You cannot update another agent's ticket",
+        message: "You cannot update another agent's ticket.",
       });
     }
 
     /*
-     * Automatically assign unassigned ticket
+     * =========================================================
+     * AUTOMATIC ASSIGNMENT
+     * =========================================================
+     *
+     * If the ticket has no assigned agent, assign it to the
+     * current authenticated user.
      */
     if (!ticket.assignedAgent) {
       ticket.assignedAgent = agentId;
-    }
 
-    const previousPriority = ticket.priority;
-
-    ticket.priority = priority;
-
-    /*
-     * Record priority change in status history.
-     *
-     * The schema's statusHistory requires a valid status,
-     * so we keep the current status while documenting
-     * the priority change in the note.
-     */
-    if (previousPriority !== priority) {
       addStatusHistory({
         ticket,
         status: ticket.status,
         changedBy: agentId,
-        changedByRole: role,
-        note: `Priority changed from ${previousPriority} to ${priority}`,
+        changedByRole: isAdmin ? "admin" : "agent",
+        note: "Ticket automatically assigned when priority was updated.",
       });
     }
 
+    /*
+     * =========================================================
+     * CHECK IF PRIORITY IS ALREADY THE SAME
+     * =========================================================
+     */
+    const previousPriority = ticket.priority;
+
+    if (previousPriority === priority) {
+      await ticket.populate(
+        "customer",
+        "name email avatar profileImage phone company",
+      );
+
+      await ticket.populate(
+        "assignedAgent",
+        "name email avatar profileImage phone company role",
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: "Ticket priority unchanged.",
+        ticket,
+      });
+    }
+
+    /*
+     * =========================================================
+     * UPDATE PRIORITY
+     * =========================================================
+     */
+    ticket.priority = priority;
+
+    /*
+     * =========================================================
+     * RECORD PRIORITY CHANGE
+     * =========================================================
+     *
+     * statusHistory requires a valid status, so we keep the
+     * current ticket status and describe the priority change
+     * inside the note.
+     */
+    addStatusHistory({
+      ticket,
+      status: ticket.status,
+      changedBy: agentId,
+      changedByRole: isAdmin ? "admin" : "agent",
+      note: `Priority changed from ${previousPriority || "none"} to ${priority}.`,
+    });
+
+    /*
+     * Save ticket
+     */
     await ticket.save();
 
-    await ticket.populate("customer", "name email avatar profileImage");
+    /*
+     * Populate related users
+     */
+    await ticket.populate(
+      "customer",
+      "name email avatar profileImage phone company",
+    );
 
-    await ticket.populate("assignedAgent", "name email avatar profileImage");
+    await ticket.populate(
+      "assignedAgent",
+      "name email avatar profileImage phone company role",
+    );
 
+    /*
+     * =========================================================
+     * SOCKET.IO UPDATE
+     * =========================================================
+     */
+    const io = getSocketIO();
+
+    if (io) {
+      const room = getTicketRoom(ticket._id);
+
+      io.to(room).emit("ticket:update", {
+        ticket,
+      });
+    }
+
+    /*
+     * =========================================================
+     * RESPONSE
+     * =========================================================
+     */
     return res.status(200).json({
       success: true,
-      message: "Ticket priority updated successfully",
+      message: "Ticket priority updated successfully.",
       ticket,
     });
   } catch (error) {
-    console.error("UPDATE TICKET PRIORITY ERROR:", error);
+    console.error("========================================");
+    console.error("UPDATE TICKET PRIORITY ERROR");
+    console.error("MESSAGE:", error.message);
+    console.error("NAME:", error.name);
+    console.error("STACK:", error.stack);
+    console.error("========================================");
 
     return res.status(500).json({
       success: false,
-      message: "Failed to update ticket priority",
+      message: "Failed to update ticket priority.",
       error: error.message,
     });
   }
@@ -964,12 +1172,31 @@ export const sendAgentReply = async (req, res) => {
 
     const files = Array.isArray(req.files) ? req.files : [];
 
+    // =======================================================
+    // AUTHENTICATION
+    // =======================================================
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    // =======================================================
+    // MESSAGE / ATTACHMENT VALIDATION
+    // =======================================================
+
     if (!cleanMessage && files.length === 0) {
       return res.status(400).json({
         success: false,
         message: "Reply message or attachment is required.",
       });
     }
+
+    // =======================================================
+    // FIND TICKET
+    // =======================================================
 
     const ticket = await Ticket.findById(ticketId);
 
@@ -980,50 +1207,59 @@ export const sendAgentReply = async (req, res) => {
       });
     }
 
-    /*
-     * =======================================================
-     * ACCESS CONTROL
-     * =======================================================
-     */
+    // =======================================================
+    // ACCESS CONTROL
+    // =======================================================
 
-    const agentId = normalizeId(ticket.assignedAgent);
+    const assignedAgentId = normalizeId(ticket.assignedAgent);
     const currentUserId = normalizeId(userId);
 
     const isAdmin = userRole === "admin";
-    const isAssignedAgent = agentId && currentUserId === agentId;
 
-    const isUnassigned = !ticket.assignedAgent;
+    const isAssignedAgent =
+      assignedAgentId && currentUserId === assignedAgentId;
 
+    const isUnassigned = !assignedAgentId;
+
+    /*
+     * Admin:
+     * Can reply to any ticket.
+     *
+     * Assigned agent:
+     * Can reply to their own ticket.
+     *
+     * Unassigned:
+     * Can reply and will automatically become assigned.
+     *
+     * Another agent:
+     * Cannot reply.
+     */
     if (!isAdmin && !isAssignedAgent && !isUnassigned) {
       return res.status(403).json({
         success: false,
-        message: "You are not allowed to reply to this ticket.",
+        message: "You cannot reply to a ticket assigned to another agent.",
       });
     }
 
-    /*
-     * =======================================================
-     * AUTO ASSIGN
-     * =======================================================
-     */
+    // =======================================================
+    // AUTO ASSIGN UNASSIGNED TICKET
+    // =======================================================
 
-    if (!ticket.assignedAgent && userId) {
+    if (isUnassigned) {
       ticket.assignedAgent = userId;
 
-      await addStatusHistory(
+      addStatusHistory({
         ticket,
-        "in-progress",
-        userId,
-        userRole === "admin" ? "admin" : "agent",
-        "Ticket automatically assigned when agent replied.",
-      );
+        status: "in-progress",
+        changedBy: userId,
+        changedByRole: isAdmin ? "admin" : "agent",
+        note: "Ticket automatically assigned when agent replied.",
+      });
     }
 
-    /*
-     * =======================================================
-     * BUILD ATTACHMENTS
-     * =======================================================
-     */
+    // =======================================================
+    // BUILD ATTACHMENTS
+    // =======================================================
 
     const attachments = files.map((file) => ({
       filename: file.filename || file.originalname || "",
@@ -1034,36 +1270,29 @@ export const sendAgentReply = async (req, res) => {
       uploadedAt: new Date(),
     }));
 
-    /*
-     * =======================================================
-     * ADD CONVERSATION MESSAGE
-     * =======================================================
-     */
+    // =======================================================
+    // ADD CONVERSATION MESSAGE
+    // =======================================================
 
     ticket.conversation.push({
       sender: userId,
-      senderRole: userRole === "admin" ? "admin" : "agent",
+      senderRole: isAdmin ? "admin" : "agent",
       message: cleanMessage || "Attachment",
       attachments,
       isRead: false,
       createdAt: new Date(),
     });
 
-    /*
-     * =======================================================
-     * UPDATE REPLY COUNTER
-     * =======================================================
-     */
+    // =======================================================
+    // UPDATE REPLY COUNTER
+    // =======================================================
 
     ticket.replies = Number(ticket.replies || 0) + 1;
-
     ticket.lastReplyAt = new Date();
 
-    /*
-     * =======================================================
-     * STATUS
-     * =======================================================
-     */
+    // =======================================================
+    // STATUS
+    // =======================================================
 
     if (
       ticket.status === "open" ||
@@ -1077,58 +1306,54 @@ export const sendAgentReply = async (req, res) => {
 
       updateLifecycleTimestamps(ticket, previousStatus, "in-progress");
 
-      await addStatusHistory(
+      addStatusHistory({
         ticket,
-        "in-progress",
-        userId,
-        userRole === "admin" ? "admin" : "agent",
-        "Ticket moved to In Progress after agent reply.",
-      );
+        status: "in-progress",
+        changedBy: userId,
+        changedByRole: isAdmin ? "admin" : "agent",
+        note: "Ticket moved to In Progress after agent reply.",
+      });
     }
 
-    /*
-     * =======================================================
-     * SAVE
-     * =======================================================
-     */
+    // =======================================================
+    // SAVE
+    // =======================================================
 
     await ticket.save();
 
-    /*
-     * =======================================================
-     * POPULATE
-     * =======================================================
-     */
+    // =======================================================
+    // POPULATE
+    // =======================================================
 
     await ticket.populate([
       {
         path: "customer",
-        select: "name email avatar phone company",
+        select: "name email avatar profileImage phone company",
       },
       {
         path: "assignedAgent",
-        select: "name email avatar phone",
+        select: "name email avatar profileImage phone role",
       },
       {
         path: "conversation.sender",
-        select: "name email avatar role",
+        select: "name email avatar profileImage role",
       },
     ]);
 
-    /*
-     * =======================================================
-     * SOCKET.IO
-     * =======================================================
-     */
+    // =======================================================
+    // SOCKET.IO
+    // =======================================================
 
     const io = getSocketIO();
 
     if (io) {
       const room = getTicketRoom(ticket._id);
 
+      const latestMessage = ticket.conversation[ticket.conversation.length - 1];
+
       io.to(room).emit("ticket:message", {
         ticketId: ticket._id.toString(),
-        message: ticket.conversation[ticket.conversation.length - 1],
+        message: latestMessage,
       });
 
       io.to(room).emit("ticket:update", {
@@ -1136,11 +1361,9 @@ export const sendAgentReply = async (req, res) => {
       });
     }
 
-    /*
-     * =======================================================
-     * RESPONSE
-     * =======================================================
-     */
+    // =======================================================
+    // RESPONSE
+    // =======================================================
 
     return res.status(200).json({
       success: true,
