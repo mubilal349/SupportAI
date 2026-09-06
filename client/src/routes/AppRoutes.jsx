@@ -32,6 +32,7 @@ import TicketQueue from "../pages/agent/tickets/TicketQueue";
 import AssignedTickets from "../pages/agent/tickets/AssignedTickets";
 import AgentTicketDetails from "../pages/agent/tickets/AgentTicketDetails";
 import AgentProfile from "../pages/agent/AgentProfile";
+import MyTickets from "../pages/agent/tickets/MyTickets";
 
 // Route Protection
 import ProtectedRoute from "./ProtectedRoute";
@@ -61,28 +62,26 @@ const AppRoutes = () => {
           AGENT ROUTES
       ======================================== */}
 
-      <Route
-        path="/agent"
-        element={
-          <ProtectedRoute allowedRoles={["agent", "admin"]}>
-            <AgentLayout />
-          </ProtectedRoute>
-        }
-      >
-        {/* /agent */}
-        <Route index element={<AgentDashboard />} />
+      <Route element={<ProtectedRoute allowedRoles={["agent"]} />}>
+        <Route path="/agent" element={<AgentLayout />}>
+          {/* /agent */}
+          <Route index element={<AgentDashboard />} />
 
-        {/* /agent/queue */}
-        <Route path="queue" element={<TicketQueue />} />
+          {/* /agent/queue */}
+          <Route path="queue" element={<TicketQueue />} />
 
-        {/* /agent/tickets */}
-        <Route path="tickets" element={<AssignedTickets />} />
+          {/* /agent/my-tickets */}
+          <Route path="my-tickets" element={<MyTickets />} />
 
-        {/* /agent/tickets/:ticketId */}
-        <Route path="tickets/:ticketId" element={<AgentTicketDetails />} />
+          {/* /agent/assigned-tickets */}
+          <Route path="assigned-tickets" element={<AssignedTickets />} />
 
-        {/* /agent/profile */}
-        <Route path="profile" element={<AgentProfile />} />
+          {/* /agent/tickets/:ticketId */}
+          <Route path="tickets/:ticketId" element={<AgentTicketDetails />} />
+
+          {/* /agent/profile */}
+          <Route path="profile" element={<AgentProfile />} />
+        </Route>
       </Route>
 
       {/* ========================================

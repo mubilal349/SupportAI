@@ -109,3 +109,11 @@ export const sendAgentReply = async (ticketId, message, files = []) => {
 
   return response.data;
 };
+
+export const getAllAssignedTickets = (params = {}) =>
+  api.get("/agent/assigned-tickets", {
+    params,
+  });
+
+export const getMyTickets = (params = {}) =>
+  api.get("/agent/my-tickets", { params });

@@ -27,7 +27,7 @@ const AgentSidebar = ({ mobileOpen = false, onClose = () => {} }) => {
     },
     {
       label: "My Tickets",
-      path: "/agent/tickets",
+      path: "/agent/my-tickets",
       icon: ClipboardList,
       end: true,
     },
@@ -135,7 +135,7 @@ const AgentSidebar = ({ mobileOpen = false, onClose = () => {} }) => {
 
           <nav className="space-y-1.5">
             <NavLink
-              to="/agent/queue"
+              to="/agent/my-tickets"
               onClick={onClose}
               className="group flex items-center gap-4 rounded-2xl px-4 py-3.5 text-[15px] text-slate-500 transition hover:bg-slate-900/70 hover:text-slate-200"
             >
@@ -154,7 +154,7 @@ const AgentSidebar = ({ mobileOpen = false, onClose = () => {} }) => {
             </NavLink>
 
             <NavLink
-              to="/agent/tickets"
+              to="/agent/assigned-tickets"
               onClick={onClose}
               className="group flex items-center gap-4 rounded-2xl px-4 py-3.5 text-[15px] text-slate-500 transition hover:bg-slate-900/70 hover:text-slate-200"
             >

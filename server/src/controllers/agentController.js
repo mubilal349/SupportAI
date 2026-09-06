@@ -415,116 +415,84 @@ export const getTicketQueue = async (req, res) => {
 
 export const getAssignedTickets = async (req, res) => {
   try {
-    const agentId = getUserId(req);
+    const userId = req.user?._id || req.user?.id;
 
-    if (!agentId) {
+    if (!userId) {
       return res.status(401).json({
-        success: false,
-        message: "Authentication required",
+        message: "Authentication required.",
       });
     }
 
-    const {
-      search = "",
-      status,
-      priority,
-      page = 1,
-      limit = 20,
-      sortBy = "updatedAt",
-      sortOrder = "desc",
-    } = req.query;
+    const { page = 1, limit = 10, status, priority, search } = req.query;
 
-    const currentPage = Math.max(Number(page) || 1, 1);
+    const pageNumber = Math.max(Number(page) || 1, 1);
+    const limitNumber = Math.min(Math.max(Number(limit) || 10, 1), 100);
 
-    const pageLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-
-    const query = {
-      assignedAgent: agentId,
+    /*
+     * =========================================================
+     * ONLY RETURN TICKETS ASSIGNED TO THE CURRENT AGENT
+     * =========================================================
+     */
+    const filter = {
+      assignedAgent: userId,
     };
 
     /*
-     * Status
+     * Status filter
      */
-    if (
-      status &&
-      ["open", "in-progress", "waiting", "resolved", "closed"].includes(status)
-    ) {
-      query.status = status;
+    if (status && status !== "all") {
+      filter.status = status;
     }
 
     /*
-     * Priority
+     * Priority filter
      */
-    if (priority && ["low", "medium", "high"].includes(priority)) {
-      query.priority = priority;
+    if (priority && priority !== "all") {
+      filter.priority = priority;
     }
 
     /*
      * Search
      */
-    if (search.trim()) {
+    if (search?.trim()) {
       const searchRegex = new RegExp(search.trim(), "i");
 
-      query.$or = [
-        {
-          subject: searchRegex,
-        },
-        {
-          ticketNumber: searchRegex,
-        },
-        {
-          description: searchRegex,
-        },
+      filter.$or = [
+        { subject: searchRegex },
+        { ticketNumber: searchRegex },
+        { description: searchRegex },
       ];
     }
 
-    const allowedSortFields = [
-      "createdAt",
-      "updatedAt",
-      "priority",
-      "status",
-      "ticketNumber",
-    ];
+    const skip = (pageNumber - 1) * limitNumber;
 
-    const safeSortBy = allowedSortFields.includes(sortBy)
-      ? sortBy
-      : "updatedAt";
+    const [tickets, total] = await Promise.all([
+      Ticket.find(filter)
+        .populate("customer", "name email avatar phone company")
+        .populate("assignedAgent", "name email avatar role")
+        .sort({ updatedAt: -1 })
+        .skip(skip)
+        .limit(limitNumber)
+        .lean(),
 
-    const safeSortOrder = String(sortOrder).toLowerCase() === "asc" ? 1 : -1;
-
-    const total = await Ticket.countDocuments(query);
-
-    const tickets = await Ticket.find(query)
-      .populate("customer", "name email avatar profileImage")
-      .populate("assignedAgent", "name email avatar profileImage")
-      .sort({
-        [safeSortBy]: safeSortOrder,
-      })
-      .skip((currentPage - 1) * pageLimit)
-      .limit(pageLimit)
-      .lean();
+      Ticket.countDocuments(filter),
+    ]);
 
     return res.status(200).json({
       success: true,
       tickets,
-
       pagination: {
-        page: currentPage,
-        limit: pageLimit,
+        page: pageNumber,
+        limit: limitNumber,
         total,
-        totalPages: Math.ceil(total / pageLimit),
-        hasNextPage: currentPage < Math.ceil(total / pageLimit),
-        hasPreviousPage: currentPage > 1,
+        totalPages: Math.ceil(total / limitNumber),
       },
-
-      total,
     });
   } catch (error) {
     console.error("GET ASSIGNED TICKETS ERROR:", error);
 
     return res.status(500).json({
-      success: false,
-      message: "Failed to load assigned tickets",
+      message: "Failed to load assigned tickets.",
       error: error.message,
     });
   }
@@ -534,6 +502,17 @@ export const getAssignedTickets = async (req, res) => {
  * =========================================================
  * GET SINGLE AGENT TICKET
  * =========================================================
+ *
+ * Admin:
+ *   Can access any ticket.
+ *
+ * Agent:
+ *   Can access ONLY tickets assigned to the
+ *   currently authenticated agent.
+ *
+ * This keeps the Assigned Tickets page and
+ * Ticket Details page consistent.
+ * =========================================================
  */
 
 export const getAgentTicketById = async (req, res) => {
@@ -542,6 +521,13 @@ export const getAgentTicketById = async (req, res) => {
     const role = getUserRole(req);
 
     const { ticketId } = req.params;
+
+    if (!agentId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
 
     const ticket = await Ticket.findById(ticketId)
       .populate("customer", "name email avatar profileImage phone")
@@ -556,11 +542,25 @@ export const getAgentTicketById = async (req, res) => {
     }
 
     /*
-     * Admin can access any ticket.
+     * =======================================================
+     * ADMIN ACCESS
+     * =======================================================
      *
-     * Agent can access:
-     * 1. Their assigned tickets
-     * 2. Unassigned tickets
+     * Admins can view any ticket.
+     */
+    if (role === "admin") {
+      return res.status(200).json({
+        success: true,
+        ticket,
+      });
+    }
+
+    /*
+     * =======================================================
+     * AGENT ACCESS
+     * =======================================================
+     *
+     * Agents can ONLY view tickets assigned to them.
      */
     const assignedAgentId = normalizeId(
       ticket.assignedAgent?._id || ticket.assignedAgent,
@@ -568,18 +568,34 @@ export const getAgentTicketById = async (req, res) => {
 
     const currentAgentId = normalizeId(agentId);
 
-    const isAdmin = role === "admin";
+    /*
+     * Ticket is not assigned to anyone.
+     *
+     * Do not allow a normal agent to access it
+     * from the Assigned Tickets details route.
+     */
+    if (!assignedAgentId) {
+      return res.status(403).json({
+        success: false,
+        message: "This ticket is not assigned to you",
+      });
+    }
 
-    const isAssignedToCurrentAgent = assignedAgentId === currentAgentId;
-
-    const isUnassigned = !ticket.assignedAgent;
-
-    if (!isAdmin && !isAssignedToCurrentAgent && !isUnassigned) {
+    /*
+     * Ticket belongs to another agent.
+     */
+    if (assignedAgentId !== currentAgentId) {
       return res.status(403).json({
         success: false,
         message: "You do not have access to this ticket",
       });
     }
+
+    /*
+     * =======================================================
+     * CURRENT AGENT OWNS THE TICKET
+     * =======================================================
+     */
 
     return res.status(200).json({
       success: true,
@@ -1142,6 +1158,229 @@ export const sendAgentReply = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to send agent reply.",
+      error: error.message,
+    });
+  }
+};
+
+export const getAllAssignedTickets = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 100,
+      status,
+      priority,
+      search,
+      agentId,
+    } = req.query;
+
+    const currentPage = Math.max(Number(page) || 1, 1);
+
+    const pageLimit = Math.min(Math.max(Number(limit) || 100, 1), 100);
+
+    // Only tickets that already have an agent.
+    const filter = {
+      assignedAgent: {
+        $ne: null,
+      },
+    };
+
+    // STATUS FILTER
+    if (
+      status &&
+      status !== "all" &&
+      ["open", "in-progress", "waiting", "resolved", "closed"].includes(status)
+    ) {
+      filter.status = status;
+    }
+
+    // PRIORITY FILTER
+    if (
+      priority &&
+      priority !== "all" &&
+      ["low", "medium", "high"].includes(priority)
+    ) {
+      filter.priority = priority;
+    }
+
+    // AGENT FILTER
+    if (agentId && agentId !== "all") {
+      filter.assignedAgent = agentId;
+    }
+
+    // SEARCH
+    if (search?.trim()) {
+      const searchRegex = new RegExp(search.trim(), "i");
+
+      filter.$or = [
+        {
+          subject: searchRegex,
+        },
+        {
+          ticketNumber: searchRegex,
+        },
+        {
+          description: searchRegex,
+        },
+      ];
+    }
+
+    const skip = (currentPage - 1) * pageLimit;
+
+    const [tickets, total] = await Promise.all([
+      Ticket.find(filter)
+        .populate("customer", "name email avatar profileImage phone company")
+        .populate("assignedAgent", "name email avatar profileImage role")
+        .sort({
+          updatedAt: -1,
+        })
+        .skip(skip)
+        .limit(pageLimit)
+        .lean(),
+
+      Ticket.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+
+      tickets,
+
+      totalAssignedTickets: total,
+
+      pagination: {
+        page: currentPage,
+        limit: pageLimit,
+        total,
+        totalPages: Math.ceil(total / pageLimit),
+        hasNextPage: currentPage < Math.ceil(total / pageLimit),
+        hasPreviousPage: currentPage > 1,
+      },
+    });
+  } catch (error) {
+    console.error("GET ALL ASSIGNED TICKETS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load all assigned tickets.",
+      error: error.message,
+    });
+  }
+};
+
+// //
+//   MY-TICKETS
+//  //
+
+export const getMyTickets = async (req, res) => {
+  try {
+    const agentId = req.user?._id || req.user?.id;
+
+    if (!agentId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    const { page = 1, limit = 100, status, priority, search } = req.query;
+
+    const currentPage = Math.max(Number(page) || 1, 1);
+
+    const pageLimit = Math.min(Math.max(Number(limit) || 100, 1), 100);
+
+    /*
+     * SECURITY:
+     *
+     * Always use the authenticated user's ID.
+     *
+     * The frontend cannot choose which agent's
+     * tickets to retrieve.
+     */
+    const filter = {
+      assignedAgent: agentId,
+    };
+
+    /* =====================================================
+       STATUS
+    ===================================================== */
+
+    if (
+      status &&
+      status !== "all" &&
+      ["open", "in-progress", "waiting", "resolved", "closed"].includes(status)
+    ) {
+      filter.status = status;
+    }
+
+    /* =====================================================
+       PRIORITY
+    ===================================================== */
+
+    if (
+      priority &&
+      priority !== "all" &&
+      ["low", "medium", "high", "urgent"].includes(priority)
+    ) {
+      filter.priority = priority;
+    }
+
+    /* =====================================================
+       SEARCH
+    ===================================================== */
+
+    if (search?.trim()) {
+      const searchRegex = new RegExp(search.trim(), "i");
+
+      filter.$or = [
+        {
+          subject: searchRegex,
+        },
+        {
+          ticketNumber: searchRegex,
+        },
+        {
+          description: searchRegex,
+        },
+      ];
+    }
+
+    const skip = (currentPage - 1) * pageLimit;
+
+    const [tickets, total] = await Promise.all([
+      Ticket.find(filter)
+        .populate("customer", "name email avatar profileImage phone company")
+        .populate("assignedAgent", "name email avatar profileImage role")
+        .sort({
+          updatedAt: -1,
+        })
+        .skip(skip)
+        .limit(pageLimit)
+        .lean(),
+
+      Ticket.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+
+      tickets,
+
+      pagination: {
+        page: currentPage,
+        limit: pageLimit,
+        total,
+        totalPages: Math.ceil(total / pageLimit),
+        hasNextPage: currentPage < Math.ceil(total / pageLimit),
+        hasPreviousPage: currentPage > 1,
+      },
+    });
+  } catch (error) {
+    console.error("GET MY TICKETS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load your tickets.",
       error: error.message,
     });
   }

@@ -242,11 +242,13 @@ const AgentTicketDetails = () => {
   const [selectedFiles, setSelectedFiles] = useState([]);
 
   const [sendingReply, setSendingReply] = useState(false);
-  const [assigning, setAssigning] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [updatingPriority, setUpdatingPriority] = useState(false);
 
   const [previewImage, setPreviewImage] = useState(null);
+
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState("");
 
   /*
   |--------------------------------------------------------------------------
@@ -654,62 +656,114 @@ const AgentTicketDetails = () => {
   };
 
   /*
-  |--------------------------------------------------------------------------
-  | Assign ticket
-  |--------------------------------------------------------------------------
-  */
-
+|--------------------------------------------------------------------------
+| Assign ticket to current agent
+|--------------------------------------------------------------------------
+*/
   const handleAssignToMe = async () => {
-    if (!ticket?.id && !ticket?._id) {
+    const id = ticket?.id || ticket?._id;
+
+    if (!id) {
+      setAssignError("Ticket ID is missing.");
+      return;
+    }
+
+    /*
+     * Prevent duplicate assignment requests.
+     */
+    if (assigning) {
+      return;
+    }
+
+    /*
+     * If the ticket is already assigned to the current agent,
+     * there is nothing to do.
+     */
+    if (isAssignedToCurrentUser) {
+      setSuccess("This ticket is already assigned to you.");
+      return;
+    }
+
+    /*
+     * If another agent is already assigned, don't attempt
+     * to overwrite that assignment from the frontend.
+     */
+    if (assignedAgent && !isAssignedToCurrentUser) {
+      setAssignError("This ticket is already assigned to another agent.");
       return;
     }
 
     try {
       setAssigning(true);
+      setAssignError("");
       setError("");
       setSuccess("");
 
-      const id = ticket.id || ticket._id;
+      console.log("ASSIGNING TICKET:", id);
 
       const response = await assignTicketToMe(id);
+
+      console.log("ASSIGN TICKET RESPONSE:", response);
 
       const updatedTicket =
         response?.ticket || response?.data?.ticket || response?.data || null;
 
       if (updatedTicket) {
-        setTicket((previous) => ({
-          ...previous,
-          ...updatedTicket,
+        setTicket((previous) => {
+          if (!previous) {
+            return previous;
+          }
 
-          id: updatedTicket.id || updatedTicket._id || previous.id,
+          return {
+            ...previous,
+            ...updatedTicket,
 
-          _id: updatedTicket._id || updatedTicket.id || previous._id,
+            id: updatedTicket.id || updatedTicket._id || previous.id,
 
-          conversation: Array.isArray(updatedTicket.conversation)
-            ? updatedTicket.conversation
-            : previous.conversation || [],
+            _id: updatedTicket._id || updatedTicket.id || previous._id,
 
-          attachments: Array.isArray(updatedTicket.attachments)
-            ? updatedTicket.attachments
-            : previous.attachments || [],
+            assignedAgent:
+              updatedTicket.assignedAgent || user || previous.assignedAgent,
 
-          statusHistory: Array.isArray(updatedTicket.statusHistory)
-            ? updatedTicket.statusHistory
-            : previous.statusHistory || [],
-        }));
+            conversation: Array.isArray(updatedTicket.conversation)
+              ? updatedTicket.conversation
+              : previous.conversation || [],
+
+            attachments: Array.isArray(updatedTicket.attachments)
+              ? updatedTicket.attachments
+              : previous.attachments || [],
+
+            statusHistory: Array.isArray(updatedTicket.statusHistory)
+              ? updatedTicket.statusHistory
+              : previous.statusHistory || [],
+          };
+        });
       } else {
+        /*
+         * Backend didn't return the complete ticket.
+         * Reload it so assignment is confirmed from the server.
+         */
         await loadTicket(false);
       }
 
       setSuccess("Ticket assigned to you successfully.");
+
+      /*
+       * Automatically remove the success message after a few seconds.
+       */
+      setTimeout(() => {
+        setSuccess("");
+      }, 3000);
     } catch (err) {
       console.error("ASSIGN TICKET ERROR:", err);
 
-      setError(
+      const message =
         err?.response?.data?.message ||
-          err?.message ||
-          "Failed to assign ticket.",
-      );
+        err?.response?.data?.error ||
+        err?.message ||
+        "Failed to assign ticket.";
+
+      setAssignError(message);
     } finally {
       setAssigning(false);
     }
@@ -1125,17 +1179,25 @@ const AgentTicketDetails = () => {
 
   const assignedAgent = ticket.assignedAgent || null;
 
+  const assignedAgentId = getId(assignedAgent);
+  const currentUserId = getId(user);
+
+  const isAssigned = Boolean(assignedAgentId);
+
   const isAssignedToCurrentUser =
-    getId(assignedAgent) &&
-    getId(user) &&
-    String(getId(assignedAgent)) === String(getId(user));
+    Boolean(assignedAgentId) &&
+    Boolean(currentUserId) &&
+    String(assignedAgentId) === String(currentUserId);
+
+  const isAssignedToAnotherAgent = isAssigned && !isAssignedToCurrentUser;
+
+  const isUnassigned = !isAssigned;
 
   const isClosed = String(ticket.status || "").toLowerCase() === "closed";
 
   const isResolved = String(ticket.status || "").toLowerCase() === "resolved";
 
   const canReply = !isClosed;
-
   /*
   |--------------------------------------------------------------------------
   | Render
@@ -1807,54 +1869,67 @@ const AgentTicketDetails = () => {
 
             {/* Assignment */}
 
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-              <div className="mb-4 flex items-center gap-2">
-                <UserCheck className="h-5 w-5 text-violet-400" />
+            {/* =========================================================
+    ASSIGNMENT
+========================================================= */}
 
-                <h2 className="font-semibold text-white">Assignment</h2>
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="h-5 w-5 text-violet-400" />
+
+                  <h2 className="font-semibold text-white">Assignment</h2>
+                </div>
+
+                {isAssigned && (
+                  <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-400">
+                    Assigned
+                  </span>
+                )}
               </div>
 
-              {assignedAgent ? (
-                <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-                  <div className="flex items-center gap-3">
-                    {assignedAgent.avatar ? (
-                      <img
-                        src={getAvatarUrl(assignedAgent.avatar)}
-                        alt={assignedAgent.name || "Agent"}
-                        className="h-10 w-10 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-800">
-                        <UserCheck className="h-5 w-5 text-slate-400" />
+              {/* =======================================================
+      UNASSIGNED
+  ======================================================= */}
+
+              {isUnassigned && (
+                <div>
+                  <div className="mb-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
+                        <UserCheck className="h-4 w-4 text-amber-400" />
                       </div>
-                    )}
 
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-white">
-                        {assignedAgent.name}
-                      </p>
+                      <div>
+                        <p className="text-sm font-medium text-amber-300">
+                          Ticket is unassigned
+                        </p>
 
-                      <p className="text-xs text-slate-500">
-                        {isAssignedToCurrentUser
-                          ? "Assigned to you"
-                          : "Assigned agent"}
-                      </p>
+                        <p className="mt-1 text-xs leading-5 text-amber-400/70">
+                          Take ownership of this ticket to start working on the
+                          customer's request.
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ) : (
-                <div>
-                  <div className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
-                    <p className="text-xs text-amber-400">
-                      This ticket is currently unassigned.
-                    </p>
-                  </div>
+
+                  {assignError && (
+                    <div className="mb-3 rounded-xl border border-red-500/20 bg-red-500/5 p-3">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+
+                        <p className="text-xs leading-5 text-red-300">
+                          {assignError}
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   <button
                     type="button"
                     onClick={handleAssignToMe}
                     disabled={assigning}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-600/10 transition-all duration-200 hover:bg-violet-500 hover:shadow-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {assigning ? (
                       <>
@@ -1868,6 +1943,96 @@ const AgentTicketDetails = () => {
                       </>
                     )}
                   </button>
+                </div>
+              )}
+
+              {/* =======================================================
+      ASSIGNED TO CURRENT AGENT
+  ======================================================= */}
+
+              {isAssignedToCurrentUser && (
+                <div>
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+                    <div className="flex items-center gap-3">
+                      {assignedAgent?.avatar ? (
+                        <img
+                          src={getAvatarUrl(assignedAgent.avatar)}
+                          alt={assignedAgent.name || "Agent"}
+                          className="h-11 w-11 rounded-full object-cover ring-2 ring-emerald-500/20"
+                        />
+                      ) : (
+                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500/10">
+                          <UserCheck className="h-5 w-5 text-emerald-400" />
+                        </div>
+                      )}
+
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-white">
+                          {assignedAgent?.name || user?.name || "You"}
+                        </p>
+
+                        <p className="mt-0.5 text-xs text-emerald-400">
+                          This ticket is assigned to you
+                        </p>
+                      </div>
+
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/10">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {assignError && (
+                    <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/5 p-3">
+                      <p className="text-xs text-red-300">{assignError}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* =======================================================
+      ASSIGNED TO ANOTHER AGENT
+  ======================================================= */}
+
+              {isAssignedToAnotherAgent && (
+                <div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
+                    <div className="flex items-center gap-3">
+                      {assignedAgent?.avatar ? (
+                        <img
+                          src={getAvatarUrl(assignedAgent.avatar)}
+                          alt={assignedAgent.name || "Agent"}
+                          className="h-11 w-11 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-800">
+                          <UserCheck className="h-5 w-5 text-slate-400" />
+                        </div>
+                      )}
+
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-white">
+                          {assignedAgent?.name || "Another agent"}
+                        </p>
+
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          This ticket is assigned to another agent
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {assignError && (
+                    <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/5 p-3">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+
+                        <p className="text-xs leading-5 text-red-300">
+                          {assignError}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </section>
