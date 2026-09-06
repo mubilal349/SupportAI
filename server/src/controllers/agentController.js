@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Ticket from "../models/Ticket.js";
 import { getSocketIO, getTicketRoom } from "../socket/socket.js";
 
