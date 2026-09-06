@@ -12,17 +12,34 @@ import {
 } from "lucide-react";
 
 import { Link } from "react-router-dom";
+
 import {
   assignTicketToMe,
   getTicketQueue,
 } from "../../../services/agentService";
 
+/* =========================================================
+   RESPONSE NORMALIZER
+========================================================= */
+
 const normalizeTickets = (response) => {
   const data =
-    response?.data?.tickets || response?.tickets || response?.data || [];
+    response?.data?.tickets ?? response?.tickets ?? response?.data ?? [];
 
   return Array.isArray(data) ? data : [];
 };
+
+/* =========================================================
+   ID HELPER
+========================================================= */
+
+const getTicketId = (ticket) => {
+  return ticket?._id || ticket?.id || null;
+};
+
+/* =========================================================
+   PRIORITY STYLES
+========================================================= */
 
 const getPriorityStyles = (priority) => {
   const value = String(priority || "").toLowerCase();
@@ -39,37 +56,90 @@ const getPriorityStyles = (priority) => {
     return "bg-amber-500/10 text-amber-400 border-amber-500/20";
   }
 
+  if (value === "low") {
+    return "bg-slate-800 text-slate-400 border-slate-700";
+  }
+
   return "bg-slate-800 text-slate-400 border-slate-700";
 };
+
+/* =========================================================
+   STATUS STYLES
+========================================================= */
 
 const getStatusStyles = (status) => {
   const value = String(status || "").toLowerCase();
 
-  if (value.includes("resolved") || value.includes("closed")) {
+  if (value === "resolved" || value === "closed") {
     return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
   }
 
-  if (value.includes("progress")) {
+  if (value === "in-progress" || value === "in_progress") {
     return "bg-blue-500/10 text-blue-400 border-blue-500/20";
   }
 
-  if (value.includes("pending")) {
+  if (value === "waiting" || value === "pending") {
     return "bg-amber-500/10 text-amber-400 border-amber-500/20";
+  }
+
+  if (value === "open") {
+    return "bg-cyan-500/10 text-cyan-400 border-cyan-500/20";
   }
 
   return "bg-slate-800 text-slate-400 border-slate-700";
 };
 
+/* =========================================================
+   STATUS LABEL
+========================================================= */
+
+const getStatusLabel = (status) => {
+  const value = String(status || "").toLowerCase();
+
+  if (value === "in-progress" || value === "in_progress") {
+    return "In Progress";
+  }
+
+  if (value === "waiting" || value === "pending") {
+    return "Waiting";
+  }
+
+  if (value === "open") {
+    return "Open";
+  }
+
+  if (value === "resolved") {
+    return "Resolved";
+  }
+
+  if (value === "closed") {
+    return "Closed";
+  }
+
+  return status || "Open";
+};
+
+/* =========================================================
+   TICKET QUEUE
+========================================================= */
+
 const TicketQueue = () => {
   const [tickets, setTickets] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
   const [assigningId, setAssigningId] = useState(null);
+
   const [error, setError] = useState("");
 
   const [search, setSearch] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+
+  /* =========================================================
+     LOAD TICKETS
+  ========================================================= */
 
   const loadTickets = async (isRefresh = false) => {
     try {
@@ -81,11 +151,30 @@ const TicketQueue = () => {
 
       setError("");
 
+      /*
+       * We intentionally load the available queue and perform
+       * the visible filters on the client.
+       *
+       * Backend already guarantees that only unassigned tickets
+       * are returned.
+       */
+
       const response = await getTicketQueue();
 
-      setTickets(normalizeTickets(response));
+      const normalizedTickets = normalizeTickets(response);
+
+      console.log("========================================");
+      console.log("AGENT TICKET QUEUE");
+      console.log("Raw response:", response);
+      console.log("Tickets:", normalizedTickets);
+      console.log("Ticket count:", normalizedTickets.length);
+      console.log("========================================");
+
+      setTickets(normalizedTickets);
     } catch (err) {
-      console.error("Ticket queue error:", err);
+      console.error("TICKET QUEUE ERROR:", err);
+
+      setTickets([]);
 
       setError(
         err?.response?.data?.message ||
@@ -98,15 +187,25 @@ const TicketQueue = () => {
     }
   };
 
+  /* =========================================================
+     INITIAL LOAD
+  ========================================================= */
+
   useEffect(() => {
     loadTickets();
   }, []);
+
+  /* =========================================================
+     CLIENT-SIDE FILTERING
+  ========================================================= */
 
   const filteredTickets = useMemo(() => {
     const query = search.trim().toLowerCase();
 
     return tickets.filter((ticket) => {
       const subject = ticket?.subject || ticket?.title || "";
+
+      const description = ticket?.description || ticket?.message || "";
 
       const customer =
         ticket?.customer?.name ||
@@ -121,16 +220,43 @@ const TicketQueue = () => {
         ticket?._id ||
         "";
 
-      const matchesSearch =
-        !query ||
-        `${subject} ${customer} ${ticketNumber}`.toLowerCase().includes(query);
+      /* ---------------------------------------------
+         SEARCH
+      --------------------------------------------- */
+
+      const searchableText = `
+        ${subject}
+        ${description}
+        ${customer}
+        ${ticketNumber}
+      `.toLowerCase();
+
+      const matchesSearch = !query || searchableText.includes(query);
+
+      /* ---------------------------------------------
+         PRIORITY
+      --------------------------------------------- */
 
       const priority = String(ticket?.priority || "").toLowerCase();
 
-      const status = String(ticket?.status || "").toLowerCase();
-
       const matchesPriority =
         priorityFilter === "all" || priority === priorityFilter;
+
+      /* ---------------------------------------------
+         STATUS
+      --------------------------------------------- */
+
+      const status = String(ticket?.status || "").toLowerCase();
+
+      /*
+       * Backend status:
+       *
+       * open
+       * waiting
+       * in-progress
+       *
+       * Frontend filter uses the same values.
+       */
 
       const matchesStatus = statusFilter === "all" || status === statusFilter;
 
@@ -138,8 +264,14 @@ const TicketQueue = () => {
     });
   }, [tickets, search, priorityFilter, statusFilter]);
 
+  /* =========================================================
+     ASSIGN TICKET
+  ========================================================= */
+
   const handleAssign = async (ticketId) => {
-    if (!ticketId) return;
+    if (!ticketId) {
+      return;
+    }
 
     try {
       setAssigningId(ticketId);
@@ -147,11 +279,18 @@ const TicketQueue = () => {
 
       await assignTicketToMe(ticketId);
 
+      /*
+       * Remove ticket from available queue immediately because
+       * it is no longer unassigned.
+       */
+
       setTickets((current) =>
-        current.filter((ticket) => (ticket?._id || ticket?.id) !== ticketId),
+        current.filter(
+          (ticket) => String(getTicketId(ticket)) !== String(ticketId),
+        ),
       );
     } catch (err) {
-      console.error("Assign ticket error:", err);
+      console.error("ASSIGN TICKET ERROR:", err);
 
       setError(
         err?.response?.data?.message ||
@@ -163,22 +302,32 @@ const TicketQueue = () => {
     }
   };
 
+  /* =========================================================
+     LOADING STATE
+  ========================================================= */
+
   if (loading) {
     return (
       <div className="flex min-h-[calc(100vh-110px)] items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <Loader2 size={32} className="animate-spin text-blue-500" />
+
           <p className="text-sm text-slate-500">Loading ticket queue...</p>
         </div>
       </div>
     );
   }
 
+  /* =========================================================
+     PAGE
+  ========================================================= */
+
   return (
     <div className="mx-auto w-full max-w-[1500px] px-4 py-8 sm:px-6 lg:px-10 lg:py-12">
-      {/* =========================================================
+      {/* =====================================================
           HEADER
-      ========================================================= */}
+      ===================================================== */}
+
       <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-400">
@@ -197,29 +346,34 @@ const TicketQueue = () => {
         <button
           type="button"
           onClick={() => loadTickets(true)}
-          className="flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-4 text-sm font-medium text-slate-400 transition hover:border-blue-500/30 hover:text-white"
+          disabled={refreshing}
+          className="flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-4 text-sm font-medium text-slate-400 transition hover:border-blue-500/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
         >
           <RefreshCw size={17} className={refreshing ? "animate-spin" : ""} />
           Refresh
         </button>
       </div>
 
-      {/* =========================================================
+      {/* =====================================================
           ERROR
-      ========================================================= */}
+      ===================================================== */}
+
       {error && (
         <div className="mt-6 flex items-center gap-3 rounded-2xl border border-red-500/20 bg-red-500/5 px-5 py-4">
-          <AlertCircle size={19} className="text-red-400" />
+          <AlertCircle size={19} className="shrink-0 text-red-400" />
 
           <p className="text-sm text-red-300">{error}</p>
         </div>
       )}
 
-      {/* =========================================================
+      {/* =====================================================
           FILTERS
-      ========================================================= */}
+      ===================================================== */}
+
       <div className="mt-8 rounded-3xl border border-slate-800 bg-[#0a1425] p-4">
         <div className="flex flex-col gap-3 lg:flex-row">
+          {/* SEARCH */}
+
           <div className="relative flex-1">
             <Search
               size={19}
@@ -235,7 +389,9 @@ const TicketQueue = () => {
             />
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
+            {/* PRIORITY */}
+
             <div className="relative">
               <Filter
                 size={17}
@@ -248,12 +404,18 @@ const TicketQueue = () => {
                 className="h-12 appearance-none rounded-2xl border border-slate-800 bg-slate-900/60 pl-10 pr-9 text-sm text-slate-400 outline-none focus:border-blue-500/40"
               >
                 <option value="all">All Priority</option>
+
                 <option value="urgent">Urgent</option>
+
                 <option value="high">High</option>
+
                 <option value="medium">Medium</option>
+
                 <option value="low">Low</option>
               </select>
             </div>
+
+            {/* STATUS */}
 
             <select
               value={statusFilter}
@@ -261,17 +423,25 @@ const TicketQueue = () => {
               className="h-12 rounded-2xl border border-slate-800 bg-slate-900/60 px-4 text-sm text-slate-400 outline-none focus:border-blue-500/40"
             >
               <option value="all">All Status</option>
+
               <option value="open">Open</option>
-              <option value="pending">Pending</option>
-              <option value="in_progress">In Progress</option>
+
+              <option value="waiting">Waiting</option>
+
+              <option value="in-progress">In Progress</option>
+
+              <option value="resolved">Resolved</option>
+
+              <option value="closed">Closed</option>
             </select>
           </div>
         </div>
       </div>
 
-      {/* =========================================================
+      {/* =====================================================
           SUMMARY
-      ========================================================= */}
+      ===================================================== */}
+
       <div className="mt-7 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
@@ -284,19 +454,21 @@ const TicketQueue = () => {
             </p>
 
             <p className="text-xs text-slate-600">
-              {filteredTickets.length} tickets found
+              {filteredTickets.length}{" "}
+              {filteredTickets.length === 1 ? "ticket" : "tickets"} found
             </p>
           </div>
         </div>
       </div>
 
-      {/* =========================================================
+      {/* =====================================================
           TICKETS
-      ========================================================= */}
+      ===================================================== */}
+
       <div className="mt-5 space-y-4">
         {filteredTickets.length > 0 ? (
           filteredTickets.map((ticket) => {
-            const id = ticket?._id || ticket?.id;
+            const id = getTicketId(ticket);
 
             const customer =
               ticket?.customer?.name ||
@@ -310,12 +482,18 @@ const TicketQueue = () => {
                 className="group rounded-3xl border border-slate-800 bg-[#0a1425] p-6 transition duration-300 hover:border-slate-700 hover:bg-[#0c172a]"
               >
                 <div className="flex flex-col gap-5 xl:flex-row xl:items-center">
-                  {/* ICON */}
+                  {/* =================================================
+                      ICON
+                  ================================================= */}
+
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-400">
                     <MessageSquareIcon />
                   </div>
 
-                  {/* CONTENT */}
+                  {/* =================================================
+                      CONTENT
+                  ================================================= */}
+
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs font-medium text-slate-600">
@@ -330,7 +508,10 @@ const TicketQueue = () => {
                           ticket?.priority,
                         )}`}
                       >
-                        {ticket?.priority || "Low"}
+                        {ticket?.priority
+                          ? String(ticket.priority).charAt(0).toUpperCase() +
+                            String(ticket.priority).slice(1)
+                          : "Low"}
                       </span>
                     </div>
 
@@ -352,6 +533,7 @@ const TicketQueue = () => {
 
                       <span className="flex items-center gap-2">
                         <Clock3 size={14} />
+
                         {ticket?.createdAt
                           ? new Date(ticket.createdAt).toLocaleString()
                           : "Recently"}
@@ -359,21 +541,27 @@ const TicketQueue = () => {
                     </div>
                   </div>
 
-                  {/* STATUS */}
+                  {/* =================================================
+                      STATUS
+                  ================================================= */}
+
                   <div className="flex items-center gap-3">
                     <span
                       className={`rounded-full border px-3 py-1.5 text-xs font-medium ${getStatusStyles(
                         ticket?.status,
                       )}`}
                     >
-                      {ticket?.status || "Open"}
+                      {getStatusLabel(ticket?.status)}
                     </span>
                   </div>
 
-                  {/* ACTIONS */}
-                  <div className="flex gap-2">
+                  {/* =================================================
+                      ACTIONS
+                  ================================================= */}
+
+                  <div className="flex flex-wrap gap-2">
                     <Link
-                      to={id ? `/agent/tickets/${id}` : "/agent/tickets"}
+                      to={id ? `/agent/tickets/${id}` : "/agent/queue"}
                       className="flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-4 text-sm font-medium text-slate-300 transition hover:border-blue-500/30 hover:text-white"
                     >
                       View
@@ -388,7 +576,10 @@ const TicketQueue = () => {
                         className="flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {assigningId === id ? (
-                          <Loader2 size={16} className="animate-spin" />
+                          <>
+                            <Loader2 size={16} className="animate-spin" />
+                            Assigning...
+                          </>
                         ) : (
                           "Assign to me"
                         )}
@@ -410,14 +601,34 @@ const TicketQueue = () => {
             </h3>
 
             <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
-              There are no tickets matching your current filters.
+              {tickets.length === 0
+                ? "There are currently no unassigned tickets available."
+                : "There are no tickets matching your current filters."}
             </p>
+
+            {(search || priorityFilter !== "all" || statusFilter !== "all") && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch("");
+                  setPriorityFilter("all");
+                  setStatusFilter("all");
+                }}
+                className="mt-5 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm font-medium text-slate-400 transition hover:border-blue-500/30 hover:text-white"
+              >
+                Clear Filters
+              </button>
+            )}
           </div>
         )}
       </div>
     </div>
   );
 };
+
+/* =========================================================
+   MESSAGE ICON
+========================================================= */
 
 const MessageSquareIcon = () => (
   <svg

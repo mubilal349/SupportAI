@@ -271,63 +271,111 @@ export const getTicketQueue = async (req, res) => {
       sortOrder = "desc",
     } = req.query;
 
+    // =======================================================
+    // PAGINATION
+    // =======================================================
+
     const currentPage = Math.max(Number(page) || 1, 1);
 
     const pageLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
 
-    /*
-     * Only tickets without an assigned agent
-     */
+    const skip = (currentPage - 1) * pageLimit;
+
+    // =======================================================
+    // ONLY UNASSIGNED TICKETS
+    // =======================================================
+    //
+    // $exists: false handles older tickets where the
+    // assignedAgent field doesn't exist at all.
+    //
+    // $eq: null handles:
+    //
+    // assignedAgent: null
+    //
+    // Both are treated as available tickets.
+    // =======================================================
+
     const query = {
-      assignedAgent: null,
+      $or: [{ assignedAgent: null }, { assignedAgent: { $exists: false } }],
     };
 
-    /*
-     * Status filter
-     */
-    if (
-      status &&
-      ["open", "in-progress", "waiting", "resolved", "closed"].includes(status)
-    ) {
+    // =======================================================
+    // STATUS FILTER
+    // =======================================================
+
+    const allowedStatuses = [
+      "open",
+      "in-progress",
+      "waiting",
+      "resolved",
+      "closed",
+    ];
+
+    if (status && status !== "all") {
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status. Allowed statuses: ${allowedStatuses.join(
+            ", ",
+          )}`,
+        });
+      }
+
       query.status = status;
     } else {
-      /*
-       * By default only actionable tickets
-       */
+      // Default queue = actionable tickets only
       query.status = {
         $in: ["open", "waiting"],
       };
     }
 
-    /*
-     * Priority filter
-     */
-    if (priority && ["low", "medium", "high"].includes(priority)) {
+    // =======================================================
+    // PRIORITY FILTER
+    // =======================================================
+
+    const allowedPriorities = ["low", "medium", "high", "urgent"];
+
+    if (priority && priority !== "all") {
+      if (!allowedPriorities.includes(priority)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid priority. Allowed priorities: ${allowedPriorities.join(
+            ", ",
+          )}`,
+        });
+      }
+
       query.priority = priority;
     }
 
-    /*
-     * Search
-     */
-    if (search.trim()) {
+    // =======================================================
+    // SEARCH
+    // =======================================================
+
+    if (search?.trim()) {
       const searchRegex = new RegExp(search.trim(), "i");
 
-      query.$or = [
+      query.$and = [
         {
-          subject: searchRegex,
-        },
-        {
-          ticketNumber: searchRegex,
-        },
-        {
-          description: searchRegex,
+          $or: [
+            {
+              subject: searchRegex,
+            },
+            {
+              ticketNumber: searchRegex,
+            },
+            {
+              description: searchRegex,
+            },
+          ],
         },
       ];
     }
 
-    /*
-     * Safe sorting
-     */
+    // =======================================================
+    // SAFE SORTING
+    // =======================================================
+
     const allowedSortFields = [
       "createdAt",
       "updatedAt",
@@ -342,52 +390,108 @@ export const getTicketQueue = async (req, res) => {
 
     const safeSortOrder = String(sortOrder).toLowerCase() === "asc" ? 1 : -1;
 
+    // =======================================================
+    // PRIORITY SORTING
+    // =======================================================
+
+    if (safeSortBy === "priority") {
+      /*
+       * MongoDB alphabetical sorting is:
+       *
+       * high
+       * low
+       * medium
+       * urgent
+       *
+       * We want:
+       *
+       * urgent
+       * high
+       * medium
+       * low
+       */
+
+      const priorityOrder = {
+        urgent: 1,
+        high: 2,
+        medium: 3,
+        low: 4,
+      };
+
+      const total = await Ticket.countDocuments(query);
+
+      let tickets = await Ticket.find(query)
+        .populate("customer", "name email avatar profileImage phone company")
+        .populate(
+          "assignedAgent",
+          "name email avatar profileImage phone company role",
+        )
+        .sort({
+          createdAt: -1,
+        })
+        .lean();
+
+      tickets.sort((a, b) => {
+        const aPriority = priorityOrder[a.priority] || 99;
+        const bPriority = priorityOrder[b.priority] || 99;
+
+        return safeSortOrder === -1
+          ? bPriority - aPriority
+          : aPriority - bPriority;
+      });
+
+      // Apply pagination AFTER priority sorting
+      tickets = tickets.slice(skip, skip + pageLimit);
+
+      return res.status(200).json({
+        success: true,
+        tickets,
+
+        pagination: {
+          page: currentPage,
+          limit: pageLimit,
+          total,
+          totalPages: Math.ceil(total / pageLimit),
+          hasNextPage: currentPage < Math.ceil(total / pageLimit),
+          hasPreviousPage: currentPage > 1,
+        },
+
+        total,
+      });
+    }
+
+    // =======================================================
+    // NORMAL DATABASE SORTING
+    // =======================================================
+
     const sort = {
       [safeSortBy]: safeSortOrder,
     };
 
-    /*
-     * Priority ordering
-     *
-     * MongoDB's normal alphabetical order isn't ideal:
-     *
-     * high
-     * low
-     * medium
-     *
-     * So we fetch and then sort priority in memory
-     * when priority sorting is requested.
-     */
+    // =======================================================
+    // TOTAL COUNT
+    // =======================================================
 
     const total = await Ticket.countDocuments(query);
 
-    let tickets = await Ticket.find(query)
-      .populate("customer", "name email avatar profileImage")
-      .populate("assignedAgent", "name email avatar profileImage")
+    // =======================================================
+    // FETCH TICKETS
+    // =======================================================
+
+    const tickets = await Ticket.find(query)
+      .populate("customer", "name email avatar profileImage phone company")
+      .populate(
+        "assignedAgent",
+        "name email avatar profileImage phone company role",
+      )
       .sort(sort)
-      .skip((currentPage - 1) * pageLimit)
+      .skip(skip)
       .limit(pageLimit)
       .lean();
 
-    /*
-     * Priority sorting
-     */
-    if (safeSortBy === "priority") {
-      const priorityOrder = {
-        high: 1,
-        medium: 2,
-        low: 3,
-      };
-
-      tickets.sort(
-        (a, b) =>
-          (priorityOrder[a.priority] || 99) - (priorityOrder[b.priority] || 99),
-      );
-
-      if (safeSortOrder === -1) {
-        tickets.reverse();
-      }
-    }
+    // =======================================================
+    // RESPONSE
+    // =======================================================
 
     return res.status(200).json({
       success: true,
@@ -405,7 +509,12 @@ export const getTicketQueue = async (req, res) => {
       total,
     });
   } catch (error) {
-    console.error("GET TICKET QUEUE ERROR:", error);
+    console.error("========================================");
+    console.error("GET TICKET QUEUE ERROR");
+    console.error("NAME:", error.name);
+    console.error("MESSAGE:", error.message);
+    console.error("STACK:", error.stack);
+    console.error("========================================");
 
     return res.status(500).json({
       success: false,
@@ -593,10 +702,22 @@ export const getAgentTicketById = async (req, res) => {
     // -------------------------------------------------------
 
     if (!assignedAgentId) {
-      return res.status(403).json({
-        success: false,
-        message: "This ticket is not assigned to you",
+      ticket.assignedAgent = agentId;
+
+      addStatusHistory({
+        ticket,
+        status: ticket.status,
+        changedBy: agentId,
+        changedByRole: "agent",
+        note: "Ticket automatically assigned when agent opened the ticket.",
       });
+
+      await ticket.save();
+
+      await ticket.populate(
+        "assignedAgent",
+        "name email avatar profileImage phone company role",
+      );
     }
 
     // -------------------------------------------------------
