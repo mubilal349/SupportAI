@@ -64,6 +64,7 @@ const BackToTop = () => {
         focus:ring-blue-500/50
         sm:bottom-8
         sm:right-8
+        cursor-pointer
       "
     >
       <ArrowUp size={20} strokeWidth={2.2} />
