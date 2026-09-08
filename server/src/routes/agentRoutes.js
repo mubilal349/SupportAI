@@ -9,6 +9,7 @@ import {
   getMyTickets,
   getTicketQueue,
   sendAgentReply,
+  addInternalNote,
   updateTicketPriority,
   updateTicketStatus,
 } from "../controllers/agentController.js";
@@ -91,5 +92,12 @@ router.post(
   uploadTicket.array("attachments", 5),
   sendAgentReply,
 );
+
+/* =========================================================
+   INTERNAL NOTE
+   Only agents/admins can create private notes
+========================================================= */
+
+router.post("/tickets/:ticketId/internal-note", addInternalNote);
 
 export default router;

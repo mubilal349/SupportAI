@@ -117,3 +117,11 @@ export const getAllAssignedTickets = (params = {}) =>
 
 export const getMyTickets = (params = {}) =>
   api.get("/agent/my-tickets", { params });
+
+export const addInternalNote = async (ticketId, message) => {
+  const response = await api.post(`/agent/tickets/${ticketId}/internal-note`, {
+    message,
+  });
+
+  return response.data;
+};

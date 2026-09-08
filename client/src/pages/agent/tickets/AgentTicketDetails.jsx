@@ -31,6 +31,7 @@ import {
   sendAgentReply,
   updateAgentTicketPriority,
   updateAgentTicketStatus,
+  addInternalNote,
 } from "../../../services/agentService";
 
 import { useAuth } from "../../../context/AuthContext";
@@ -249,6 +250,10 @@ const AgentTicketDetails = () => {
 
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState("");
+
+  const [internalNote, setInternalNote] = useState("");
+  const [isAddingInternalNote, setIsAddingInternalNote] = useState(false);
+  const [internalNoteError, setInternalNoteError] = useState("");
 
   /*
   |--------------------------------------------------------------------------
@@ -766,6 +771,76 @@ const AgentTicketDetails = () => {
       setAssignError(message);
     } finally {
       setAssigning(false);
+    }
+  };
+
+  /*
+  |--------------------------------------------------------------------------
+  | HANDLEADDINTERNALNOTE
+  |--------------------------------------------------------------------------
+  */
+
+  const handleAddInternalNote = async () => {
+    const cleanNote = internalNote.trim();
+
+    if (!ticket?.id && !ticket?._id) {
+      setInternalNoteError("Ticket information is missing.");
+      return;
+    }
+
+    if (!cleanNote) {
+      setInternalNoteError("Please enter an internal note.");
+      return;
+    }
+
+    if (cleanNote.length > 10000) {
+      setInternalNoteError("Internal note cannot exceed 10,000 characters.");
+      return;
+    }
+
+    try {
+      setIsAddingInternalNote(true);
+      setInternalNoteError("");
+
+      const ticketId = ticket.id || ticket._id;
+
+      const response = await addInternalNote(ticketId, cleanNote);
+
+      const updatedTicket = response?.ticket || response?.data?.ticket || null;
+
+      const newNote = response?.note || response?.data?.note || null;
+
+      /*
+       * Update complete ticket if backend returned it.
+       */
+      if (updatedTicket) {
+        setTicket(updatedTicket);
+      } else if (newNote) {
+        /*
+         * Otherwise append the note locally.
+         */
+        setTicket((previousTicket) => {
+          if (!previousTicket) return previousTicket;
+
+          return {
+            ...previousTicket,
+
+            conversation: [...(previousTicket.conversation || []), newNote],
+          };
+        });
+      }
+
+      setInternalNote("");
+    } catch (error) {
+      console.error("ADD INTERNAL NOTE ERROR:", error);
+
+      setInternalNoteError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to add internal note.",
+      );
+    } finally {
+      setIsAddingInternalNote(false);
     }
   };
 
@@ -1487,6 +1562,8 @@ const AgentTicketDetails = () => {
               ) : (
                 <div className="space-y-6">
                   {conversation.map((message, index) => {
+                    const isInternalNote = message?.isInternal === true;
+
                     const senderRole = String(
                       message?.senderRole || message?.sender?.role || "",
                     ).toLowerCase();
@@ -1506,6 +1583,59 @@ const AgentTicketDetails = () => {
                       ? message.attachments
                       : [];
 
+                    // =========================================================
+                    // INTERNAL NOTE
+                    // =========================================================
+
+                    if (isInternalNote) {
+                      return (
+                        <div
+                          key={
+                            message?._id || message?.id || `message-${index}`
+                          }
+                          className="flex justify-start"
+                        >
+                          <div className="w-full max-w-[90%]">
+                            <div className="mb-2 flex items-center gap-2">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10">
+                                <span className="text-sm">🔒</span>
+                              </div>
+
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-xs font-semibold text-amber-300">
+                                    Internal Note
+                                  </span>
+
+                                  <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-400">
+                                    Private
+                                  </span>
+                                </div>
+
+                                <p className="text-[11px] text-slate-600">
+                                  {senderName}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+                              <p className="whitespace-pre-wrap break-words text-sm leading-6 text-amber-100">
+                                {message?.message || ""}
+                              </p>
+                            </div>
+
+                            <div className="mt-1.5 text-[11px] text-slate-600">
+                              {formatDate(message?.createdAt)}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // =========================================================
+                    // NORMAL CUSTOMER / AGENT MESSAGE
+                    // =========================================================
+
                     return (
                       <div
                         key={message?._id || message?.id || `message-${index}`}
@@ -1513,8 +1643,6 @@ const AgentTicketDetails = () => {
                           isAgent ? "justify-end" : "justify-start"
                         }`}
                       >
-                        {/* Customer avatar */}
-
                         {!isAgent && (
                           <div className="shrink-0">
                             {senderAvatar ? (
@@ -1536,8 +1664,6 @@ const AgentTicketDetails = () => {
                             isAgent ? "items-end" : "items-start"
                           }`}
                         >
-                          {/* Name / badge */}
-
                           <div
                             className={`mb-1.5 flex flex-wrap items-center gap-2 ${
                               isAgent ? "justify-end" : "justify-start"
@@ -1560,8 +1686,6 @@ const AgentTicketDetails = () => {
                             )}
                           </div>
 
-                          {/* Message */}
-
                           <div
                             className={`rounded-2xl border p-4 ${
                               isAgent
@@ -1573,8 +1697,6 @@ const AgentTicketDetails = () => {
                               {message?.message || ""}
                             </p>
 
-                            {/* Attachments */}
-
                             {attachments.length > 0 && (
                               <div className="mt-4 space-y-2">
                                 {attachments.map((file, fileIndex) =>
@@ -1583,8 +1705,6 @@ const AgentTicketDetails = () => {
                               </div>
                             )}
                           </div>
-
-                          {/* Date */}
 
                           <div
                             className={`mt-1.5 flex items-center gap-2 ${
@@ -1600,8 +1720,6 @@ const AgentTicketDetails = () => {
                             )}
                           </div>
                         </div>
-
-                        {/* Agent avatar */}
 
                         {isAgent && (
                           <div className="shrink-0">
@@ -1672,120 +1790,233 @@ const AgentTicketDetails = () => {
             ===================================================== */}
 
             {canReply && (
-              <form
-                onSubmit={handleSendReply}
-                className="border-t border-slate-800 p-4 sm:p-6"
-              >
-                <div className="mb-3 flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-semibold text-white">
-                      Reply to Customer
-                    </h3>
+              <div className="border-t border-slate-800 p-4 sm:p-6">
+                {/* =========================================================
+        COMPOSER MODE
+    ========================================================= */}
 
-                    <p className="mt-0.5 text-xs text-slate-500">
-                      Send a message or attach files.
-                    </p>
-                  </div>
+                <div className="mb-4 flex rounded-xl border border-slate-800 bg-slate-950 p-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setComposerMode("reply");
+                      setInternalNoteError("");
+                    }}
+                    className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition ${
+                      composerMode === "reply"
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "text-slate-500 hover:text-slate-300"
+                    }`}
+                  >
+                    Reply to Customer
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setComposerMode("internal");
+                      setInternalNoteError("");
+                    }}
+                    className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition ${
+                      composerMode === "internal"
+                        ? "bg-amber-500/10 text-amber-300"
+                        : "text-slate-500 hover:text-slate-300"
+                    }`}
+                  >
+                    🔒 Internal Note
+                  </button>
                 </div>
 
-                <textarea
-                  value={reply}
-                  onChange={(event) => setReply(event.target.value)}
-                  placeholder="Write your reply..."
-                  rows={5}
-                  disabled={sendingReply}
-                  className="w-full resize-none rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-60"
-                />
+                {/* =========================================================
+        CUSTOMER REPLY
+    ========================================================= */}
 
-                {/* Selected files */}
+                {composerMode === "reply" && (
+                  <form onSubmit={handleSendReply}>
+                    <div className="mb-3">
+                      <h3 className="text-sm font-semibold text-white">
+                        Reply to Customer
+                      </h3>
 
-                {selectedFiles.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    {selectedFiles.map((file, index) => (
-                      <div
-                        key={`${file.name}-${index}`}
-                        className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950 p-3"
-                      >
-                        {isImageFile({
-                          name: file.name,
-                          mimetype: file.type,
-                        }) ? (
-                          <ImageIcon className="h-5 w-5 text-blue-400" />
-                        ) : (
-                          <FileText className="h-5 w-5 text-slate-400" />
-                        )}
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        Send a message or attach files.
+                      </p>
+                    </div>
 
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm text-slate-300">
-                            {file.name}
-                          </p>
+                    <textarea
+                      value={reply}
+                      onChange={(event) => setReply(event.target.value)}
+                      placeholder="Write your reply..."
+                      rows={5}
+                      disabled={sendingReply}
+                      className="w-full resize-none rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
 
-                          <p className="text-xs text-slate-600">
-                            {formatFileSize(file.size)}
-                          </p>
-                        </div>
+                    {/* Selected files */}
+
+                    {selectedFiles.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {selectedFiles.map((file, index) => (
+                          <div
+                            key={`${file.name}-${index}`}
+                            className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950 p-3"
+                          >
+                            {isImageFile({
+                              name: file.name,
+                              mimetype: file.type,
+                            }) ? (
+                              <ImageIcon className="h-5 w-5 text-blue-400" />
+                            ) : (
+                              <FileText className="h-5 w-5 text-slate-400" />
+                            )}
+
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm text-slate-300">
+                                {file.name}
+                              </p>
+
+                              <p className="text-xs text-slate-600">
+                                {formatFileSize(file.size)}
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => removeSelectedFile(index)}
+                              className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-800 hover:text-red-400"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          multiple
+                          hidden
+                          onChange={handleFileChange}
+                          accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx"
+                        />
 
                         <button
                           type="button"
-                          onClick={() => removeSelectedFile(index)}
-                          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-800 hover:text-red-400"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={sendingReply || selectedFiles.length >= 5}
+                          className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-slate-700 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          <X className="h-4 w-4" />
+                          <Paperclip className="h-4 w-4" />
+                          Attach File
                         </button>
+
+                        <span className="ml-3 text-xs text-slate-600">
+                          {selectedFiles.length}/5
+                        </span>
                       </div>
-                    ))}
-                  </div>
+
+                      <button
+                        type="submit"
+                        disabled={
+                          sendingReply ||
+                          (!reply.trim() && selectedFiles.length === 0)
+                        }
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {sendingReply ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Sending...
+                          </>
+                        ) : (
+                          <>
+                            <Send className="h-4 w-4" />
+                            Send Reply
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
                 )}
 
-                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      hidden
-                      onChange={handleFileChange}
-                      accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx"
+                {/* =========================================================
+        INTERNAL NOTE
+    ========================================================= */}
+
+                {composerMode === "internal" && (
+                  <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+                    <div className="mb-4 flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10">
+                        <span className="text-lg">🔒</span>
+                      </div>
+
+                      <div>
+                        <h3 className="text-sm font-semibold text-amber-300">
+                          Internal Note
+                        </h3>
+
+                        <p className="mt-1 text-xs leading-5 text-amber-400/70">
+                          This note is private and can only be seen by agents
+                          and administrators.
+                        </p>
+                      </div>
+                    </div>
+
+                    <textarea
+                      value={internalNote}
+                      onChange={(event) => {
+                        setInternalNote(event.target.value);
+                        setInternalNoteError("");
+                      }}
+                      placeholder="Add a private note for your support team..."
+                      rows={5}
+                      maxLength={10000}
+                      disabled={isAddingInternalNote}
+                      className="w-full resize-none rounded-xl border border-amber-500/20 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-amber-400/50 focus:ring-2 focus:ring-amber-500/10 disabled:cursor-not-allowed disabled:opacity-60"
                     />
 
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={sendingReply || selectedFiles.length >= 5}
-                      className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-slate-700 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Paperclip className="h-4 w-4" />
-                      Attach File
-                    </button>
+                    {internalNoteError && (
+                      <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/5 p-3">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
 
-                    <span className="ml-3 text-xs text-slate-600">
-                      {selectedFiles.length}
-                      /5
-                    </span>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={
-                      sendingReply ||
-                      (!reply.trim() && selectedFiles.length === 0)
-                    }
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {sendingReply ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Sending...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="h-4 w-4" />
-                        Send Reply
-                      </>
+                          <p className="text-xs leading-5 text-red-300">
+                            {internalNoteError}
+                          </p>
+                        </div>
+                      </div>
                     )}
-                  </button>
-                </div>
-              </form>
+
+                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <span className="text-xs text-amber-500/60">
+                        {internalNote.length}/10000 characters
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={handleAddInternalNote}
+                        disabled={isAddingInternalNote || !internalNote.trim()}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isAddingInternalNote ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Adding Note...
+                          </>
+                        ) : (
+                          <>
+                            <span>🔒</span>
+                            Add Internal Note
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Closed notice */}

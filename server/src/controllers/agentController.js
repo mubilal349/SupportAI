@@ -1733,3 +1733,258 @@ export const getMyTickets = async (req, res) => {
     });
   }
 };
+
+/*
+ * =========================================================
+ * ADD INTERNAL NOTE
+ * =========================================================
+ *
+ * Internal notes:
+ * - Are visible only to agents/admins
+ * - Are NOT customer replies
+ * - Are stored inside ticket.conversation
+ * - Use isInternal: true
+ * - Assigned agents can add notes to their own tickets
+ * - Admins can add notes to any ticket
+ * - Unassigned tickets are automatically assigned to the
+ *   current agent when they add a note
+ *
+ * =========================================================
+ */
+
+export const addInternalNote = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { message = "" } = req.body;
+
+    const userId = getUserId(req);
+    const userRole = getUserRole(req);
+
+    const cleanMessage = String(message || "").trim();
+
+    // =======================================================
+    // AUTHENTICATION
+    // =======================================================
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    // =======================================================
+    // VALIDATE TICKET ID
+    // =======================================================
+
+    if (!ticketId || !mongoose.Types.ObjectId.isValid(ticketId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID.",
+      });
+    }
+
+    // =======================================================
+    // VALIDATE MESSAGE
+    // =======================================================
+
+    if (!cleanMessage) {
+      return res.status(400).json({
+        success: false,
+        message: "Internal note cannot be empty.",
+      });
+    }
+
+    if (cleanMessage.length > 10000) {
+      return res.status(400).json({
+        success: false,
+        message: "Internal note cannot exceed 10000 characters.",
+      });
+    }
+
+    // =======================================================
+    // FIND TICKET
+    // =======================================================
+
+    const ticket = await Ticket.findById(ticketId);
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found.",
+      });
+    }
+
+    // =======================================================
+    // ACCESS CONTROL
+    // =======================================================
+
+    const assignedAgentId = normalizeId(ticket.assignedAgent);
+    const currentUserId = normalizeId(userId);
+
+    const isAdmin = userRole === "admin";
+
+    const isAssignedAgent =
+      assignedAgentId && currentUserId === assignedAgentId;
+
+    const isUnassigned = !assignedAgentId;
+
+    /*
+     * Admin:
+     * Can add an internal note to any ticket.
+     *
+     * Assigned agent:
+     * Can add an internal note to their own ticket.
+     *
+     * Unassigned:
+     * Agent can add a note and becomes assigned.
+     *
+     * Another agent:
+     * Cannot add a note.
+     */
+
+    if (!isAdmin && !isAssignedAgent && !isUnassigned) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "You cannot add an internal note to a ticket assigned to another agent.",
+      });
+    }
+
+    // =======================================================
+    // AUTO ASSIGN UNASSIGNED TICKET
+    // =======================================================
+
+    if (isUnassigned) {
+      ticket.assignedAgent = userId;
+
+      /*
+       * Record assignment in status history.
+       */
+      addStatusHistory({
+        ticket,
+        status: ticket.status,
+        changedBy: userId,
+        changedByRole: isAdmin ? "admin" : "agent",
+        note: "Ticket automatically assigned when internal note was added.",
+      });
+    }
+
+    // =======================================================
+    // CREATE INTERNAL NOTE
+    // =======================================================
+
+    const internalNote = {
+      sender: userId,
+      senderRole: isAdmin ? "admin" : "agent",
+      message: cleanMessage,
+
+      /*
+       * VERY IMPORTANT
+       *
+       * This distinguishes the note from a normal
+       * customer-visible agent reply.
+       */
+      isInternal: true,
+
+      attachments: [],
+
+      isRead: false,
+
+      createdAt: new Date(),
+    };
+
+    // =======================================================
+    // ADD TO CONVERSATION
+    // =======================================================
+
+    ticket.conversation.push(internalNote);
+
+    // =======================================================
+    // SAVE
+    // =======================================================
+
+    await ticket.save();
+
+    // =======================================================
+    // POPULATE
+    // =======================================================
+
+    await ticket.populate([
+      {
+        path: "customer",
+        select: "name email avatar profileImage phone company",
+      },
+      {
+        path: "assignedAgent",
+        select: "name email avatar profileImage phone role",
+      },
+      {
+        path: "conversation.sender",
+        select: "name email avatar profileImage role",
+      },
+    ]);
+
+    // =======================================================
+    // GET SAVED NOTE
+    // =======================================================
+
+    const savedNote = ticket.conversation[ticket.conversation.length - 1];
+
+    // =======================================================
+    // SOCKET.IO
+    // =======================================================
+
+    const io = getSocketIO();
+
+    if (io) {
+      const room = getTicketRoom(ticket._id);
+
+      /*
+       * IMPORTANT:
+       *
+       * DO NOT emit this as "ticket:message".
+       *
+       * Your customer TicketDetails listens for normal
+       * ticket messages. Internal notes must use a
+       * separate event.
+       */
+
+      io.to(room).emit("ticket:internal-note", {
+        ticketId: ticket._id.toString(),
+        note: savedNote,
+      });
+
+      /*
+       * Update ticket information for agents.
+       */
+      io.to(room).emit("ticket:update", {
+        ticket,
+      });
+    }
+
+    // =======================================================
+    // RESPONSE
+    // =======================================================
+
+    return res.status(201).json({
+      success: true,
+      message: "Internal note added successfully.",
+      note: savedNote,
+      ticket,
+    });
+  } catch (error) {
+    console.error("========================================");
+    console.error("ADD INTERNAL NOTE ERROR");
+    console.error("MESSAGE:", error.message);
+    console.error("NAME:", error.name);
+    console.error("STACK:", error.stack);
+    console.error("========================================");
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to add internal note.",
+      error: error.message,
+    });
+  }
+};
