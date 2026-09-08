@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import Ticket from "../models/Ticket.js";
-import { getSocketIO, getTicketRoom } from "../socket/socket.js";
+import { getSocketIO, getAgentTicketRoom } from "../socket/socket.js";
 
 /*
  * =========================================================
@@ -1309,6 +1309,17 @@ export const sendAgentReply = async (req, res) => {
     }
 
     // =======================================================
+    // TICKET ID VALIDATION
+    // =======================================================
+
+    if (!ticketId || !mongoose.Types.ObjectId.isValid(ticketId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID.",
+      });
+    }
+
+    // =======================================================
     // MESSAGE / ATTACHMENT VALIDATION
     // =======================================================
 
@@ -1346,19 +1357,6 @@ export const sendAgentReply = async (req, res) => {
 
     const isUnassigned = !assignedAgentId;
 
-    /*
-     * Admin:
-     * Can reply to any ticket.
-     *
-     * Assigned agent:
-     * Can reply to their own ticket.
-     *
-     * Unassigned:
-     * Can reply and will automatically become assigned.
-     *
-     * Another agent:
-     * Cannot reply.
-     */
     if (!isAdmin && !isAssignedAgent && !isUnassigned) {
       return res.status(403).json({
         success: false,
@@ -1390,13 +1388,21 @@ export const sendAgentReply = async (req, res) => {
       filename: file.filename || file.originalname || "",
       originalName: file.originalname || file.filename || "",
       mimetype: file.mimetype || "",
-      size: file.size || 0,
+      size: Number(file.size || 0),
       path: file.path || file.filename || "",
       uploadedAt: new Date(),
     }));
 
     // =======================================================
-    // ADD CONVERSATION MESSAGE
+    // ENSURE CONVERSATION EXISTS
+    // =======================================================
+
+    if (!Array.isArray(ticket.conversation)) {
+      ticket.conversation = [];
+    }
+
+    // =======================================================
+    // ADD NORMAL AGENT REPLY
     // =======================================================
 
     ticket.conversation.push({
@@ -1404,6 +1410,7 @@ export const sendAgentReply = async (req, res) => {
       senderRole: isAdmin ? "admin" : "agent",
       message: cleanMessage || "Attachment",
       attachments,
+      isInternal: false,
       isRead: false,
       createdAt: new Date(),
     });
@@ -1466,6 +1473,12 @@ export const sendAgentReply = async (req, res) => {
     ]);
 
     // =======================================================
+    // GET SAVED MESSAGE
+    // =======================================================
+
+    const latestMessage = ticket.conversation[ticket.conversation.length - 1];
+
+    // =======================================================
     // SOCKET.IO
     // =======================================================
 
@@ -1474,15 +1487,26 @@ export const sendAgentReply = async (req, res) => {
     if (io) {
       const room = getTicketRoom(ticket._id);
 
-      const latestMessage = ticket.conversation[ticket.conversation.length - 1];
+      // -------------------------------------------------------
+      // Normal agent reply is PUBLIC
+      // -------------------------------------------------------
 
-      io.to(room).emit("ticket:message", {
+      io.to(room).emit("ticket:new-message", {
         ticketId: ticket._id.toString(),
         message: latestMessage,
       });
 
+      // -------------------------------------------------------
+      // Update ticket status / metadata
+      // -------------------------------------------------------
+
       io.to(room).emit("ticket:update", {
-        ticket,
+        ticket: {
+          ...ticket.toObject(),
+          conversation: ticket.conversation.filter(
+            (item) => item?.isInternal !== true,
+          ),
+        },
       });
     }
 
