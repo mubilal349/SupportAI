@@ -198,6 +198,10 @@ const normalizeReply = (message, index = 0) => {
     attachments: Array.isArray(message?.attachments) ? message.attachments : [],
 
     isRead: message?.isRead ?? false,
+
+    // IMPORTANT:
+    // Preserve the internal-note flag.
+    isInternal: message?.isInternal === true,
   };
 };
 
@@ -213,9 +217,8 @@ const normalizeTicket = (data, fallbackId = "") => {
   }
 
   const conversation = Array.isArray(data.conversation)
-    ? data.conversation
+    ? data.conversation.filter((message) => message?.isInternal !== true)
     : [];
-
   const normalizedConversation =
     conversation.length > 0
       ? conversation.map(normalizeReply)
@@ -806,57 +809,27 @@ const TicketDetails = () => {
         return;
       }
 
-      if (data.ticketId && String(data.ticketId) !== String(id)) {
-        return;
-      }
+      const updatedTicket = data.ticket || data;
 
-      console.log("REAL-TIME TICKET UPDATE:", data);
-
-      setTicket((previous) => {
-        if (!previous) {
-          return previous;
+      setTicket((previousTicket) => {
+        if (!previousTicket) {
+          return previousTicket;
         }
 
+        const hasConversation = Array.isArray(updatedTicket.conversation);
+
+        const publicConversation = hasConversation
+          ? updatedTicket.conversation.filter(
+              (message) => message?.isInternal !== true,
+            )
+          : previousTicket.conversation || [];
+
         return {
-          ...previous,
-
-          status:
-            data.status !== undefined
-              ? String(data.status).toLowerCase()
-              : previous.status,
-
-          replyCount:
-            typeof data.replies === "number"
-              ? data.replies
-              : previous.replyCount,
-
-          lastReplyAt: data.lastReplyAt || previous.lastReplyAt,
-
-          updatedAt: data.updatedAt || data.lastReplyAt || previous.updatedAt,
-
-          reopenedAt: data.reopenedAt ?? previous.reopenedAt,
-
-          resolvedAt:
-            data.resolvedAt !== undefined
-              ? data.resolvedAt
-              : previous.resolvedAt,
-
-          closedAt:
-            data.closedAt !== undefined ? data.closedAt : previous.closedAt,
-
-          customerRating: data.customerRating ?? previous.customerRating,
-
-          customerFeedback: data.customerFeedback ?? previous.customerFeedback,
-
-          statusHistory: Array.isArray(data.statusHistory)
-            ? data.statusHistory
-            : previous.statusHistory,
+          ...previousTicket,
+          ...updatedTicket,
+          conversation: publicConversation,
         };
       });
-
-      if (Array.isArray(data.statusHistory)) {
-        setStatusHistory(data.statusHistory);
-      }
     };
 
     /*

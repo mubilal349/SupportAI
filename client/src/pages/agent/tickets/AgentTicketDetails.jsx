@@ -251,6 +251,8 @@ const AgentTicketDetails = () => {
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState("");
 
+  const [composerMode, setComposerMode] = useState("reply");
+
   const [internalNote, setInternalNote] = useState("");
   const [isAddingInternalNote, setIsAddingInternalNote] = useState(false);
   const [internalNoteError, setInternalNoteError] = useState("");

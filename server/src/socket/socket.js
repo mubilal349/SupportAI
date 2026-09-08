@@ -4,9 +4,6 @@ import Ticket from "../models/Ticket.js";
 // =========================================================
 // SOCKET.IO INSTANCE
 // =========================================================
-// Stores the initialized Socket.IO instance so controllers
-// can access it later for real-time ticket updates.
-// =========================================================
 
 let ioInstance = null;
 
@@ -51,7 +48,7 @@ export const canAccessTicket = (ticket, user) => {
     return true;
   }
 
-  // Agent can access assigned ticket
+  // Agent can access only their assigned ticket
   if (
     role === "agent" &&
     String(ticket.assignedAgent?._id || ticket.assignedAgent) === userId
@@ -63,7 +60,12 @@ export const canAccessTicket = (ticket, user) => {
 };
 
 // =========================================================
-// TICKET ROOM
+// PUBLIC TICKET ROOM
+// =========================================================
+// Customer + assigned agent + admin can join.
+//
+// IMPORTANT:
+// Never emit internal notes into this room.
 // =========================================================
 
 export const getTicketRoom = (ticketId) => {
@@ -71,10 +73,18 @@ export const getTicketRoom = (ticketId) => {
 };
 
 // =========================================================
-// GET SOCKET.IO INSTANCE
+// PRIVATE AGENT TICKET ROOM
 // =========================================================
-// Used by controllers such as agentController.js to emit
-// real-time events after database operations.
+// Only agents/admins should receive internal notes.
+// Customers NEVER join this room.
+// =========================================================
+
+export const getAgentTicketRoom = (ticketId) => {
+  return `ticket:agents:${ticketId}`;
+};
+
+// =========================================================
+// GET SOCKET.IO INSTANCE
 // =========================================================
 
 export const getSocketIO = () => {
@@ -86,7 +96,6 @@ export const getSocketIO = () => {
 // =========================================================
 
 export const initializeSocket = (io) => {
-  // Store Socket.IO instance for use by controllers
   ioInstance = io;
 
   console.log("Socket.IO initialized successfully.");
@@ -127,7 +136,10 @@ export const initializeSocket = (io) => {
 
     const userRoom = `user:${userId}`;
 
-    // Join personal user notification room
+    // -----------------------------------------------------
+    // PERSONAL USER ROOM
+    // -----------------------------------------------------
+
     socket.join(userRoom);
 
     console.log(
@@ -164,6 +176,10 @@ export const initializeSocket = (io) => {
           return;
         }
 
+        // -------------------------------------------------
+        // AUTHORIZATION
+        // -------------------------------------------------
+
         if (!canAccessTicket(ticket, socket.user)) {
           socket.emit("ticket:error", {
             message: "You are not authorized to access this ticket.",
@@ -172,16 +188,49 @@ export const initializeSocket = (io) => {
           return;
         }
 
+        // -------------------------------------------------
+        // PUBLIC ROOM
+        // -------------------------------------------------
+
         const room = getTicketRoom(ticketId);
 
         socket.join(room);
 
-        console.log(`Socket ${socket.id} joined room ${room}`);
+        console.log(`Socket ${socket.id} joined public ticket room ${room}`);
+
+        // -------------------------------------------------
+        // PRIVATE AGENT ROOM
+        // -------------------------------------------------
+        // Customers DO NOT join this room.
+        // Agents/admins DO join this room.
+        // -------------------------------------------------
+
+        if (role === "agent" || role === "admin") {
+          const agentRoom = getAgentTicketRoom(ticketId);
+
+          socket.join(agentRoom);
+
+          console.log(
+            `Socket ${socket.id} joined private agent ticket room ${agentRoom}`,
+          );
+        }
+
+        // -------------------------------------------------
+        // JOIN CONFIRMATION
+        // -------------------------------------------------
 
         socket.emit("ticket:joined", {
           ticketId,
           room,
+          agentRoom:
+            role === "agent" || role === "admin"
+              ? getAgentTicketRoom(ticketId)
+              : null,
         });
+
+        // -------------------------------------------------
+        // USER ONLINE
+        // -------------------------------------------------
 
         socket.to(room).emit("ticket:user-online", {
           ticketId,
@@ -206,6 +255,7 @@ export const initializeSocket = (io) => {
         return;
       }
 
+      // Leave public room
       const room = getTicketRoom(ticketId);
 
       socket.leave(room);
@@ -216,7 +266,18 @@ export const initializeSocket = (io) => {
         role,
       });
 
-      console.log(`Socket ${socket.id} left room ${room}`);
+      // Leave private agent room if applicable
+      if (role === "agent" || role === "admin") {
+        const agentRoom = getAgentTicketRoom(ticketId);
+
+        socket.leave(agentRoom);
+
+        console.log(
+          `Socket ${socket.id} left private agent ticket room ${agentRoom}`,
+        );
+      }
+
+      console.log(`Socket ${socket.id} left public ticket room ${room}`);
     });
 
     // =====================================================
@@ -283,9 +344,40 @@ export const initializeSocket = (io) => {
           return;
         }
 
+        // -------------------------------------------------
+        // SECURITY:
+        // Customers cannot read/mark internal notes.
+        // -------------------------------------------------
+
+        if (conversationMessage.isInternal === true && role === "customer") {
+          return;
+        }
+
         conversationMessage.isRead = true;
 
         await ticket.save();
+
+        // -------------------------------------------------
+        // INTERNAL MESSAGE READ
+        // -------------------------------------------------
+        // Internal notes stay inside private agent room.
+        // -------------------------------------------------
+
+        if (conversationMessage.isInternal === true) {
+          const agentRoom = getAgentTicketRoom(ticketId);
+
+          io.to(agentRoom).emit("ticket:message:read", {
+            ticketId,
+            messageId,
+            userId,
+          });
+
+          return;
+        }
+
+        // -------------------------------------------------
+        // NORMAL PUBLIC MESSAGE READ
+        // -------------------------------------------------
 
         const room = getTicketRoom(ticketId);
 

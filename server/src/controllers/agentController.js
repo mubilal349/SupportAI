@@ -1938,28 +1938,13 @@ export const addInternalNote = async (req, res) => {
     const io = getSocketIO();
 
     if (io) {
-      const room = getTicketRoom(ticket._id);
+      const agentRoom = getAgentTicketRoom(ticket._id);
 
-      /*
-       * IMPORTANT:
-       *
-       * DO NOT emit this as "ticket:message".
-       *
-       * Your customer TicketDetails listens for normal
-       * ticket messages. Internal notes must use a
-       * separate event.
-       */
-
-      io.to(room).emit("ticket:internal-note", {
+      // Internal notes are private.
+      // Only agents and admins should receive them.
+      io.to(agentRoom).emit("ticket:internal-note", {
         ticketId: ticket._id.toString(),
         note: savedNote,
-      });
-
-      /*
-       * Update ticket information for agents.
-       */
-      io.to(room).emit("ticket:update", {
-        ticket,
       });
     }
 

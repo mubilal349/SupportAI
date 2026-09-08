@@ -19,6 +19,30 @@ import {
 
 /*
  * =========================================================
+ * REMOVE INTERNAL NOTES FROM CUSTOMER RESPONSE
+ * =========================================================
+ */
+
+const sanitizeCustomerTicket = (ticket) => {
+  if (!ticket) {
+    return ticket;
+  }
+
+  const sanitizedTicket = {
+    ...ticket,
+  };
+
+  if (Array.isArray(sanitizedTicket.conversation)) {
+    sanitizedTicket.conversation = sanitizedTicket.conversation.filter(
+      (message) => message?.isInternal !== true,
+    );
+  }
+
+  return sanitizedTicket;
+};
+
+/*
+ * =========================================================
  * GENERATE TICKET NUMBER
  * =========================================================
  */
@@ -436,12 +460,14 @@ export const createTicket = async (req, res) => {
      * =====================================================
      */
 
+    const sanitizedTicket = sanitizeCustomerTicket(populatedTicket);
+
     return res.status(201).json({
       success: true,
 
       message: "Ticket created successfully.",
 
-      ticket: populatedTicket,
+      ticket: sanitizedTicket,
     });
   } catch (error) {
     console.error("CREATE TICKET ERROR:", error);
@@ -471,10 +497,14 @@ export const getCustomerTickets = async (req, res) => {
       })
       .lean();
 
+    const sanitizedTickets = Array.isArray(tickets)
+      ? tickets.map(sanitizeCustomerTicket)
+      : [];
+
     return res.status(200).json({
       success: true,
 
-      tickets: Array.isArray(tickets) ? tickets : [],
+      tickets: sanitizedTickets,
     });
   } catch (error) {
     console.error("GET CUSTOMER TICKETS ERROR:", error);
@@ -725,12 +755,11 @@ export const addTicketReply = async (req, res) => {
 
       console.log(`TICKET STATUS CHANGED: ${previousStatus} → open`);
     } else if (ticket.status === "waiting") {
-
-    /*
-     * =====================================================
-     * WAITING → OPEN
-     * =====================================================
-     */
+      /*
+       * =====================================================
+       * WAITING → OPEN
+       * =====================================================
+       */
       ticket.status = "open";
 
       ticket.statusHistory.push({
@@ -1012,6 +1041,8 @@ Status: ${ticket.status || "open"}
      * =====================================================
      */
 
+    const sanitizedUpdatedTicket = sanitizeCustomerTicket(updatedTicket);
+
     return res.status(200).json({
       success: true,
 
@@ -1019,9 +1050,9 @@ Status: ${ticket.status || "open"}
         ? "Reply sent and AI response generated successfully."
         : "Reply sent successfully, but AI response could not be generated.",
 
-      ticket: updatedTicket,
+      ticket: sanitizedUpdatedTicket,
 
-      conversation: updatedTicket?.conversation || [],
+      conversation: sanitizedUpdatedTicket?.conversation || [],
 
       aiResponse: aiText?.trim() || null,
 
