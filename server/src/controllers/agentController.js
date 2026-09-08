@@ -620,15 +620,16 @@ export const getAssignedTickets = async (req, res) => {
  * GET SINGLE AGENT TICKET
  * =========================================================
  *
- * Admin:
- *   Can access any ticket.
+ * Behavior:
  *
- * Agent:
- *   Can access ONLY tickets assigned to the
- *   currently authenticated agent.
+ * 1. Admin can access any ticket.
+ * 2. Agent opens an unassigned ticket:
+ *      -> Automatically assigns it to that agent.
+ * 3. Agent opens their own ticket:
+ *      -> Access granted.
+ * 4. Agent opens another agent's ticket:
+ *      -> Access denied.
  *
- * This keeps the Assigned Tickets page and
- * Ticket Details page consistent.
  * =========================================================
  */
 
@@ -683,12 +684,13 @@ export const getAgentTicketById = async (req, res) => {
     if (role === "admin") {
       return res.status(200).json({
         success: true,
+        message: "Ticket loaded successfully",
         ticket,
       });
     }
 
     // =======================================================
-    // AGENT OWNERSHIP CHECK
+    // CURRENT ASSIGNMENT
     // =======================================================
 
     const assignedAgentId = normalizeId(
@@ -697,32 +699,27 @@ export const getAgentTicketById = async (req, res) => {
 
     const currentAgentId = normalizeId(agentId);
 
-    // -------------------------------------------------------
-    // TICKET IS UNASSIGNED
-    // -------------------------------------------------------
+    // =======================================================
+    // UNASSIGNED TICKET
+    // =======================================================
+    // IMPORTANT:
+    // Opening an unassigned ticket DOES NOT assign it.
+    //
+    // Any agent can view an unassigned ticket.
+    // The agent must explicitly click "Assign to Me"
+    // to take ownership of the ticket.
 
     if (!assignedAgentId) {
-      ticket.assignedAgent = agentId;
-
-      addStatusHistory({
+      return res.status(200).json({
+        success: true,
+        message: "Unassigned ticket loaded successfully",
         ticket,
-        status: ticket.status,
-        changedBy: agentId,
-        changedByRole: "agent",
-        note: "Ticket automatically assigned when agent opened the ticket.",
       });
-
-      await ticket.save();
-
-      await ticket.populate(
-        "assignedAgent",
-        "name email avatar profileImage phone company role",
-      );
     }
 
-    // -------------------------------------------------------
+    // =======================================================
     // TICKET BELONGS TO ANOTHER AGENT
-    // -------------------------------------------------------
+    // =======================================================
 
     if (assignedAgentId !== currentAgentId) {
       return res.status(403).json({
@@ -737,10 +734,16 @@ export const getAgentTicketById = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+      message: "Ticket loaded successfully",
       ticket,
     });
   } catch (error) {
-    console.error("GET AGENT TICKET ERROR:", error);
+    console.error("========================================");
+    console.error("GET AGENT TICKET ERROR");
+    console.error("MESSAGE:", error.message);
+    console.error("NAME:", error.name);
+    console.error("STACK:", error.stack);
+    console.error("========================================");
 
     return res.status(500).json({
       success: false,
