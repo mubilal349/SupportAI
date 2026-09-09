@@ -43,6 +43,8 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// CUSTOMER APIS
+
 app.use("/api/auth", authRoutes);
 app.use("/api/conversations", conversationRoutes);
 app.use("/api/messages", messageRoutes);
@@ -52,7 +54,7 @@ app.use("/api/ai-tickets", aiTicketRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/analytics", analyticsRoutes);
 
-// Agent routes
+// Agent APIS
 app.use("/api/agent", agentRoutes);
 
 export default app;

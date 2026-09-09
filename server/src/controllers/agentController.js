@@ -183,10 +183,8 @@ export const getAgentDashboard = async (req, res) => {
      * Tickets waiting in the global queue
      */
     const queueCount = await Ticket.countDocuments({
-      assignedAgent: null,
-      status: {
-        $in: ["open", "waiting"],
-      },
+      $or: [{ assignedAgent: null }, { assignedAgent: { $exists: false } }],
+      status: { $in: ["open", "waiting"] },
     });
 
     /*
@@ -213,18 +211,17 @@ export const getAgentDashboard = async (req, res) => {
         waitingTickets,
         resolvedToday,
         queueCount,
+        queueTickets: queueCount,
       },
 
-      /*
-       * These aliases make the frontend easier to support
-       * even if it expects slightly different names.
-       */
       assignedCount: assignedTickets,
       openCount: openTickets,
       inProgressCount: inProgressTickets,
       waitingCount: waitingTickets,
       resolvedTodayCount: resolvedToday,
+
       queueCount,
+      queueTickets: queueCount,
 
       recentTickets,
     });
