@@ -179,6 +179,18 @@ export const getAgentDashboard = async (req, res) => {
       },
     });
 
+    const resolvedTickets = await Ticket.countDocuments({
+      assignedAgent: agentId,
+      status: "resolved",
+    });
+
+    const totalHandledTickets = assignedTickets + resolvedTickets;
+
+    const resolutionRate =
+      totalHandledTickets > 0
+        ? Math.round((resolvedTickets / totalHandledTickets) * 100)
+        : 0;
+
     /*
      * Tickets waiting in the global queue
      */
@@ -208,8 +220,11 @@ export const getAgentDashboard = async (req, res) => {
         assignedTickets,
         openTickets,
         inProgressTickets,
+        inProgress: inProgressTickets,
         waitingTickets,
+        resolvedTickets,
         resolvedToday,
+        resolutionRate,
         queueCount,
         queueTickets: queueCount,
       },
@@ -218,7 +233,10 @@ export const getAgentDashboard = async (req, res) => {
       openCount: openTickets,
       inProgressCount: inProgressTickets,
       waitingCount: waitingTickets,
+
+      resolvedTickets,
       resolvedTodayCount: resolvedToday,
+      resolutionRate,
 
       queueCount,
       queueTickets: queueCount,

@@ -11,7 +11,7 @@ import {
   UserRound,
 } from "lucide-react";
 
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import {
   assignTicketToMe,
@@ -124,6 +124,16 @@ const getStatusLabel = (status) => {
 ========================================================= */
 
 const TicketQueue = () => {
+  /* =========================================================
+     URL SEARCH PARAMS
+  ========================================================= */
+
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  /* =========================================================
+     STATE
+  ========================================================= */
+
   const [tickets, setTickets] = useState([]);
 
   const [loading, setLoading] = useState(true);
@@ -133,7 +143,17 @@ const TicketQueue = () => {
 
   const [error, setError] = useState("");
 
-  const [search, setSearch] = useState("");
+  /*
+   * Initialize search from the URL.
+   *
+   * Example:
+   * /agent/queue?search=login
+   *
+   * The header search in AgentLayout sends the search
+   * query through the URL.
+   */
+  const [search, setSearch] = useState(searchParams.get("search") || "");
+
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
 
@@ -196,6 +216,16 @@ const TicketQueue = () => {
   }, []);
 
   /* =========================================================
+     SYNC SEARCH WITH URL
+  ========================================================= */
+
+  useEffect(() => {
+    const urlSearch = searchParams.get("search") || "";
+
+    setSearch(urlSearch);
+  }, [searchParams]);
+
+  /* =========================================================
      CLIENT-SIDE FILTERING
   ========================================================= */
 
@@ -248,21 +278,50 @@ const TicketQueue = () => {
 
       const status = String(ticket?.status || "").toLowerCase();
 
-      /*
-       * Backend status:
-       *
-       * open
-       * waiting
-       * in-progress
-       *
-       * Frontend filter uses the same values.
-       */
-
       const matchesStatus = statusFilter === "all" || status === statusFilter;
 
       return matchesSearch && matchesPriority && matchesStatus;
     });
   }, [tickets, search, priorityFilter, statusFilter]);
+
+  /* =========================================================
+     HANDLE SEARCH INPUT
+  ========================================================= */
+
+  const handleSearchChange = (event) => {
+    const value = event.target.value;
+
+    setSearch(value);
+
+    /*
+     * Keep the search query in the URL.
+     *
+     * This allows the header search from AgentLayout
+     * to communicate with TicketQueue.
+     */
+    if (value.trim()) {
+      setSearchParams({
+        search: value,
+      });
+    } else {
+      setSearchParams({});
+    }
+  };
+
+  /* =========================================================
+     CLEAR FILTERS
+  ========================================================= */
+
+  const clearFilters = () => {
+    setSearch("");
+    setPriorityFilter("all");
+    setStatusFilter("all");
+
+    /*
+     * Also remove the search parameter from the URL.
+     */
+    setSearchParams({});
+  };
 
   /* =========================================================
      ASSIGN TICKET
@@ -383,7 +442,7 @@ const TicketQueue = () => {
             <input
               type="text"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={handleSearchChange}
               placeholder="Search tickets..."
               className="h-12 w-full rounded-2xl border border-slate-800 bg-slate-900/60 pl-11 pr-4 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-blue-500/40"
             />
@@ -609,11 +668,7 @@ const TicketQueue = () => {
             {(search || priorityFilter !== "all" || statusFilter !== "all") && (
               <button
                 type="button"
-                onClick={() => {
-                  setSearch("");
-                  setPriorityFilter("all");
-                  setStatusFilter("all");
-                }}
+                onClick={clearFilters}
                 className="mt-5 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm font-medium text-slate-400 transition hover:border-blue-500/30 hover:text-white"
               >
                 Clear Filters
