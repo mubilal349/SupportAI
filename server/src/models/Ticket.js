@@ -179,7 +179,7 @@ const ticketSchema = new mongoose.Schema(
 
     priority: {
       type: String,
-      enum: ["low", "medium", "high"],
+      enum: ["low", "medium", "high", "urgent"],
       default: "medium",
     },
 
@@ -244,6 +244,20 @@ const ticketSchema = new mongoose.Schema(
 
     lastReplyAt: {
       type: Date,
+      default: null,
+    },
+
+    // ==========================================
+    // AGENT RESPONSE TIME
+    // ==========================================
+
+    firstAgentResponseAt: {
+      type: Date,
+      default: null,
+    },
+
+    firstAgentResponseTime: {
+      type: Number,
       default: null,
     },
 

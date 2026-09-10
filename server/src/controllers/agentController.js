@@ -1421,6 +1421,38 @@ export const sendAgentReply = async (req, res) => {
       ticket.conversation = [];
     }
 
+    // ==========================================
+    // FIRST AGENT RESPONSE TIME
+    // ==========================================
+
+    if (!ticket.firstAgentResponseAt) {
+      const firstCustomerMessage = ticket.conversation
+        .filter(
+          (message) =>
+            message.senderRole === "customer" && message.isInternal !== true,
+        )
+        .sort(
+          (a, b) =>
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        )[0];
+
+      if (firstCustomerMessage) {
+        const customerMessageTime = new Date(
+          firstCustomerMessage.createdAt,
+        ).getTime();
+
+        const agentResponseTime = Date.now();
+
+        const responseTime = agentResponseTime - customerMessageTime;
+
+        if (responseTime >= 0) {
+          ticket.firstAgentResponseAt = new Date(agentResponseTime);
+
+          ticket.firstAgentResponseTime = responseTime;
+        }
+      }
+    }
+
     // =======================================================
     // ADD NORMAL AGENT REPLY
     // =======================================================
@@ -2755,6 +2787,368 @@ export const updateAgentAvailability = async (req, res) => {
       success: false,
       message: "Failed to update agent availability.",
       error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// AGENT ANALYTICS
+// ==========================================
+
+export const getAgentAnalytics = async (req, res) => {
+  try {
+    const agentId = getUserId(req);
+    const role = getUserRole(req);
+
+    if (!agentId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    if (!["agent", "admin"].includes(role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Agent access required",
+      });
+    }
+
+    const { range = "30d" } = req.query;
+
+    const now = new Date();
+
+    let startDate = null;
+
+    if (range === "7d") {
+      startDate = new Date(now);
+      startDate.setDate(startDate.getDate() - 7);
+    }
+
+    if (range === "30d") {
+      startDate = new Date(now);
+      startDate.setDate(startDate.getDate() - 30);
+    }
+
+    if (range === "90d") {
+      startDate = new Date(now);
+      startDate.setDate(startDate.getDate() - 90);
+    }
+
+    const ticketFilter = {
+      assignedAgent: agentId,
+    };
+
+    if (startDate) {
+      ticketFilter.createdAt = {
+        $gte: startDate,
+        $lte: now,
+      };
+    }
+
+    const tickets = await Ticket.find(ticketFilter)
+      .select(
+        [
+          "ticketNumber",
+          "status",
+          "priority",
+          "createdAt",
+          "resolvedAt",
+          "closedAt",
+          "firstAgentResponseAt",
+          "firstAgentResponseTime",
+          "conversation",
+        ].join(" "),
+      )
+      .sort({
+        createdAt: -1,
+      })
+      .lean();
+
+    // ==========================================
+    // BASIC COUNTS
+    // ==========================================
+
+    const ticketsHandled = tickets.length;
+
+    const resolvedTickets = tickets.filter(
+      (ticket) =>
+        ticket.status === "resolved" ||
+        ticket.status === "closed" ||
+        ticket.resolvedAt ||
+        ticket.closedAt,
+    ).length;
+
+    const openTickets = tickets.filter(
+      (ticket) => ticket.status === "open",
+    ).length;
+
+    const inProgressTickets = tickets.filter(
+      (ticket) => ticket.status === "in-progress",
+    ).length;
+
+    const waitingTickets = tickets.filter(
+      (ticket) => ticket.status === "waiting",
+    ).length;
+
+    const closedTickets = tickets.filter(
+      (ticket) => ticket.status === "closed",
+    ).length;
+
+    // ==========================================
+    // RESOLUTION RATE
+    // ==========================================
+
+    const resolutionRate =
+      ticketsHandled > 0
+        ? Math.round((resolvedTickets / ticketsHandled) * 100)
+        : 0;
+
+    // ==========================================
+    // RESPONSE TIMES
+    // ==========================================
+
+    const responseTimes = [];
+
+    tickets.forEach((ticket) => {
+      if (
+        typeof ticket.firstAgentResponseTime === "number" &&
+        ticket.firstAgentResponseTime >= 0
+      ) {
+        responseTimes.push(ticket.firstAgentResponseTime);
+
+        return;
+      }
+
+      // Fallback for older tickets
+      const conversation = Array.isArray(ticket.conversation)
+        ? ticket.conversation
+        : [];
+
+      const firstCustomerMessage = conversation
+        .filter(
+          (message) =>
+            message.senderRole === "customer" && message.isInternal !== true,
+        )
+        .sort(
+          (a, b) =>
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        )[0];
+
+      if (!firstCustomerMessage) {
+        return;
+      }
+
+      const firstAgentReply = conversation
+        .filter(
+          (message) =>
+            message.senderRole === "agent" &&
+            message.sender &&
+            normalizeId(message.sender) === normalizeId(agentId) &&
+            message.isInternal !== true &&
+            new Date(message.createdAt).getTime() >
+              new Date(firstCustomerMessage.createdAt).getTime(),
+        )
+        .sort(
+          (a, b) =>
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        )[0];
+
+      if (!firstAgentReply) {
+        return;
+      }
+
+      const responseTime =
+        new Date(firstAgentReply.createdAt).getTime() -
+        new Date(firstCustomerMessage.createdAt).getTime();
+
+      if (responseTime >= 0) {
+        responseTimes.push(responseTime);
+      }
+    });
+
+    // ==========================================
+    // RESPONSE TIME CALCULATIONS
+    // ==========================================
+
+    const totalResponseTime = responseTimes.reduce(
+      (total, time) => total + time,
+      0,
+    );
+
+    const averageResponseTime =
+      responseTimes.length > 0
+        ? Math.round(totalResponseTime / responseTimes.length)
+        : 0;
+
+    const fastestResponseTime =
+      responseTimes.length > 0 ? Math.min(...responseTimes) : 0;
+
+    const slowestResponseTime =
+      responseTimes.length > 0 ? Math.max(...responseTimes) : 0;
+
+    // ==========================================
+    // FORMAT DURATION
+    // ==========================================
+
+    const formatDuration = (milliseconds) => {
+      if (!milliseconds || milliseconds < 0) {
+        return "0m";
+      }
+
+      const totalSeconds = Math.floor(milliseconds / 1000);
+
+      const hours = Math.floor(totalSeconds / 3600);
+
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+
+      const seconds = totalSeconds % 60;
+
+      if (hours > 0) {
+        return `${hours}h ${minutes}m`;
+      }
+
+      if (minutes > 0) {
+        return `${minutes}m ${seconds}s`;
+      }
+
+      return `${seconds}s`;
+    };
+
+    // ==========================================
+    // STATUS BREAKDOWN
+    // ==========================================
+
+    const statusBreakdown = {
+      open: openTickets,
+
+      "in-progress": inProgressTickets,
+
+      waiting: waitingTickets,
+
+      resolved: tickets.filter((ticket) => ticket.status === "resolved").length,
+
+      closed: closedTickets,
+    };
+
+    // ==========================================
+    // PRIORITY BREAKDOWN
+    // ==========================================
+
+    const priorityBreakdown = {
+      low: tickets.filter((ticket) => ticket.priority === "low").length,
+
+      medium: tickets.filter((ticket) => ticket.priority === "medium").length,
+
+      high: tickets.filter((ticket) => ticket.priority === "high").length,
+
+      urgent: tickets.filter((ticket) => ticket.priority === "urgent").length,
+    };
+
+    // ==========================================
+    // PERFORMANCE TREND
+    // ==========================================
+
+    const trendMap = {};
+
+    tickets.forEach((ticket) => {
+      if (!ticket.createdAt) {
+        return;
+      }
+
+      const date = new Date(ticket.createdAt);
+
+      const key = date.toISOString().split("T")[0];
+
+      if (!trendMap[key]) {
+        trendMap[key] = {
+          date: key,
+          handled: 0,
+          resolved: 0,
+        };
+      }
+
+      trendMap[key].handled += 1;
+
+      if (
+        ticket.status === "resolved" ||
+        ticket.status === "closed" ||
+        ticket.resolvedAt ||
+        ticket.closedAt
+      ) {
+        trendMap[key].resolved += 1;
+      }
+    });
+
+    const trend = Object.values(trendMap)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      .slice(-30);
+
+    // ==========================================
+    // RESPONSE RATE
+    // ==========================================
+
+    const respondedTickets = responseTimes.length;
+
+    const responseRate =
+      ticketsHandled > 0
+        ? Math.round((respondedTickets / ticketsHandled) * 100)
+        : 0;
+
+    // ==========================================
+    // RESPONSE
+    // ==========================================
+
+    return res.status(200).json({
+      success: true,
+
+      range,
+
+      analytics: {
+        ticketsHandled,
+
+        resolvedTickets,
+
+        openTickets,
+
+        inProgressTickets,
+
+        waitingTickets,
+
+        closedTickets,
+
+        resolutionRate,
+
+        respondedTickets,
+
+        responseRate,
+
+        averageResponseTime,
+
+        fastestResponseTime,
+
+        slowestResponseTime,
+
+        averageResponseTimeFormatted: formatDuration(averageResponseTime),
+
+        fastestResponseTimeFormatted: formatDuration(fastestResponseTime),
+
+        slowestResponseTimeFormatted: formatDuration(slowestResponseTime),
+
+        statusBreakdown,
+
+        priorityBreakdown,
+
+        trend,
+      },
+    });
+  } catch (error) {
+    console.error("Get Agent Analytics Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load agent analytics",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };

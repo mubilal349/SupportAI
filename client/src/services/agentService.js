@@ -172,3 +172,17 @@ export const updateAgentAvailability = async (availability) => {
 
   return response.data;
 };
+
+// ==========================================
+// AGENT ANALYTICS
+// ==========================================
+
+export const getAgentAnalytics = async (range = "30d") => {
+  const response = await api.get("/agent/analytics", {
+    params: {
+      range,
+    },
+  });
+
+  return response.data;
+};

@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  BarChart3,
   Circle,
   LayoutDashboard,
   Loader2,
@@ -88,6 +89,12 @@ const workspaceItems = [
     label: "Escalated Tickets",
     to: "/agent/escalated",
     icon: ShieldAlert,
+    end: true,
+  },
+  {
+    label: "Analytics",
+    to: "/agent/analytics",
+    icon: BarChart3,
     end: true,
   },
 ];

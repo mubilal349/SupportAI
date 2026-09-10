@@ -35,6 +35,7 @@ import AgentProfile from "../pages/agent/AgentProfile";
 import MyTickets from "../pages/agent/tickets/MyTickets";
 import AgentCustomerProfile from "../pages/agent/AgentCustomerProfile";
 import EscalatedTickets from "../pages/agent/EscalatedTickets";
+import AgentAnalytics from "../pages/agent/AgentAnalytics";
 
 // Route Protection
 import ProtectedRoute from "./ProtectedRoute";
@@ -83,6 +84,9 @@ const AppRoutes = () => {
 
           {/* escalted */}
           <Route path="escalated" element={<EscalatedTickets />} />
+
+          {/* analytics */}
+          <Route path="analytics" element={<AgentAnalytics />} />
 
           {/* /agent/profile */}
           <Route path="profile" element={<AgentProfile />} />
