@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Ticket from "../models/Ticket.js";
+import User from "../models/User.js";
 import { getSocketIO, getAgentTicketRoom } from "../socket/socket.js";
 
 /*
@@ -2008,6 +2009,117 @@ export const addInternalNote = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to add internal note.",
+      error: error.message,
+    });
+  }
+};
+
+// GET CUSTOMER PROFILE FUNCTION
+
+export const getAgentCustomerProfile = async (req, res) => {
+  try {
+    const { customerId } = req.params;
+
+    // =====================================================
+    // VALIDATE CUSTOMER ID
+    // =====================================================
+
+    if (!customerId) {
+      return res.status(400).json({
+        success: false,
+        message: "Customer ID is required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(customerId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid customer ID",
+      });
+    }
+
+    // =====================================================
+    // FIND CUSTOMER
+    // =====================================================
+
+    const customer = await User.findById(customerId)
+      .select("name email avatar phone company status lastSeen createdAt")
+      .lean();
+
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    // =====================================================
+    // FIND CUSTOMER TICKETS
+    // =====================================================
+
+    const tickets = await Ticket.find({
+      customer: customerId,
+    })
+      .select(
+        "_id ticketNumber subject category priority status createdAt updatedAt",
+      )
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    // =====================================================
+    // TICKET STATS
+    // =====================================================
+
+    const totalTickets = tickets.length;
+
+    const openTickets = tickets.filter((ticket) =>
+      ["open", "in-progress", "waiting"].includes(
+        String(ticket.status || "").toLowerCase(),
+      ),
+    ).length;
+
+    const resolvedTickets = tickets.filter((ticket) =>
+      ["resolved", "closed"].includes(
+        String(ticket.status || "").toLowerCase(),
+      ),
+    ).length;
+
+    // =====================================================
+    // RESPONSE
+    // =====================================================
+
+    return res.status(200).json({
+      success: true,
+
+      customer: {
+        _id: customer._id,
+        name: customer.name || "",
+        email: customer.email || "",
+        avatar: customer.avatar || "",
+        phone: customer.phone || "",
+        company: customer.company || "",
+        status: customer.status || "active",
+        lastSeen: customer.lastSeen || null,
+        createdAt: customer.createdAt || null,
+      },
+
+      stats: {
+        totalTickets,
+        openTickets,
+        resolvedTickets,
+      },
+
+      tickets,
+    });
+  } catch (error) {
+    console.error("=================================");
+    console.error("getAgentCustomerProfile ERROR");
+    console.error(error);
+    console.error("=================================");
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load customer profile",
       error: error.message,
     });
   }

@@ -33,6 +33,7 @@ import AssignedTickets from "../pages/agent/tickets/AssignedTickets";
 import AgentTicketDetails from "../pages/agent/tickets/AgentTicketDetails";
 import AgentProfile from "../pages/agent/AgentProfile";
 import MyTickets from "../pages/agent/tickets/MyTickets";
+import AgentCustomerProfile from "../pages/agent/AgentCustomerProfile";
 
 // Route Protection
 import ProtectedRoute from "./ProtectedRoute";
@@ -81,6 +82,12 @@ const AppRoutes = () => {
 
           {/* /agent/profile */}
           <Route path="profile" element={<AgentProfile />} />
+
+          {/* /customer/profile */}
+          <Route
+            path="/agent/customers/:customerId"
+            element={<AgentCustomerProfile />}
+          />
         </Route>
       </Route>
 

@@ -12,6 +12,7 @@ import {
   addInternalNote,
   updateTicketPriority,
   updateTicketStatus,
+  getAgentCustomerProfile,
 } from "../controllers/agentController.js";
 
 import { requireAgent } from "../middleware/agentMiddleware.js";
@@ -58,6 +59,17 @@ router.get("/assigned-tickets", getAllAssignedTickets);
 ========================================================= */
 
 router.get("/tickets", getAssignedTickets);
+
+/* =========================================================
+   CUSTOMER PROFILE
+========================================================= */
+
+router.get(
+  "/customers/:customerId",
+  authenticateToken,
+  requireAgent,
+  getAgentCustomerProfile,
+);
 
 /* =========================================================
    SINGLE TICKET

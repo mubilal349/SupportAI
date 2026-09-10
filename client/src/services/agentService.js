@@ -125,3 +125,11 @@ export const addInternalNote = async (ticketId, message) => {
 
   return response.data;
 };
+
+// get customer profile service
+
+export const getAgentCustomerProfile = async (customerId) => {
+  const response = await api.get(`/agent/customers/${customerId}`);
+
+  return response.data;
+};

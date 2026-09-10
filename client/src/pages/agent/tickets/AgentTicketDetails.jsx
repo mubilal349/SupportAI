@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
+  ArrowRight,
   Check,
   CheckCircle2,
   Clock3,
@@ -2043,11 +2044,20 @@ const AgentTicketDetails = () => {
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
               <div className="mb-4 flex items-center gap-2">
                 <User className="h-5 w-5 text-blue-400" />
-
                 <h2 className="font-semibold text-white">Customer</h2>
               </div>
 
-              <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  const customerId = getId(ticket.customer);
+
+                  if (customerId) {
+                    navigate(`/agent/customers/${customerId}`);
+                  }
+                }}
+                className="group flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-slate-800/60 cursor-pointer"
+              >
                 {ticketCustomer.avatar ? (
                   <img
                     src={getAvatarUrl(ticketCustomer.avatar)}
@@ -2061,43 +2071,22 @@ const AgentTicketDetails = () => {
                 )}
 
                 <div className="min-w-0">
-                  <p className="truncate font-semibold text-white">
+                  <p className="truncate font-semibold text-white transition group-hover:text-blue-400">
                     {ticketCustomer.name || "Customer"}
                   </p>
 
                   {ticketCustomer.email && (
-                    <p className="truncate text-xs text-slate-500">
+                    <p className="truncate text-sm text-slate-500">
                       {ticketCustomer.email}
                     </p>
                   )}
+
+                  <p className="mt-1 flex items-center gap-1 text-xs text-blue-400 opacity-0 transition group-hover:opacity-100">
+                    View customer profile
+                    <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                  </p>
                 </div>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                {ticketCustomer.phone && (
-                  <div>
-                    <p className="text-[11px] uppercase tracking-wider text-slate-600">
-                      Phone
-                    </p>
-
-                    <p className="mt-1 text-sm text-slate-300">
-                      {ticketCustomer.phone}
-                    </p>
-                  </div>
-                )}
-
-                {ticketCustomer.company && (
-                  <div>
-                    <p className="text-[11px] uppercase tracking-wider text-slate-600">
-                      Company
-                    </p>
-
-                    <p className="mt-1 text-sm text-slate-300">
-                      {ticketCustomer.company}
-                    </p>
-                  </div>
-                )}
-              </div>
+              </button>
             </section>
 
             {/* Assignment */}
