@@ -7,6 +7,7 @@ import {
   Ticket,
   UserRound,
   X,
+  ShieldAlert,
 } from "lucide-react";
 
 import { NavLink, Link } from "react-router-dom";
@@ -30,6 +31,12 @@ const AgentSidebar = ({ mobileOpen = false, onClose = () => {} }) => {
       path: "/agent/my-tickets",
       icon: ClipboardList,
       end: true,
+    },
+    {
+      label: "Escalated Tickets",
+      name: "Escalated Tickets",
+      path: "/agent/escalated",
+      icon: ShieldAlert,
     },
   ];
 

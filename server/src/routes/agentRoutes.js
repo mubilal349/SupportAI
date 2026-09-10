@@ -13,6 +13,8 @@ import {
   updateTicketPriority,
   updateTicketStatus,
   getAgentCustomerProfile,
+  escalateTicket,
+  getEscalatedTickets,
 } from "../controllers/agentController.js";
 
 import { requireAgent } from "../middleware/agentMiddleware.js";
@@ -77,6 +79,12 @@ router.get(
 
 router.get("/tickets/:ticketId", getAgentTicketById);
 
+// =======================================================
+// ESCALATED TICKETS
+// =======================================================
+
+router.get("/escalated", authenticateToken, requireAgent, getEscalatedTickets);
+
 /* =========================================================
    ASSIGN TICKET
 ========================================================= */
@@ -111,5 +119,16 @@ router.post(
 ========================================================= */
 
 router.post("/tickets/:ticketId/internal-note", addInternalNote);
+
+/* =========================================================
+   ESCALATE
+========================================================= */
+
+router.post(
+  "/tickets/:ticketId/escalate",
+  authenticateToken,
+  requireAgent,
+  escalateTicket,
+);
 
 export default router;

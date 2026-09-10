@@ -293,21 +293,47 @@ const ticketSchema = new mongoose.Schema(
     // ESCALATION
     // ==========================================
 
-    isEscalated: {
-      type: Boolean,
-      default: false,
-    },
+    escalation: {
+      isEscalated: {
+        type: Boolean,
+        default: false,
+      },
 
-    escalatedAt: {
-      type: Date,
-      default: null,
-    },
+      escalatedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
 
-    escalationReason: {
-      type: String,
-      trim: true,
-      maxlength: 1000,
-      default: "",
+      escalatedTo: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+
+      reason: {
+        type: String,
+        trim: true,
+        maxlength: 1000,
+        default: "",
+      },
+
+      note: {
+        type: String,
+        trim: true,
+        maxlength: 5000,
+        default: "",
+      },
+
+      escalatedAt: {
+        type: Date,
+        default: null,
+      },
+
+      resolvedAt: {
+        type: Date,
+        default: null,
+      },
     },
 
     // ==========================================

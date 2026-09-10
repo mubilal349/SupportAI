@@ -133,3 +133,24 @@ export const getAgentCustomerProfile = async (customerId) => {
 
   return response.data;
 };
+
+// escalate service
+
+export const escalateAgentTicket = async (ticketId, escalationData) => {
+  const response = await api.post(
+    `/agent/tickets/${ticketId}/escalate`,
+    escalationData,
+  );
+
+  return response.data;
+};
+
+// =======================================================
+// GET ESCALATED TICKETS
+// =======================================================
+
+export const getEscalatedTickets = async () => {
+  const response = await api.get("/agent/escalated");
+
+  return response.data;
+};

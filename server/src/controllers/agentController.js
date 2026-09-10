@@ -1,7 +1,11 @@
 import mongoose from "mongoose";
 import Ticket from "../models/Ticket.js";
 import User from "../models/User.js";
-import { getSocketIO, getAgentTicketRoom } from "../socket/socket.js";
+import {
+  getSocketIO,
+  getTicketRoom,
+  getAgentTicketRoom,
+} from "../socket/socket.js";
 
 /*
  * =========================================================
@@ -2009,6 +2013,409 @@ export const addInternalNote = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to add internal note.",
+      error: error.message,
+    });
+  }
+};
+
+/*
+ * =========================================================
+ * ESCALATE TICKET
+ * =========================================================
+ *
+ * Agent can escalate their own ticket to:
+ *
+ * 1. A specific admin
+ * 2. A senior agent
+ *
+ * The ticket remains associated with the original agent,
+ * but escalation information identifies who needs to handle it.
+ *
+ * =========================================================
+ */
+
+export const escalateTicket = async (req, res) => {
+  try {
+    const agentId = getUserId(req);
+    const role = getUserRole(req);
+
+    const { ticketId } = req.params;
+
+    const { escalatedTo = null, reason = "", note = "" } = req.body;
+
+    // =======================================================
+    // AUTHENTICATION
+    // =======================================================
+
+    if (!agentId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    // =======================================================
+    // VALIDATE TICKET ID
+    // =======================================================
+
+    if (!ticketId || !mongoose.Types.ObjectId.isValid(ticketId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID.",
+      });
+    }
+
+    // =======================================================
+    // VALIDATE REASON
+    // =======================================================
+
+    const cleanReason = String(reason || "").trim();
+    const cleanNote = String(note || "").trim();
+
+    if (!cleanReason) {
+      return res.status(400).json({
+        success: false,
+        message: "Escalation reason is required.",
+      });
+    }
+
+    if (cleanReason.length > 500) {
+      return res.status(400).json({
+        success: false,
+        message: "Escalation reason cannot exceed 500 characters.",
+      });
+    }
+
+    if (cleanNote.length > 5000) {
+      return res.status(400).json({
+        success: false,
+        message: "Escalation note cannot exceed 5000 characters.",
+      });
+    }
+
+    // =======================================================
+    // FIND TICKET
+    // =======================================================
+
+    const ticket = await Ticket.findById(ticketId);
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found.",
+      });
+    }
+
+    // =======================================================
+    // ACCESS CONTROL
+    // =======================================================
+
+    const assignedAgentId = normalizeId(ticket.assignedAgent);
+    const currentAgentId = normalizeId(agentId);
+
+    const isAdmin = role === "admin";
+
+    const isAssignedAgent =
+      assignedAgentId && assignedAgentId === currentAgentId;
+
+    const isUnassigned = !assignedAgentId;
+
+    /*
+     * Admin can escalate any ticket.
+     *
+     * Agent can escalate:
+     * - their own ticket
+     * - an unassigned ticket
+     */
+
+    if (!isAdmin && !isAssignedAgent && !isUnassigned) {
+      return res.status(403).json({
+        success: false,
+        message: "You cannot escalate a ticket assigned to another agent.",
+      });
+    }
+
+    // =======================================================
+    // CHECK EXISTING ESCALATION
+    // =======================================================
+
+    if (ticket.escalation?.isEscalated) {
+      return res.status(409).json({
+        success: false,
+        message: "This ticket is already escalated.",
+      });
+    }
+
+    // =======================================================
+    // VALIDATE ESCALATION TARGET
+    // =======================================================
+
+    let targetUser = null;
+
+    if (escalatedTo) {
+      if (!mongoose.Types.ObjectId.isValid(escalatedTo)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid escalation target.",
+        });
+      }
+
+      targetUser = await User.findById(escalatedTo)
+        .select("name email role status")
+        .lean();
+
+      if (!targetUser) {
+        return res.status(404).json({
+          success: false,
+          message: "Escalation target not found.",
+        });
+      }
+
+      /*
+       * Only admin or agent can receive escalations.
+       */
+
+      if (!["admin", "agent"].includes(targetUser.role)) {
+        return res.status(400).json({
+          success: false,
+          message: "Ticket can only be escalated to an admin or agent.",
+        });
+      }
+
+      /*
+       * Do not allow escalation to yourself.
+       */
+
+      if (normalizeId(targetUser._id) === currentAgentId) {
+        return res.status(400).json({
+          success: false,
+          message: "You cannot escalate a ticket to yourself.",
+        });
+      }
+    }
+
+    // =======================================================
+    // AUTO ASSIGN UNASSIGNED TICKET
+    // =======================================================
+
+    if (isUnassigned) {
+      ticket.assignedAgent = agentId;
+    }
+
+    // =======================================================
+    // ESCALATION DATA
+    // =======================================================
+
+    ticket.escalation = {
+      isEscalated: true,
+      escalatedBy: agentId,
+      escalatedTo: targetUser?._id || null,
+      reason: cleanReason,
+      note: cleanNote,
+      escalatedAt: new Date(),
+      resolvedAt: null,
+    };
+
+    // =======================================================
+    // UPDATE STATUS
+    // =======================================================
+
+    const previousStatus = ticket.status;
+
+    /*
+     * Escalated tickets should remain actionable.
+     *
+     * If currently open/waiting, move to in-progress.
+     */
+
+    if (["open", "waiting"].includes(ticket.status)) {
+      ticket.status = "in-progress";
+    }
+
+    // =======================================================
+    // STATUS HISTORY
+    // =======================================================
+
+    addStatusHistory({
+      ticket,
+      status: ticket.status,
+      changedBy: agentId,
+      changedByRole: isAdmin ? "admin" : "agent",
+      note: `Ticket escalated. Reason: ${cleanReason}${
+        targetUser
+          ? ` Escalated to ${targetUser.name || targetUser.email}.`
+          : " Escalated to senior support."
+      }`,
+    });
+
+    // =======================================================
+    // SAVE
+    // =======================================================
+
+    await ticket.save();
+
+    // =======================================================
+    // POPULATE
+    // =======================================================
+
+    await ticket.populate([
+      {
+        path: "customer",
+        select: "name email avatar profileImage phone company",
+      },
+      {
+        path: "assignedAgent",
+        select: "name email avatar profileImage role",
+      },
+      {
+        path: "escalation.escalatedBy",
+        select: "name email avatar profileImage role",
+      },
+      {
+        path: "escalation.escalatedTo",
+        select: "name email avatar profileImage role",
+      },
+    ]);
+
+    // =======================================================
+    // SOCKET.IO
+    // =======================================================
+
+    const io = getSocketIO();
+
+    if (io) {
+      const room = getTicketRoom(ticket._id);
+
+      io.to(room).emit("ticket:escalated", {
+        ticketId: ticket._id.toString(),
+        ticket,
+      });
+
+      io.to(room).emit("ticket:update", {
+        ticket,
+      });
+    }
+
+    // =======================================================
+    // RESPONSE
+    // =======================================================
+
+    return res.status(200).json({
+      success: true,
+      message: "Ticket escalated successfully.",
+      ticket,
+    });
+  } catch (error) {
+    console.error("========================================");
+    console.error("ESCALATE TICKET ERROR");
+    console.error("MESSAGE:", error.message);
+    console.error("NAME:", error.name);
+    console.error("STACK:", error.stack);
+    console.error("========================================");
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to escalate ticket.",
+      error: error.message,
+    });
+  }
+};
+
+// =======================================================
+// GET ESCALATED TICKETS
+// =======================================================
+
+export const getEscalatedTickets = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const role = getUserRole(req);
+
+    // =====================================================
+    // AUTHENTICATION
+    // =====================================================
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    // =====================================================
+    // ONLY AGENT / ADMIN
+    // =====================================================
+
+    if (!["agent", "admin"].includes(role)) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to view escalated tickets.",
+      });
+    }
+
+    // =====================================================
+    // QUERY
+    // =====================================================
+
+    const query = {
+      "escalation.isEscalated": true,
+    };
+
+    /*
+     * If an escalation has a specific target,
+     * only that target should see it.
+     *
+     * Admin can see all escalated tickets.
+     *
+     * Agents see:
+     * - tickets specifically escalated to them
+     * - tickets escalated without a specific target
+     */
+
+    if (role === "agent") {
+      query.$or = [
+        {
+          "escalation.escalatedTo": userId,
+        },
+        {
+          "escalation.escalatedTo": null,
+        },
+      ];
+    }
+
+    // =====================================================
+    // GET TICKETS
+    // =====================================================
+
+    const tickets = await Ticket.find(query)
+      .populate("customer", "name email avatar profileImage")
+      .populate("assignedAgent", "name email avatar profileImage role")
+      .populate("escalation.escalatedBy", "name email avatar profileImage role")
+      .populate("escalation.escalatedTo", "name email avatar profileImage role")
+      .sort({
+        "escalation.escalatedAt": -1,
+      })
+      .lean();
+
+    // =====================================================
+    // RESPONSE
+    // =====================================================
+
+    return res.status(200).json({
+      success: true,
+      count: tickets.length,
+      tickets,
+    });
+  } catch (error) {
+    console.error("========================================");
+    console.error("GET ESCALATED TICKETS ERROR");
+    console.error("MESSAGE:", error.message);
+    console.error("NAME:", error.name);
+    console.error("STACK:", error.stack);
+    console.error("========================================");
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch escalated tickets.",
       error: error.message,
     });
   }

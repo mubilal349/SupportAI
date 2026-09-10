@@ -6,6 +6,7 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
+  ChevronDown,
   Clock3,
   Download,
   File,
@@ -16,10 +17,10 @@ import {
   Paperclip,
   RefreshCw,
   Send,
+  ShieldAlert,
   User,
   UserCheck,
   X,
-  ChevronDown,
 } from "lucide-react";
 
 import { io } from "socket.io-client";
@@ -33,6 +34,7 @@ import {
   updateAgentTicketPriority,
   updateAgentTicketStatus,
   addInternalNote,
+  escalateAgentTicket,
 } from "../../../services/agentService";
 
 import { useAuth } from "../../../context/AuthContext";
@@ -260,6 +262,22 @@ const AgentTicketDetails = () => {
 
   /*
   |--------------------------------------------------------------------------
+  | Ticket Escalation
+  |--------------------------------------------------------------------------
+  */
+
+  const [showEscalateModal, setShowEscalateModal] = useState(false);
+
+  const [escalationReason, setEscalationReason] = useState("");
+
+  const [escalationNote, setEscalationNote] = useState("");
+
+  const [escalating, setEscalating] = useState(false);
+
+  const [escalationError, setEscalationError] = useState("");
+
+  /*
+  |--------------------------------------------------------------------------
   | Customer Typing Indicator
   |--------------------------------------------------------------------------
   */
@@ -333,6 +351,20 @@ const AgentTicketDetails = () => {
           statusHistory: Array.isArray(rawTicket.statusHistory)
             ? rawTicket.statusHistory
             : [],
+
+          /*
+           * Keep escalation information available even when
+           * the backend doesn't return an escalation object.
+           */
+          escalation: rawTicket.escalation || {
+            isEscalated: false,
+            escalatedBy: null,
+            escalatedTo: null,
+            reason: "",
+            note: "",
+            escalatedAt: null,
+            resolvedAt: null,
+          },
         };
 
         console.log("========================================");
@@ -341,6 +373,7 @@ const AgentTicketDetails = () => {
         console.log("DESCRIPTION:", normalizedTicket.description);
         console.log("CONVERSATION:", normalizedTicket.conversation);
         console.log("ATTACHMENTS:", normalizedTicket.attachments);
+        console.log("ESCALATION:", normalizedTicket.escalation);
         console.log("========================================");
 
         setTicket(normalizedTicket);
@@ -368,20 +401,6 @@ const AgentTicketDetails = () => {
   |--------------------------------------------------------------------------
   | Customer Typing Socket
   |--------------------------------------------------------------------------
-  |
-  | Agent joins the current ticket room and listens for:
-  |
-  | ticket:typing
-  |
-  | Backend sends:
-  |
-  | {
-  |   ticketId,
-  |   userId,
-  |   role: "customer",
-  |   isTyping: true/false
-  | }
-  |
   */
 
   useEffect(() => {
@@ -411,12 +430,6 @@ const AgentTicketDetails = () => {
       const handleConnect = () => {
         console.log("AGENT TYPING SOCKET CONNECTED:", socket.id);
 
-        /*
-         * Join this ticket's room.
-         *
-         * Backend:
-         * ticket:join
-         */
         socket.emit("ticket:join", {
           ticketId,
         });
@@ -427,18 +440,10 @@ const AgentTicketDetails = () => {
       };
 
       const handleCustomerTyping = (data) => {
-        /*
-         * Make sure the event belongs to this ticket.
-         */
         if (String(data?.ticketId || "") !== String(ticketId)) {
           return;
         }
 
-        /*
-         * We only want the CUSTOMER typing indicator.
-         *
-         * Ignore agent/admin typing events.
-         */
         const role = String(data?.role || "").toLowerCase();
 
         if (role !== "customer") {
@@ -462,10 +467,6 @@ const AgentTicketDetails = () => {
 
       socket.on("ticket:error", handleSocketError);
 
-      /*
-       * If the socket connects immediately,
-       * join the ticket room.
-       */
       if (socket.connected) {
         handleConnect();
       }
@@ -473,23 +474,14 @@ const AgentTicketDetails = () => {
       return () => {
         console.log("LEAVING AGENT TICKET SOCKET:", ticketId);
 
-        /*
-         * Stop showing typing indicator.
-         */
         setCustomerTyping(false);
 
-        /*
-         * Leave ticket room.
-         */
         if (socket.connected) {
           socket.emit("ticket:leave", {
             ticketId,
           });
         }
 
-        /*
-         * Remove listeners.
-         */
         socket.off("connect", handleConnect);
 
         socket.off("ticket:joined", handleJoined);
@@ -498,9 +490,6 @@ const AgentTicketDetails = () => {
 
         socket.off("ticket:error", handleSocketError);
 
-        /*
-         * Disconnect this page's socket.
-         */
         socket.disconnect();
 
         if (socketRef.current === socket) {
@@ -529,18 +518,6 @@ const AgentTicketDetails = () => {
       ? ticket.conversation
       : [];
 
-    /*
-     * The original customer issue is normally stored in:
-     *
-     * ticket.description
-     *
-     * It may NOT exist inside:
-     *
-     * ticket.conversation
-     *
-     * Therefore we create a frontend-only initial message.
-     */
-
     const description = String(
       ticket.description || ticket.initialMessage || ticket.message || "",
     ).trim();
@@ -549,21 +526,9 @@ const AgentTicketDetails = () => {
 
     console.log("CONVERSATION BUILDER - EXISTING:", existingConversation);
 
-    /*
-     * If there is no description, simply use the existing
-     * conversation.
-     */
-
     if (!description) {
       return existingConversation;
     }
-
-    /*
-     * Check whether backend already saved the original
-     * description as a customer message.
-     *
-     * This prevents duplicate messages.
-     */
 
     const originalAlreadyExists = existingConversation.some((message) => {
       const messageText = String(message?.message || "").trim();
@@ -578,10 +543,6 @@ const AgentTicketDetails = () => {
     if (originalAlreadyExists) {
       return existingConversation;
     }
-
-    /*
-     * Create the original customer message.
-     */
 
     const originalTicketMessage = {
       _id: `initial-ticket-${ticket.id || ticket._id}`,
@@ -605,11 +566,6 @@ const AgentTicketDetails = () => {
 
       isInitialTicketMessage: true,
     };
-
-    /*
-     * IMPORTANT:
-     * Original ticket message goes FIRST.
-     */
 
     return [originalTicketMessage, ...existingConversation];
   }, [ticket]);
@@ -664,10 +620,11 @@ const AgentTicketDetails = () => {
   };
 
   /*
-|--------------------------------------------------------------------------
-| Assign ticket to current agent
-|--------------------------------------------------------------------------
-*/
+  |--------------------------------------------------------------------------
+  | Assign ticket to current agent
+  |--------------------------------------------------------------------------
+  */
+
   const handleAssignToMe = async () => {
     const id = ticket?.id || ticket?._id;
 
@@ -676,26 +633,15 @@ const AgentTicketDetails = () => {
       return;
     }
 
-    /*
-     * Prevent duplicate assignment requests.
-     */
     if (assigning) {
       return;
     }
 
-    /*
-     * If the ticket is already assigned to the current agent,
-     * there is nothing to do.
-     */
     if (isAssignedToCurrentUser) {
       setSuccess("This ticket is already assigned to you.");
       return;
     }
 
-    /*
-     * If another agent is already assigned, don't attempt
-     * to overwrite that assignment from the frontend.
-     */
     if (assignedAgent && !isAssignedToCurrentUser) {
       setAssignError("This ticket is already assigned to another agent.");
       return;
@@ -744,21 +690,16 @@ const AgentTicketDetails = () => {
             statusHistory: Array.isArray(updatedTicket.statusHistory)
               ? updatedTicket.statusHistory
               : previous.statusHistory || [],
+
+            escalation: updatedTicket.escalation || previous.escalation,
           };
         });
       } else {
-        /*
-         * Backend didn't return the complete ticket.
-         * Reload it so assignment is confirmed from the server.
-         */
         await loadTicket(false);
       }
 
       setSuccess("Ticket assigned to you successfully.");
 
-      /*
-       * Automatically remove the success message after a few seconds.
-       */
       setTimeout(() => {
         setSuccess("");
       }, 3000);
@@ -779,7 +720,7 @@ const AgentTicketDetails = () => {
 
   /*
   |--------------------------------------------------------------------------
-  | HANDLEADDINTERNALNOTE
+  | Add Internal Note
   |--------------------------------------------------------------------------
   */
 
@@ -805,23 +746,17 @@ const AgentTicketDetails = () => {
       setIsAddingInternalNote(true);
       setInternalNoteError("");
 
-      const ticketId = ticket.id || ticket._id;
+      const id = ticket.id || ticket._id;
 
-      const response = await addInternalNote(ticketId, cleanNote);
+      const response = await addInternalNote(id, cleanNote);
 
       const updatedTicket = response?.ticket || response?.data?.ticket || null;
 
       const newNote = response?.note || response?.data?.note || null;
 
-      /*
-       * Update complete ticket if backend returned it.
-       */
       if (updatedTicket) {
         setTicket(updatedTicket);
       } else if (newNote) {
-        /*
-         * Otherwise append the note locally.
-         */
         setTicket((previousTicket) => {
           if (!previousTicket) return previousTicket;
 
@@ -844,6 +779,129 @@ const AgentTicketDetails = () => {
       );
     } finally {
       setIsAddingInternalNote(false);
+    }
+  };
+
+  /*
+  |--------------------------------------------------------------------------
+  | Escalate Ticket
+  |--------------------------------------------------------------------------
+  */
+
+  const handleEscalateTicket = async () => {
+    if (!ticket) {
+      return;
+    }
+
+    const id = ticket.id || ticket._id;
+
+    if (!id) {
+      setEscalationError("Ticket ID is missing.");
+      return;
+    }
+
+    if (!escalationReason.trim()) {
+      setEscalationError("Please select an escalation reason.");
+      return;
+    }
+
+    if (escalationReason.trim().length > 500) {
+      setEscalationError("Escalation reason cannot exceed 500 characters.");
+      return;
+    }
+
+    if (escalationNote.trim().length > 5000) {
+      setEscalationError("Escalation note cannot exceed 5,000 characters.");
+      return;
+    }
+
+    if (ticket?.escalation?.isEscalated) {
+      setEscalationError("This ticket is already escalated.");
+      return;
+    }
+
+    try {
+      setEscalating(true);
+      setEscalationError("");
+      setError("");
+      setSuccess("");
+
+      const response = await escalateAgentTicket(id, {
+        /*
+         * No target is selected here.
+         *
+         * Backend can route this to senior support/admin
+         * depending on your escalation implementation.
+         */
+        escalatedTo: null,
+
+        reason: escalationReason.trim(),
+
+        note: escalationNote.trim(),
+      });
+
+      console.log("ESCALATE TICKET RESPONSE:", response);
+
+      const updatedTicket =
+        response?.ticket || response?.data?.ticket || response?.data || null;
+
+      if (updatedTicket) {
+        setTicket((previous) => {
+          if (!previous) {
+            return previous;
+          }
+
+          return {
+            ...previous,
+            ...updatedTicket,
+
+            id: updatedTicket.id || updatedTicket._id || previous.id,
+
+            _id: updatedTicket._id || updatedTicket.id || previous._id,
+
+            conversation: Array.isArray(updatedTicket.conversation)
+              ? updatedTicket.conversation
+              : previous.conversation || [],
+
+            attachments: Array.isArray(updatedTicket.attachments)
+              ? updatedTicket.attachments
+              : previous.attachments || [],
+
+            statusHistory: Array.isArray(updatedTicket.statusHistory)
+              ? updatedTicket.statusHistory
+              : previous.statusHistory || [],
+
+            escalation: updatedTicket.escalation || previous.escalation,
+          };
+        });
+      } else {
+        await loadTicket(false);
+      }
+
+      setShowEscalateModal(false);
+
+      setEscalationReason("");
+
+      setEscalationNote("");
+
+      setSuccess(
+        "Ticket escalated successfully. Senior support has been notified.",
+      );
+
+      setTimeout(() => {
+        setSuccess("");
+      }, 4000);
+    } catch (err) {
+      console.error("ESCALATE TICKET ERROR:", err);
+
+      setEscalationError(
+        err?.response?.data?.message ||
+          err?.response?.data?.error ||
+          err?.message ||
+          "Failed to escalate ticket.",
+      );
+    } finally {
+      setEscalating(false);
     }
   };
 
@@ -888,6 +946,8 @@ const AgentTicketDetails = () => {
           statusHistory: Array.isArray(updatedTicket.statusHistory)
             ? updatedTicket.statusHistory
             : previous.statusHistory || [],
+
+          escalation: updatedTicket.escalation || previous.escalation,
         }));
       } else {
         setTicket((previous) => ({
@@ -951,6 +1011,8 @@ const AgentTicketDetails = () => {
           statusHistory: Array.isArray(updatedTicket.statusHistory)
             ? updatedTicket.statusHistory
             : previous.statusHistory || [],
+
+          escalation: updatedTicket.escalation || previous.escalation,
         }));
       } else {
         setTicket((previous) => ({
@@ -1025,13 +1087,10 @@ const AgentTicketDetails = () => {
           statusHistory: Array.isArray(updatedTicket.statusHistory)
             ? updatedTicket.statusHistory
             : previous.statusHistory || [],
+
+          escalation: updatedTicket.escalation || previous.escalation,
         }));
       } else {
-        /*
-         * If backend doesn't return the complete ticket,
-         * refresh it.
-         */
-
         await loadTicket(false);
       }
 
@@ -1258,6 +1317,7 @@ const AgentTicketDetails = () => {
   const assignedAgent = ticket.assignedAgent || null;
 
   const assignedAgentId = getId(assignedAgent);
+
   const currentUserId = getId(user);
 
   const isAssigned = Boolean(assignedAgentId);
@@ -1275,7 +1335,26 @@ const AgentTicketDetails = () => {
 
   const isResolved = String(ticket.status || "").toLowerCase() === "resolved";
 
+  const isEscalated = ticket?.escalation?.isEscalated === true;
+
+  const isAdmin = String(user?.role || "").toLowerCase() === "admin";
+
+  /*
+   * An agent can escalate:
+   *
+   * - their own assigned ticket
+   * - an unassigned ticket
+   * - admin can escalate any ticket
+   *
+   * Another agent's ticket cannot be escalated by this agent.
+   */
+  const canEscalate =
+    !isClosed &&
+    !isEscalated &&
+    (isAssignedToCurrentUser || isUnassigned || isAdmin);
+
   const canReply = !isClosed;
+
   /*
   |--------------------------------------------------------------------------
   | Render
@@ -1309,6 +1388,13 @@ const AgentTicketDetails = () => {
                 {ticket.ticketNumber && (
                   <span className="rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-400">
                     #{ticket.ticketNumber}
+                  </span>
+                )}
+
+                {isEscalated && (
+                  <span className="inline-flex items-center gap-1.5 rounded-lg border border-orange-500/20 bg-orange-500/10 px-2.5 py-1 text-xs font-semibold text-orange-400">
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    Escalated
                   </span>
                 )}
               </div>
@@ -1524,8 +1610,6 @@ const AgentTicketDetails = () => {
           ======================================================= */}
 
           <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
-            {/* Conversation header */}
-
             <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4 sm:px-6">
               <div>
                 <div className="flex items-center gap-2">
@@ -1544,8 +1628,6 @@ const AgentTicketDetails = () => {
                 Ticket #{ticket.ticketNumber || ticket.id}
               </div>
             </div>
-
-            {/* Messages */}
 
             <div className="max-h-[650px] overflow-y-auto p-4 sm:p-6">
               {conversation.length === 0 ? (
@@ -1585,10 +1667,6 @@ const AgentTicketDetails = () => {
                     const attachments = Array.isArray(message?.attachments)
                       ? message.attachments
                       : [];
-
-                    // =========================================================
-                    // INTERNAL NOTE
-                    // =========================================================
 
                     if (isInternalNote) {
                       return (
@@ -1634,10 +1712,6 @@ const AgentTicketDetails = () => {
                         </div>
                       );
                     }
-
-                    // =========================================================
-                    // NORMAL CUSTOMER / AGENT MESSAGE
-                    // =========================================================
 
                     return (
                       <div
@@ -1747,14 +1821,10 @@ const AgentTicketDetails = () => {
                 </div>
               )}
 
-              {/* =====================================================
-                  CUSTOMER TYPING INDICATOR
-              ===================================================== */}
+              {/* Customer typing */}
 
               {customerTyping && (
                 <div className="mt-4 flex items-center gap-3">
-                  {/* Customer avatar */}
-
                   <div className="shrink-0">
                     {ticketCustomer.avatar ? (
                       <img
@@ -1768,8 +1838,6 @@ const AgentTicketDetails = () => {
                       </div>
                     )}
                   </div>
-
-                  {/* Typing bubble */}
 
                   <div className="flex items-center gap-2 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-2.5">
                     <span className="text-xs font-medium text-slate-400">
@@ -1794,10 +1862,6 @@ const AgentTicketDetails = () => {
 
             {canReply && (
               <div className="border-t border-slate-800 p-4 sm:p-6">
-                {/* =========================================================
-        COMPOSER MODE
-    ========================================================= */}
-
                 <div className="mb-4 flex rounded-xl border border-slate-800 bg-slate-950 p-1">
                   <button
                     type="button"
@@ -1830,9 +1894,7 @@ const AgentTicketDetails = () => {
                   </button>
                 </div>
 
-                {/* =========================================================
-        CUSTOMER REPLY
-    ========================================================= */}
+                {/* Customer Reply */}
 
                 {composerMode === "reply" && (
                   <form onSubmit={handleSendReply}>
@@ -1854,8 +1916,6 @@ const AgentTicketDetails = () => {
                       disabled={sendingReply}
                       className="w-full resize-none rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-60"
                     />
-
-                    {/* Selected files */}
 
                     {selectedFiles.length > 0 && (
                       <div className="mt-3 space-y-2">
@@ -1945,9 +2005,7 @@ const AgentTicketDetails = () => {
                   </form>
                 )}
 
-                {/* =========================================================
-        INTERNAL NOTE
-    ========================================================= */}
+                {/* Internal Note */}
 
                 {composerMode === "internal" && (
                   <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
@@ -2022,8 +2080,6 @@ const AgentTicketDetails = () => {
               </div>
             )}
 
-            {/* Closed notice */}
-
             {!canReply && (
               <div className="border-t border-slate-800 p-5">
                 <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-500">
@@ -2044,6 +2100,7 @@ const AgentTicketDetails = () => {
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
               <div className="mb-4 flex items-center gap-2">
                 <User className="h-5 w-5 text-blue-400" />
+
                 <h2 className="font-semibold text-white">Customer</h2>
               </div>
 
@@ -2056,7 +2113,7 @@ const AgentTicketDetails = () => {
                     navigate(`/agent/customers/${customerId}`);
                   }
                 }}
-                className="group flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-slate-800/60 cursor-pointer"
+                className="group flex w-full cursor-pointer items-center gap-3 rounded-xl p-2 text-left transition hover:bg-slate-800/60"
               >
                 {ticketCustomer.avatar ? (
                   <img
@@ -2091,10 +2148,6 @@ const AgentTicketDetails = () => {
 
             {/* Assignment */}
 
-            {/* =========================================================
-    ASSIGNMENT
-========================================================= */}
-
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
@@ -2110,9 +2163,7 @@ const AgentTicketDetails = () => {
                 )}
               </div>
 
-              {/* =======================================================
-      UNASSIGNED
-  ======================================================= */}
+              {/* Unassigned */}
 
               {isUnassigned && (
                 <div>
@@ -2168,9 +2219,7 @@ const AgentTicketDetails = () => {
                 </div>
               )}
 
-              {/* =======================================================
-      ASSIGNED TO CURRENT AGENT
-  ======================================================= */}
+              {/* Assigned to current agent */}
 
               {isAssignedToCurrentUser && (
                 <div>
@@ -2212,9 +2261,7 @@ const AgentTicketDetails = () => {
                 </div>
               )}
 
-              {/* =======================================================
-      ASSIGNED TO ANOTHER AGENT
-  ======================================================= */}
+              {/* Assigned to another agent */}
 
               {isAssignedToAnotherAgent && (
                 <div>
@@ -2259,6 +2306,142 @@ const AgentTicketDetails = () => {
               )}
             </section>
 
+            {/* =====================================================
+                ESCALATION
+            ===================================================== */}
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="h-5 w-5 text-orange-400" />
+
+                  <h2 className="font-semibold text-white">Escalation</h2>
+                </div>
+
+                {isEscalated && (
+                  <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-orange-400">
+                    Escalated
+                  </span>
+                )}
+              </div>
+
+              {/* Not escalated */}
+
+              {!isEscalated && (
+                <div>
+                  <div className="rounded-xl border border-orange-500/10 bg-orange-500/5 p-3">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-orange-500/10">
+                        <ShieldAlert className="h-4 w-4 text-orange-400" />
+                      </div>
+
+                      <div>
+                        <p className="text-sm font-medium text-orange-300">
+                          Need senior assistance?
+                        </p>
+
+                        <p className="mt-1 text-xs leading-5 text-orange-400/70">
+                          Escalate difficult or sensitive tickets to senior
+                          support.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {canEscalate ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEscalationError("");
+                        setEscalationReason("");
+                        setEscalationNote("");
+                        setShowEscalateModal(true);
+                      }}
+                      className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-orange-500/20 bg-orange-500/10 px-4 py-2.5 text-sm font-semibold text-orange-400 transition hover:border-orange-500/40 hover:bg-orange-500/15 hover:text-orange-300"
+                    >
+                      <ShieldAlert className="h-4 w-4" />
+                      Escalate Ticket
+                    </button>
+                  ) : (
+                    <p className="mt-4 rounded-xl border border-slate-800 bg-slate-950 p-3 text-xs leading-5 text-slate-500">
+                      This ticket cannot be escalated from your current
+                      assignment.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Already escalated */}
+
+              {isEscalated && (
+                <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-500/10">
+                      <ShieldAlert className="h-5 w-5 text-orange-400" />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-semibold text-orange-300">
+                          Ticket Escalated
+                        </h3>
+
+                        <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-400">
+                          Pending
+                        </span>
+                      </div>
+
+                      {ticket.escalation?.reason && (
+                        <div className="mt-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-orange-500/60">
+                            Reason
+                          </p>
+
+                          <p className="mt-1 text-sm leading-5 text-slate-300">
+                            {ticket.escalation.reason}
+                          </p>
+                        </div>
+                      )}
+
+                      {ticket.escalation?.note && (
+                        <div className="mt-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-orange-500/60">
+                            Escalation Note
+                          </p>
+
+                          <div className="mt-1 rounded-lg border border-orange-500/10 bg-slate-950/70 p-3">
+                            <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-400">
+                              {ticket.escalation.note}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {ticket.escalation?.escalatedAt && (
+                        <p className="mt-3 text-[11px] text-slate-600">
+                          Escalated {formatDate(ticket.escalation.escalatedAt)}
+                        </p>
+                      )}
+
+                      {ticket.escalation?.escalatedTo && (
+                        <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950 p-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-600">
+                            Escalated To
+                          </p>
+
+                          <p className="mt-1 text-xs font-medium text-slate-300">
+                            {ticket.escalation.escalatedTo?.name ||
+                              ticket.escalation.escalatedTo?.email ||
+                              "Senior Support"}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+
             {/* Original ticket */}
 
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
@@ -2273,8 +2456,6 @@ const AgentTicketDetails = () => {
                   {ticket.description || "No description provided."}
                 </p>
               </div>
-
-              {/* Ticket attachments */}
 
               {Array.isArray(ticket.attachments) &&
                 ticket.attachments.length > 0 && (
@@ -2371,6 +2552,194 @@ const AgentTicketDetails = () => {
           </aside>
         </div>
       </div>
+
+      {/* =========================================================
+          ESCALATION MODAL
+      ========================================================= */}
+
+      {showEscalateModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => {
+            if (!escalating) {
+              setShowEscalateModal(false);
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            {/* Modal Header */}
+
+            <div className="flex items-start justify-between border-b border-slate-800 p-5">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-500/10">
+                  <ShieldAlert className="h-5 w-5 text-orange-400" />
+                </div>
+
+                <div>
+                  <h2 className="text-lg font-semibold text-white">
+                    Escalate Ticket
+                  </h2>
+
+                  <p className="mt-1 text-xs leading-5 text-slate-500">
+                    Send this ticket to senior support for additional
+                    assistance.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (!escalating) {
+                    setShowEscalateModal(false);
+                  }
+                }}
+                disabled={escalating}
+                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+
+            <div className="space-y-5 p-5">
+              {/* Reason */}
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-300">
+                  Escalation Reason
+                </label>
+
+                <div className="relative">
+                  <select
+                    value={escalationReason}
+                    onChange={(event) => {
+                      setEscalationReason(event.target.value);
+                      setEscalationError("");
+                    }}
+                    disabled={escalating}
+                    className="w-full appearance-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 pr-10 text-sm text-slate-200 outline-none transition focus:border-orange-500/50 focus:ring-2 focus:ring-orange-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <option value="">Select a reason</option>
+
+                    <option value="Technical issue">Technical issue</option>
+
+                    <option value="Requires senior approval">
+                      Requires senior approval
+                    </option>
+
+                    <option value="Customer complaint">
+                      Customer complaint
+                    </option>
+
+                    <option value="Billing issue">Billing issue</option>
+
+                    <option value="Security concern">Security concern</option>
+
+                    <option value="Complex issue">Complex issue</option>
+
+                    <option value="Other">Other</option>
+                  </select>
+
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                </div>
+              </div>
+
+              {/* Note */}
+
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <label className="block text-sm font-medium text-slate-300">
+                    Additional Note
+                  </label>
+
+                  <span className="text-[11px] text-slate-600">
+                    {escalationNote.length}/5000
+                  </span>
+                </div>
+
+                <textarea
+                  value={escalationNote}
+                  onChange={(event) => {
+                    setEscalationNote(event.target.value);
+                    setEscalationError("");
+                  }}
+                  placeholder="Explain why this ticket needs senior assistance..."
+                  rows={5}
+                  maxLength={5000}
+                  disabled={escalating}
+                  className="w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-slate-600 focus:border-orange-500/50 focus:ring-2 focus:ring-orange-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+
+              {/* Info */}
+
+              <div className="rounded-xl border border-orange-500/10 bg-orange-500/5 p-3">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-orange-400" />
+
+                  <p className="text-xs leading-5 text-orange-300/80">
+                    Escalating this ticket will mark it as escalated and notify
+                    the appropriate senior support team. The current ticket
+                    assignment will remain unchanged until the escalation is
+                    accepted.
+                  </p>
+                </div>
+              </div>
+
+              {/* Error */}
+
+              {escalationError && (
+                <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+
+                    <p className="text-xs leading-5 text-red-300">
+                      {escalationError}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+
+            <div className="flex flex-col-reverse gap-3 border-t border-slate-800 p-5 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowEscalateModal(false)}
+                disabled={escalating}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-5 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleEscalateTicket}
+                disabled={escalating || !escalationReason.trim()}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {escalating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Escalating...
+                  </>
+                ) : (
+                  <>
+                    <ShieldAlert className="h-4 w-4" />
+                    Escalate Ticket
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* =========================================================
           IMAGE PREVIEW
