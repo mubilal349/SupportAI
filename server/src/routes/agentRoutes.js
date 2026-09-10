@@ -15,6 +15,8 @@ import {
   getAgentCustomerProfile,
   escalateTicket,
   getEscalatedTickets,
+  getAgentAvailability,
+  updateAgentAvailability,
 } from "../controllers/agentController.js";
 
 import { requireAgent } from "../middleware/agentMiddleware.js";
@@ -34,6 +36,26 @@ router.use(authenticateToken, requireAgent);
 ========================================================= */
 
 router.get("/dashboard", getAgentDashboard);
+
+/*
+ * =========================================================
+ * AGENT AVAILABILITY
+ * =========================================================
+ */
+
+router.get(
+  "/availability",
+  authenticateToken,
+  requireAgent,
+  getAgentAvailability,
+);
+
+router.put(
+  "/availability",
+  authenticateToken,
+  requireAgent,
+  updateAgentAvailability,
+);
 
 /* =========================================================
    TICKET QUEUE

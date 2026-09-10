@@ -154,3 +154,21 @@ export const getEscalatedTickets = async () => {
 
   return response.data;
 };
+
+// =======================================================
+// AGENT AVAILABILITY
+// =======================================================
+
+export const getAgentAvailability = async () => {
+  const response = await api.get("/agent/availability");
+
+  return response.data;
+};
+
+export const updateAgentAvailability = async (availability) => {
+  const response = await api.put("/agent/availability", {
+    availability,
+  });
+
+  return response.data;
+};

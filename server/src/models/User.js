@@ -140,6 +140,12 @@ const userSchema = new mongoose.Schema(
       default: "active",
     },
 
+    availability: {
+      type: String,
+      enum: ["online", "away", "busy", "offline"],
+      default: "offline",
+    },
+
     // ==========================================
     // ACTIVITY
     // ==========================================

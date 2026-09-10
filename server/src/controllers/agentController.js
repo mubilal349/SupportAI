@@ -2531,3 +2531,230 @@ export const getAgentCustomerProfile = async (req, res) => {
     });
   }
 };
+
+/*
+ * =========================================================
+ * GET AGENT AVAILABILITY
+ * =========================================================
+ *
+ * Returns the availability status of the currently
+ * authenticated agent.
+ *
+ * Possible values:
+ * - online
+ * - away
+ * - busy
+ * - offline
+ *
+ * =========================================================
+ */
+
+export const getAgentAvailability = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const role = getUserRole(req);
+
+    // =======================================================
+    // AUTHENTICATION
+    // =======================================================
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    // =======================================================
+    // ROLE CHECK
+    // =======================================================
+
+    if (!["agent", "admin"].includes(role)) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to access agent availability.",
+      });
+    }
+
+    // =======================================================
+    // FIND CURRENT USER
+    // =======================================================
+
+    const user = await User.findById(userId)
+      .select("name email role availability lastSeen")
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Agent not found.",
+      });
+    }
+
+    // =======================================================
+    // RESPONSE
+    // =======================================================
+
+    return res.status(200).json({
+      success: true,
+
+      availability: user.availability || "offline",
+
+      lastSeen: user.lastSeen || null,
+
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        availability: user.availability || "offline",
+        lastSeen: user.lastSeen || null,
+      },
+    });
+  } catch (error) {
+    console.error("========================================");
+    console.error("GET AGENT AVAILABILITY ERROR");
+    console.error("MESSAGE:", error.message);
+    console.error("STACK:", error.stack);
+    console.error("========================================");
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load agent availability.",
+      error: error.message,
+    });
+  }
+};
+
+/*
+ * =========================================================
+ * UPDATE AGENT AVAILABILITY
+ * =========================================================
+ *
+ * Updates the availability of the currently authenticated
+ * agent.
+ *
+ * Allowed values:
+ *
+ * online
+ * away
+ * busy
+ * offline
+ *
+ * =========================================================
+ */
+
+export const updateAgentAvailability = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const role = getUserRole(req);
+
+    // =======================================================
+    // AUTHENTICATION
+    // =======================================================
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    // =======================================================
+    // ROLE CHECK
+    // =======================================================
+
+    if (!["agent", "admin"].includes(role)) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to update agent availability.",
+      });
+    }
+
+    // =======================================================
+    // VALID AVAILABILITY VALUES
+    // =======================================================
+
+    const allowedAvailability = ["online", "away", "busy", "offline"];
+
+    const availability = String(req.body?.availability || "")
+      .trim()
+      .toLowerCase();
+
+    // =======================================================
+    // VALIDATE AVAILABILITY
+    // =======================================================
+
+    if (!allowedAvailability.includes(availability)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid availability. Allowed values: ${allowedAvailability.join(
+          ", ",
+        )}`,
+      });
+    }
+
+    // =======================================================
+    // UPDATE USER
+    // =======================================================
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        availability,
+        lastSeen: new Date(),
+      },
+      {
+        new: true,
+        runValidators: true,
+      },
+    )
+      .select("name email role availability lastSeen")
+      .lean();
+
+    // =======================================================
+    // USER NOT FOUND
+    // =======================================================
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Agent not found.",
+      });
+    }
+
+    // =======================================================
+    // RESPONSE
+    // =======================================================
+
+    return res.status(200).json({
+      success: true,
+      message: "Agent availability updated successfully.",
+
+      availability: user.availability,
+
+      lastSeen: user.lastSeen,
+
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        availability: user.availability,
+        lastSeen: user.lastSeen,
+      },
+    });
+  } catch (error) {
+    console.error("========================================");
+    console.error("UPDATE AGENT AVAILABILITY ERROR");
+    console.error("MESSAGE:", error.message);
+    console.error("STACK:", error.stack);
+    console.error("========================================");
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update agent availability.",
+      error: error.message,
+    });
+  }
+};
