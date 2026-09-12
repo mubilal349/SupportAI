@@ -177,10 +177,10 @@ export const updateAgentAvailability = async (availability) => {
 // AGENT ANALYTICS
 // ==========================================
 
-export const getAgentAnalytics = async (range = "30d") => {
-  const response = await api.get("/agent/analytics", {
+export const getAgentAnalytics = async (period = "30d") => {
+  const response = await api.get("/analytics/agent", {
     params: {
-      range,
+      period,
     },
   });
 

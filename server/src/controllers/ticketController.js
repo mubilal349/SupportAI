@@ -1954,7 +1954,6 @@ export const getTicketStatusHistory = async (req, res) => {
 export const submitTicketRating = async (req, res) => {
   try {
     const { id } = req.params;
-
     const { rating, feedback } = req.body;
 
     /*
@@ -1966,7 +1965,6 @@ export const submitTicketRating = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-
         message: "Invalid ticket ID.",
       });
     }
@@ -1986,8 +1984,7 @@ export const submitTicketRating = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-
-        message: "Rating must be between 1 and 5.",
+        message: "Rating must be an integer between 1 and 5.",
       });
     }
 
@@ -1999,11 +1996,10 @@ export const submitTicketRating = async (req, res) => {
 
     const cleanFeedback = typeof feedback === "string" ? feedback.trim() : "";
 
-    if (cleanFeedback.length > 2000) {
+    if (cleanFeedback.length > 1000) {
       return res.status(400).json({
         success: false,
-
-        message: "Feedback cannot exceed 2000 characters.",
+        message: "Feedback cannot exceed 1000 characters.",
       });
     }
 
@@ -2011,32 +2007,31 @@ export const submitTicketRating = async (req, res) => {
      * =====================================================
      * FIND CUSTOMER TICKET
      * =====================================================
+     *
+     * The ticket must belong to the authenticated customer.
      */
 
     const ticket = await Ticket.findOne({
       _id: id,
-
       customer: req.user.id,
     });
 
     if (!ticket) {
       return res.status(404).json({
         success: false,
-
         message: "Ticket not found.",
       });
     }
 
     /*
      * =====================================================
-     * CHECK STATUS
+     * CHECK TICKET STATUS
      * =====================================================
      */
 
     if (!["resolved", "closed"].includes(ticket.status)) {
       return res.status(400).json({
         success: false,
-
         message: "You can only rate a resolved or closed ticket.",
       });
     }
@@ -2045,18 +2040,30 @@ export const submitTicketRating = async (req, res) => {
      * =====================================================
      * PREVENT DUPLICATE RATING
      * =====================================================
+     *
+     * Check both the new canonical satisfaction object
+     * and the old legacy rating field.
      */
 
-    if (ticket.customerRating !== null || ticket.ratedAt) {
+    if (
+      ticket.satisfaction?.rating !== null &&
+      ticket.satisfaction?.rating !== undefined
+    ) {
       return res.status(400).json({
         success: false,
-
         message: "This ticket has already been rated.",
+        rating: ticket.satisfaction.rating,
+        feedback: ticket.satisfaction.feedback || "",
+        ratedAt: ticket.satisfaction.submittedAt || null,
+      });
+    }
 
+    if (ticket.customerRating !== null && ticket.customerRating !== undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "This ticket has already been rated.",
         rating: ticket.customerRating,
-
         feedback: ticket.customerFeedback || "",
-
         ratedAt: ticket.ratedAt || null,
       });
     }
@@ -2069,10 +2076,30 @@ export const submitTicketRating = async (req, res) => {
 
     const ratedAt = new Date();
 
+    /*
+     * -----------------------------------------------------
+     * CANONICAL SATISFACTION DATA
+     * -----------------------------------------------------
+     */
+
+    ticket.satisfaction = {
+      rating: numericRating,
+      feedback: cleanFeedback,
+      submittedAt: ratedAt,
+      submittedBy: req.user.id,
+    };
+
+    /*
+     * -----------------------------------------------------
+     * LEGACY FIELDS
+     * -----------------------------------------------------
+     *
+     * Keep these fields synchronized so existing frontend
+     * components and analytics continue to work.
+     */
+
     ticket.customerRating = numericRating;
-
     ticket.customerFeedback = cleanFeedback;
-
     ticket.ratedAt = ratedAt;
 
     await ticket.save();
@@ -2091,11 +2118,18 @@ export const submitTicketRating = async (req, res) => {
 
         ticketNumber: ticket.ticketNumber,
 
-        rating: ticket.customerRating,
+        rating: numericRating,
 
-        feedback: ticket.customerFeedback || "",
+        feedback: cleanFeedback,
 
-        ratedAt: ticket.ratedAt,
+        ratedAt,
+
+        satisfaction: {
+          rating: numericRating,
+          feedback: cleanFeedback,
+          submittedAt: ratedAt,
+          submittedBy: String(req.user.id),
+        },
       });
     }
 
@@ -2110,18 +2144,34 @@ export const submitTicketRating = async (req, res) => {
 
       message: "Thank you for your feedback.",
 
-      rating: ticket.customerRating,
+      /*
+       * Legacy response fields
+       */
+      rating: numericRating,
+      feedback: cleanFeedback,
+      ratedAt,
 
-      feedback: ticket.customerFeedback || "",
+      /*
+       * Canonical satisfaction object
+       */
+      satisfaction: {
+        rating: numericRating,
+        feedback: cleanFeedback,
+        submittedAt: ratedAt,
+        submittedBy: req.user.id,
+      },
 
-      ratedAt: ticket.ratedAt,
+      /*
+       * Useful for the frontend because your updated
+       * handleSubmitRating already supports response.ticket
+       */
+      ticket,
     });
   } catch (error) {
     console.error("SUBMIT TICKET RATING ERROR:", error);
 
     return res.status(500).json({
       success: false,
-
       message: "Failed to submit ticket rating.",
     });
   }

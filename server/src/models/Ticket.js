@@ -191,6 +191,33 @@ const ticketSchema = new mongoose.Schema(
     },
 
     // ==========================================
+    // FEEDBACK AND RATING
+    // ==========================================
+
+    satisfaction: {
+      rating: {
+        type: Number,
+        min: 1,
+        max: 5,
+        default: null,
+      },
+      feedback: {
+        type: String,
+        maxlength: 1000,
+        default: "",
+      },
+      submittedAt: {
+        type: Date,
+        default: null,
+      },
+      submittedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+    },
+
+    // ==========================================
     // STATUS HISTORY
     // ==========================================
 

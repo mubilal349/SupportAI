@@ -2,6 +2,7 @@ import express from "express";
 
 import { getCustomerAnalytics } from "../controllers/analyticsController.js";
 
+import { getAgentAnalytics } from "../controllers/agentAnalyticsController.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -26,5 +27,8 @@ router.use(authenticateToken);
 // GET /api/analytics/customer?period=90d
 
 router.get("/customer", getCustomerAnalytics);
+
+// Agent Analytics
+router.get("/agent", getAgentAnalytics);
 
 export default router;

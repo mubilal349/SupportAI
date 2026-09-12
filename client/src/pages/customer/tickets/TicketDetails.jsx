@@ -299,14 +299,48 @@ const normalizeTicket = (data, fallbackId = "") => {
         : normalizedConversation.length,
 
     /*
-     * CUSTOMER RATING
+     * CUSTOMER SATISFACTION
+     *
+     * The satisfaction object is the canonical structure.
+     * Legacy fields are preserved for backward compatibility.
      */
-    customerRating: data.customerRating ?? data.rating ?? null,
+    satisfaction: {
+      rating:
+        data?.satisfaction?.rating ??
+        data?.customerRating ??
+        data?.rating ??
+        null,
+
+      feedback:
+        data?.satisfaction?.feedback ??
+        data?.customerFeedback ??
+        data?.feedback ??
+        "",
+
+      submittedAt: data?.satisfaction?.submittedAt ?? data?.ratedAt ?? null,
+
+      submittedBy: data?.satisfaction?.submittedBy ?? null,
+    },
 
     /*
-     * CUSTOMER FEEDBACK
+     * LEGACY CUSTOMER RATING
      */
-    customerFeedback: data.customerFeedback ?? data.feedback ?? "",
+    customerRating:
+      data?.customerRating ??
+      data?.satisfaction?.rating ??
+      data?.rating ??
+      null,
+
+    /*
+     * LEGACY CUSTOMER FEEDBACK
+     */
+    customerFeedback:
+      data?.customerFeedback ??
+      data?.satisfaction?.feedback ??
+      data?.feedback ??
+      "",
+
+    ratedAt: data?.ratedAt ?? data?.satisfaction?.submittedAt ?? null,
 
     statusHistory: Array.isArray(data.statusHistory) ? data.statusHistory : [],
   };
@@ -1706,7 +1740,14 @@ const TicketDetails = () => {
       return;
     }
 
-    if (!rating || rating < 1 || rating > 5) {
+    if (!["resolved", "closed"].includes(ticket.status)) {
+      setRatingError(
+        "You can submit a rating only after the ticket has been resolved.",
+      );
+      return;
+    }
+
+    if (!rating || Number(rating) < 1 || Number(rating) > 5) {
       setRatingError("Please select a rating from 1 to 5.");
       return;
     }
@@ -1733,22 +1774,52 @@ const TicketDetails = () => {
 
       const savedRating =
         updatedTicket?.customerRating ??
+        updatedTicket?.satisfaction?.rating ??
         updatedTicket?.rating ??
         response?.customerRating ??
+        response?.satisfaction?.rating ??
         response?.rating ??
         Number(rating);
 
       const savedFeedback =
         updatedTicket?.customerFeedback ??
+        updatedTicket?.satisfaction?.feedback ??
         updatedTicket?.feedback ??
         response?.customerFeedback ??
+        response?.satisfaction?.feedback ??
         response?.feedback ??
         trimmedFeedback;
 
+      const savedRatedAt =
+        updatedTicket?.ratedAt ??
+        updatedTicket?.satisfaction?.submittedAt ??
+        response?.ratedAt ??
+        response?.satisfaction?.submittedAt ??
+        new Date().toISOString();
+
       setTicket((prev) => ({
         ...prev,
+
+        /*
+         * Legacy fields
+         */
         customerRating: Number(savedRating),
         customerFeedback: savedFeedback,
+        ratedAt: savedRatedAt,
+
+        /*
+         * Canonical satisfaction structure
+         */
+        satisfaction: {
+          ...(prev?.satisfaction || {}),
+          rating: Number(savedRating),
+          feedback: savedFeedback,
+          submittedAt: savedRatedAt,
+          submittedBy:
+            updatedTicket?.satisfaction?.submittedBy ||
+            prev?.satisfaction?.submittedBy ||
+            null,
+        },
       }));
 
       setRating(Number(savedRating));
