@@ -317,6 +317,77 @@ const getStatusClasses = (status = "") => {
 };
 
 // ============================================================
+// SLA HELPERS
+// ============================================================
+
+const getSlaStatusClasses = (status = "") => {
+  const value = String(status).toLowerCase();
+
+  if (value === "met") {
+    return {
+      badge: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+      dot: "bg-emerald-400",
+    };
+  }
+
+  if (value === "breached") {
+    return {
+      badge: "border-red-500/30 bg-red-500/10 text-red-300",
+      dot: "bg-red-400",
+    };
+  }
+
+  return {
+    badge: "border-yellow-500/30 bg-yellow-500/10 text-yellow-300",
+    dot: "bg-yellow-400",
+  };
+};
+
+const formatSlaStatus = (status = "") => {
+  if (!status) return "Pending";
+
+  return String(status)
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const getRemainingTime = (dueAt, completedAt = null) => {
+  if (!dueAt) return null;
+
+  if (completedAt) {
+    return null;
+  }
+
+  const now = Date.now();
+  const due = new Date(dueAt).getTime();
+
+  if (Number.isNaN(due)) return null;
+
+  const difference = due - now;
+
+  const absoluteDifference = Math.abs(difference);
+
+  const minutes = Math.floor(absoluteDifference / (1000 * 60));
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  let formatted = "";
+
+  if (hours > 0) {
+    formatted = `${hours}h ${remainingMinutes}m`;
+  } else {
+    formatted = `${remainingMinutes}m`;
+  }
+
+  if (difference < 0) {
+    return `${formatted} overdue`;
+  }
+
+  return `${formatted} remaining`;
+};
+
+// ============================================================
 // COMPONENT
 // ============================================================
 
@@ -435,6 +506,10 @@ const AgentTicketDetails = () => {
           ...rawTicket,
 
           id: getId(rawTicket) || ticketId,
+
+          // SLA
+          slaStatus:
+            rawTicket.slaStatus || response?.sla || rawTicket.sla || null,
 
           conversation: Array.isArray(rawTicket.conversation)
             ? rawTicket.conversation
@@ -1206,6 +1281,28 @@ const AgentTicketDetails = () => {
   const isClosed = String(ticket?.status || "").toLowerCase() === "closed";
 
   const isResolved = String(ticket?.status || "").toLowerCase() === "resolved";
+
+  // ==========================================================
+  // SLA
+  // ==========================================================
+
+  const slaStatus = ticket?.slaStatus || ticket?.sla || null;
+
+  const responseSlaStatus = slaStatus?.responseStatus || "pending";
+
+  const resolutionSlaStatus = slaStatus?.resolutionStatus || "pending";
+
+  const responseDueAt = slaStatus?.responseDueAt || null;
+
+  const resolutionDueAt = slaStatus?.resolutionDueAt || null;
+
+  const firstRespondedAt = slaStatus?.firstRespondedAt || null;
+
+  const resolvedAt = slaStatus?.resolvedAt || null;
+
+  const responseRemaining = getRemainingTime(responseDueAt, firstRespondedAt);
+
+  const resolutionRemaining = getRemainingTime(resolutionDueAt, resolvedAt);
 
   const isEscalated = ticket?.escalation?.isEscalated === true;
 
@@ -2315,6 +2412,182 @@ const AgentTicketDetails = () => {
               {assignError && (
                 <p className="mt-2 text-xs text-red-400">{assignError}</p>
               )}
+            </section>
+
+            {/* SLA TRACKING */}
+
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/40 p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock3 size={17} className="text-blue-400" />
+
+                  <h3 className="text-sm font-semibold text-white">
+                    SLA Tracking
+                  </h3>
+                </div>
+
+                <span className="text-[10px] uppercase tracking-wider text-slate-600">
+                  Service Level
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {/* RESPONSE SLA */}
+
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-medium text-slate-400">
+                        First Response
+                      </p>
+
+                      <p className="mt-1 text-[11px] text-slate-600">
+                        Human agent response
+                      </p>
+                    </div>
+
+                    {(() => {
+                      const classes = getSlaStatusClasses(responseSlaStatus);
+
+                      return (
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-medium ${classes.badge}`}
+                        >
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${classes.dot}`}
+                          />
+
+                          {formatSlaStatus(responseSlaStatus)}
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Due */}
+
+                  {responseDueAt && (
+                    <div className="mt-3 border-t border-slate-800 pt-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-slate-600">Due</span>
+
+                        <span className="text-[11px] text-slate-400">
+                          {formatDate(responseDueAt)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Remaining */}
+
+                  {!firstRespondedAt && responseRemaining && (
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="text-[11px] text-slate-600">Time</span>
+
+                      <span
+                        className={`text-[11px] font-medium ${
+                          responseSlaStatus === "breached"
+                            ? "text-red-400"
+                            : "text-yellow-300"
+                        }`}
+                      >
+                        {responseRemaining}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Responded */}
+
+                  {firstRespondedAt && (
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="text-[11px] text-slate-600">
+                        Responded
+                      </span>
+
+                      <span className="text-[11px] text-emerald-400">
+                        {formatDate(firstRespondedAt)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* RESOLUTION SLA */}
+
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-medium text-slate-400">
+                        Resolution
+                      </p>
+
+                      <p className="mt-1 text-[11px] text-slate-600">
+                        Ticket resolution target
+                      </p>
+                    </div>
+
+                    {(() => {
+                      const classes = getSlaStatusClasses(resolutionSlaStatus);
+
+                      return (
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-medium ${classes.badge}`}
+                        >
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${classes.dot}`}
+                          />
+
+                          {formatSlaStatus(resolutionSlaStatus)}
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Due */}
+
+                  {resolutionDueAt && (
+                    <div className="mt-3 border-t border-slate-800 pt-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-slate-600">Due</span>
+
+                        <span className="text-[11px] text-slate-400">
+                          {formatDate(resolutionDueAt)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Remaining */}
+
+                  {!resolvedAt && resolutionRemaining && (
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="text-[11px] text-slate-600">Time</span>
+
+                      <span
+                        className={`text-[11px] font-medium ${
+                          resolutionSlaStatus === "breached"
+                            ? "text-red-400"
+                            : "text-yellow-300"
+                        }`}
+                      >
+                        {resolutionRemaining}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Resolved */}
+
+                  {resolvedAt && (
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="text-[11px] text-slate-600">
+                        Resolved
+                      </span>
+
+                      <span className="text-[11px] text-emerald-400">
+                        {formatDate(resolvedAt)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
             </section>
 
             {/* ESCALATION */}

@@ -262,6 +262,42 @@ const ticketSchema = new mongoose.Schema(
     },
 
     // ==========================================
+    // SLA TRACKING
+    // ==========================================
+
+    sla: {
+      responseTimeMinutes: {
+        type: Number,
+        default: 120,
+      },
+
+      resolutionTimeMinutes: {
+        type: Number,
+        default: 1440,
+      },
+
+      responseDueAt: {
+        type: Date,
+        default: null,
+      },
+
+      resolutionDueAt: {
+        type: Date,
+        default: null,
+      },
+
+      firstRespondedAt: {
+        type: Date,
+        default: null,
+      },
+
+      resolvedAt: {
+        type: Date,
+        default: null,
+      },
+    },
+
+    // ==========================================
     // TICKET LIFECYCLE
     // ==========================================
 

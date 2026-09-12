@@ -1,6 +1,9 @@
 import mongoose from "mongoose";
 import Ticket from "../models/Ticket.js";
 import User from "../models/User.js";
+
+import { createSlaDates } from "../utils/sla.js";
+
 import {
   getSocketIO,
   getTicketRoom,
@@ -12,6 +15,17 @@ import {
  * HELPERS
  * =========================================================
  */
+
+const normalizeId = (value) => {
+  if (!value) return null;
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  return value.toString();
+};
+
 const isTicketAssignedToUser = (ticket, userId) => {
   if (!ticket?.assignedAgent || !userId) {
     return false;
@@ -28,19 +42,214 @@ const getUserRole = (req) => {
   return req.user?.role || "agent";
 };
 
-const normalizeId = (value) => {
-  if (!value) return null;
+/*
+ * =========================================================
+ * SLA HELPERS
+ * =========================================================
+ *
+ * SLA rules:
+ *
+ * 1. Ticket creation starts the SLA clock.
+ * 2. AI reply does NOT count as first human response.
+ * 3. Customer reply does NOT count.
+ * 4. Internal note does NOT count.
+ * 5. First public agent/admin reply counts.
+ * 6. First human response is recorded only once.
+ * 7. Resolving a ticket records SLA resolution time.
+ * 8. Reopening clears only SLA resolvedAt.
+ * 9. Reopening preserves firstRespondedAt.
+ * 10. Legacy tickets without SLA are initialized safely.
+ *
+ * =========================================================
+ */
 
-  if (typeof value === "string") {
-    return value;
+/*
+ * Ensure legacy tickets have SLA information.
+ */
+const ensureTicketSla = (ticket) => {
+  if (!ticket) {
+    return null;
   }
 
-  return value.toString();
+  if (!ticket.sla) {
+    const createdAt = ticket.createdAt || new Date();
+
+    const slaDates = createSlaDates({
+      createdAt,
+      priority: ticket.priority || "medium",
+    });
+
+    ticket.sla = {
+      ...slaDates,
+      firstRespondedAt: null,
+      resolvedAt: null,
+    };
+  } else {
+    /*
+     * Protect against partially-created SLA objects.
+     */
+    if (!Object.prototype.hasOwnProperty.call(ticket.sla, "firstRespondedAt")) {
+      ticket.sla.firstRespondedAt = null;
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(ticket.sla, "resolvedAt")) {
+      ticket.sla.resolvedAt = null;
+    }
+
+    /*
+     * Legacy/partial SLA objects may not contain due dates.
+     */
+    if (!ticket.sla.responseDueAt || !ticket.sla.resolutionDueAt) {
+      const createdAt = ticket.createdAt || new Date();
+
+      const slaDates = createSlaDates({
+        createdAt,
+        priority: ticket.priority || "medium",
+      });
+
+      if (!ticket.sla.responseDueAt) {
+        ticket.sla.responseDueAt = slaDates.responseDueAt;
+      }
+
+      if (!ticket.sla.resolutionDueAt) {
+        ticket.sla.resolutionDueAt = slaDates.resolutionDueAt;
+      }
+    }
+  }
+
+  return ticket.sla;
 };
 
 /*
- * Add an entry to ticket status history
+ * =========================================================
+ * MARK FIRST HUMAN RESPONSE
+ * =========================================================
+ *
+ * Only a real public agent/admin reply counts.
  */
+const markFirstHumanResponse = ({ ticket, respondedAt = new Date() }) => {
+  if (!ticket) {
+    return;
+  }
+
+  const sla = ensureTicketSla(ticket);
+
+  /*
+   * Never overwrite the original first human response.
+   */
+  if (sla.firstRespondedAt) {
+    return;
+  }
+
+  sla.firstRespondedAt = respondedAt;
+};
+
+/*
+ * =========================================================
+ * MARK TICKET RESOLVED FOR SLA
+ * =========================================================
+ */
+const markTicketResolvedForSla = ({ ticket, resolvedAt = new Date() }) => {
+  if (!ticket) {
+    return;
+  }
+
+  const sla = ensureTicketSla(ticket);
+
+  sla.resolvedAt = resolvedAt;
+};
+
+/*
+ * =========================================================
+ * REOPEN TICKET SLA
+ * =========================================================
+ *
+ * IMPORTANT:
+ *
+ * firstRespondedAt is preserved.
+ * Only resolvedAt is cleared.
+ */
+const reopenTicketSla = (ticket) => {
+  if (!ticket) {
+    return;
+  }
+
+  const sla = ensureTicketSla(ticket);
+
+  sla.resolvedAt = null;
+};
+
+/*
+ * =========================================================
+ * GET SLA STATUS
+ * =========================================================
+ */
+const getTicketSlaStatus = (ticket, now = new Date()) => {
+  if (!ticket) {
+    return null;
+  }
+
+  const sla = ensureTicketSla(ticket);
+
+  const responseDueAt = sla?.responseDueAt ? new Date(sla.responseDueAt) : null;
+
+  const resolutionDueAt = sla?.resolutionDueAt
+    ? new Date(sla.resolutionDueAt)
+    : null;
+
+  const firstRespondedAt = sla?.firstRespondedAt
+    ? new Date(sla.firstRespondedAt)
+    : null;
+
+  const resolvedAt = sla?.resolvedAt ? new Date(sla.resolvedAt) : null;
+
+  const responseBreached =
+    !!responseDueAt &&
+    !firstRespondedAt &&
+    now.getTime() > responseDueAt.getTime();
+
+  const resolutionBreached =
+    !!resolutionDueAt &&
+    !resolvedAt &&
+    now.getTime() > resolutionDueAt.getTime();
+
+  const responseStatus = firstRespondedAt
+    ? responseDueAt && firstRespondedAt.getTime() <= responseDueAt.getTime()
+      ? "met"
+      : "breached"
+    : responseBreached
+      ? "breached"
+      : "pending";
+
+  const resolutionStatus = resolvedAt
+    ? resolutionDueAt && resolvedAt.getTime() <= resolutionDueAt.getTime()
+      ? "met"
+      : "breached"
+    : resolutionBreached
+      ? "breached"
+      : "pending";
+
+  return {
+    responseDueAt,
+    resolutionDueAt,
+
+    firstRespondedAt,
+    resolvedAt,
+
+    responseBreached,
+    resolutionBreached,
+
+    responseStatus,
+    resolutionStatus,
+  };
+};
+
+/*
+ * =========================================================
+ * ADD STATUS HISTORY
+ * =========================================================
+ */
+
 const addStatusHistory = ({
   ticket,
   status,
@@ -48,7 +257,13 @@ const addStatusHistory = ({
   changedByRole = "agent",
   note = "",
 }) => {
-  if (!ticket) return;
+  if (!ticket) {
+    return;
+  }
+
+  if (!Array.isArray(ticket.statusHistory)) {
+    ticket.statusHistory = [];
+  }
 
   ticket.statusHistory.push({
     status,
@@ -60,44 +275,83 @@ const addStatusHistory = ({
 };
 
 /*
- * Update lifecycle timestamps according to status
+ * =========================================================
+ * UPDATE LIFECYCLE TIMESTAMPS
+ * =========================================================
  */
+
 const updateLifecycleTimestamps = (ticket, previousStatus, newStatus) => {
   const now = new Date();
 
   /*
+   * Make sure SLA exists before lifecycle changes.
+   */
+  ensureTicketSla(ticket);
+
+  /*
+   * =======================================================
    * RESOLVED
+   * =======================================================
    */
   if (newStatus === "resolved") {
     ticket.resolvedAt = now;
     ticket.closedAt = null;
+
+    markTicketResolvedForSla({
+      ticket,
+      resolvedAt: now,
+    });
   }
 
   /*
+   * =======================================================
    * CLOSED
+   * =======================================================
+   *
+   * If a ticket is closed without previously being resolved,
+   * treat the close time as the resolution time.
    */
   if (newStatus === "closed") {
     ticket.closedAt = now;
 
     if (!ticket.resolvedAt) {
       ticket.resolvedAt = now;
+
+      markTicketResolvedForSla({
+        ticket,
+        resolvedAt: now,
+      });
     }
   }
 
   /*
+   * =======================================================
    * REOPENED
+   * =======================================================
+   *
+   * Preserve firstRespondedAt.
+   *
+   * Clear:
+   * - ticket.resolvedAt
+   * - ticket.closedAt
+   * - sla.resolvedAt
    */
   if (
     ["resolved", "closed"].includes(previousStatus) &&
     !["resolved", "closed"].includes(newStatus)
   ) {
     ticket.reopenedAt = now;
+
     ticket.resolvedAt = null;
     ticket.closedAt = null;
+
+    reopenTicketSla(ticket);
   }
 
   /*
-   * Moving away from resolved
+   * =======================================================
+   * MOVING AWAY FROM RESOLVED
+   * =======================================================
    */
   if (
     previousStatus === "resolved" &&
@@ -105,13 +359,23 @@ const updateLifecycleTimestamps = (ticket, previousStatus, newStatus) => {
     newStatus !== "closed"
   ) {
     ticket.resolvedAt = null;
+
+    reopenTicketSla(ticket);
   }
 
   /*
-   * Moving away from closed
+   * =======================================================
+   * MOVING AWAY FROM CLOSED
+   * =======================================================
    */
   if (previousStatus === "closed" && newStatus !== "closed") {
     ticket.closedAt = null;
+
+    if (newStatus !== "resolved") {
+      ticket.resolvedAt = null;
+
+      reopenTicketSla(ticket);
+    }
   }
 };
 
@@ -143,7 +407,7 @@ export const getAgentDashboard = async (req, res) => {
     });
 
     /*
-     * Open tickets assigned to this agent
+     * Open tickets
      */
     const openTickets = await Ticket.countDocuments({
       assignedAgent: agentId,
@@ -151,7 +415,7 @@ export const getAgentDashboard = async (req, res) => {
     });
 
     /*
-     * In-progress tickets assigned to this agent
+     * In-progress tickets
      */
     const inProgressTickets = await Ticket.countDocuments({
       assignedAgent: agentId,
@@ -197,11 +461,13 @@ export const getAgentDashboard = async (req, res) => {
         : 0;
 
     /*
-     * Tickets waiting in the global queue
+     * Tickets waiting in global queue
      */
     const queueCount = await Ticket.countDocuments({
       $or: [{ assignedAgent: null }, { assignedAgent: { $exists: false } }],
-      status: { $in: ["open", "waiting"] },
+      status: {
+        $in: ["open", "waiting"],
+      },
     });
 
     /*
@@ -217,6 +483,11 @@ export const getAgentDashboard = async (req, res) => {
       })
       .limit(10)
       .lean();
+
+    const recentTicketsWithSla = recentTickets.map((ticket) => ({
+      ...ticket,
+      slaStatus: getTicketSlaStatus(ticket),
+    }));
 
     return res.status(200).json({
       success: true,
@@ -246,7 +517,7 @@ export const getAgentDashboard = async (req, res) => {
       queueCount,
       queueTickets: queueCount,
 
-      recentTickets,
+      recentTickets: recentTicketsWithSla,
     });
   } catch (error) {
     console.error("GET AGENT DASHBOARD ERROR:", error);
@@ -264,17 +535,11 @@ export const getAgentDashboard = async (req, res) => {
  * GET TICKET QUEUE
  * =========================================================
  *
- * Returns unassigned tickets available for agents.
+ * IMPORTANT:
  *
- * Supported query parameters:
+ * Only unassigned tickets are returned.
  *
- * ?search=
- * ?status=
- * ?priority=
- * ?page=
- * ?limit=
- * ?sortBy=
- * ?sortOrder=
+ * Opening an unassigned ticket DOES NOT assign it.
  *
  * =========================================================
  */
@@ -291,37 +556,27 @@ export const getTicketQueue = async (req, res) => {
       sortOrder = "desc",
     } = req.query;
 
-    // =======================================================
-    // PAGINATION
-    // =======================================================
-
     const currentPage = Math.max(Number(page) || 1, 1);
 
     const pageLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
 
     const skip = (currentPage - 1) * pageLimit;
 
-    // =======================================================
-    // ONLY UNASSIGNED TICKETS
-    // =======================================================
-    //
-    // $exists: false handles older tickets where the
-    // assignedAgent field doesn't exist at all.
-    //
-    // $eq: null handles:
-    //
-    // assignedAgent: null
-    //
-    // Both are treated as available tickets.
-    // =======================================================
+    /*
+     * =======================================================
+     * ONLY UNASSIGNED
+     * =======================================================
+     */
 
     const query = {
       $or: [{ assignedAgent: null }, { assignedAgent: { $exists: false } }],
     };
 
-    // =======================================================
-    // STATUS FILTER
-    // =======================================================
+    /*
+     * =======================================================
+     * STATUS
+     * =======================================================
+     */
 
     const allowedStatuses = [
       "open",
@@ -343,15 +598,16 @@ export const getTicketQueue = async (req, res) => {
 
       query.status = status;
     } else {
-      // Default queue = actionable tickets only
       query.status = {
         $in: ["open", "waiting"],
       };
     }
 
-    // =======================================================
-    // PRIORITY FILTER
-    // =======================================================
+    /*
+     * =======================================================
+     * PRIORITY
+     * =======================================================
+     */
 
     const allowedPriorities = ["low", "medium", "high", "urgent"];
 
@@ -368,9 +624,11 @@ export const getTicketQueue = async (req, res) => {
       query.priority = priority;
     }
 
-    // =======================================================
-    // SEARCH
-    // =======================================================
+    /*
+     * =======================================================
+     * SEARCH
+     * =======================================================
+     */
 
     if (search?.trim()) {
       const searchRegex = new RegExp(search.trim(), "i");
@@ -392,9 +650,11 @@ export const getTicketQueue = async (req, res) => {
       ];
     }
 
-    // =======================================================
-    // SAFE SORTING
-    // =======================================================
+    /*
+     * =======================================================
+     * SAFE SORTING
+     * =======================================================
+     */
 
     const allowedSortFields = [
       "createdAt",
@@ -410,27 +670,13 @@ export const getTicketQueue = async (req, res) => {
 
     const safeSortOrder = String(sortOrder).toLowerCase() === "asc" ? 1 : -1;
 
-    // =======================================================
-    // PRIORITY SORTING
-    // =======================================================
+    /*
+     * =======================================================
+     * PRIORITY SORT
+     * =======================================================
+     */
 
     if (safeSortBy === "priority") {
-      /*
-       * MongoDB alphabetical sorting is:
-       *
-       * high
-       * low
-       * medium
-       * urgent
-       *
-       * We want:
-       *
-       * urgent
-       * high
-       * medium
-       * low
-       */
-
       const priorityOrder = {
         urgent: 1,
         high: 2,
@@ -453,6 +699,7 @@ export const getTicketQueue = async (req, res) => {
 
       tickets.sort((a, b) => {
         const aPriority = priorityOrder[a.priority] || 99;
+
         const bPriority = priorityOrder[b.priority] || 99;
 
         return safeSortOrder === -1
@@ -460,8 +707,10 @@ export const getTicketQueue = async (req, res) => {
           : aPriority - bPriority;
       });
 
-      // Apply pagination AFTER priority sorting
-      tickets = tickets.slice(skip, skip + pageLimit);
+      tickets = tickets.slice(skip, skip + pageLimit).map((ticket) => ({
+        ...ticket,
+        slaStatus: getTicketSlaStatus(ticket),
+      }));
 
       return res.status(200).json({
         success: true,
@@ -480,25 +729,19 @@ export const getTicketQueue = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // NORMAL DATABASE SORTING
-    // =======================================================
+    /*
+     * =======================================================
+     * NORMAL SORT
+     * =======================================================
+     */
 
     const sort = {
       [safeSortBy]: safeSortOrder,
     };
 
-    // =======================================================
-    // TOTAL COUNT
-    // =======================================================
-
     const total = await Ticket.countDocuments(query);
 
-    // =======================================================
-    // FETCH TICKETS
-    // =======================================================
-
-    const tickets = await Ticket.find(query)
+    let tickets = await Ticket.find(query)
       .populate("customer", "name email avatar profileImage phone company")
       .populate(
         "assignedAgent",
@@ -509,9 +752,10 @@ export const getTicketQueue = async (req, res) => {
       .limit(pageLimit)
       .lean();
 
-    // =======================================================
-    // RESPONSE
-    // =======================================================
+    tickets = tickets.map((ticket) => ({
+      ...ticket,
+      slaStatus: getTicketSlaStatus(ticket),
+    }));
 
     return res.status(200).json({
       success: true,
@@ -556,6 +800,7 @@ export const getAssignedTickets = async (req, res) => {
 
     if (!userId) {
       return res.status(401).json({
+        success: false,
         message: "Authentication required.",
       });
     }
@@ -563,34 +808,21 @@ export const getAssignedTickets = async (req, res) => {
     const { page = 1, limit = 10, status, priority, search } = req.query;
 
     const pageNumber = Math.max(Number(page) || 1, 1);
+
     const limitNumber = Math.min(Math.max(Number(limit) || 10, 1), 100);
 
-    /*
-     * =========================================================
-     * ONLY RETURN TICKETS ASSIGNED TO THE CURRENT AGENT
-     * =========================================================
-     */
     const filter = {
       assignedAgent: userId,
     };
 
-    /*
-     * Status filter
-     */
     if (status && status !== "all") {
       filter.status = status;
     }
 
-    /*
-     * Priority filter
-     */
     if (priority && priority !== "all") {
       filter.priority = priority;
     }
 
-    /*
-     * Search
-     */
     if (search?.trim()) {
       const searchRegex = new RegExp(search.trim(), "i");
 
@@ -607,7 +839,9 @@ export const getAssignedTickets = async (req, res) => {
       Ticket.find(filter)
         .populate("customer", "name email avatar phone company")
         .populate("assignedAgent", "name email avatar role")
-        .sort({ updatedAt: -1 })
+        .sort({
+          updatedAt: -1,
+        })
         .skip(skip)
         .limit(limitNumber)
         .lean(),
@@ -615,9 +849,16 @@ export const getAssignedTickets = async (req, res) => {
       Ticket.countDocuments(filter),
     ]);
 
+    const ticketsWithSla = tickets.map((ticket) => ({
+      ...ticket,
+      slaStatus: getTicketSlaStatus(ticket),
+    }));
+
     return res.status(200).json({
       success: true,
-      tickets,
+
+      tickets: ticketsWithSla,
+
       pagination: {
         page: pageNumber,
         limit: limitNumber,
@@ -629,6 +870,7 @@ export const getAssignedTickets = async (req, res) => {
     console.error("GET ASSIGNED TICKETS ERROR:", error);
 
     return res.status(500).json({
+      success: false,
       message: "Failed to load assigned tickets.",
       error: error.message,
     });
@@ -640,15 +882,11 @@ export const getAssignedTickets = async (req, res) => {
  * GET SINGLE AGENT TICKET
  * =========================================================
  *
- * Behavior:
+ * IMPORTANT:
  *
- * 1. Admin can access any ticket.
- * 2. Agent opens an unassigned ticket:
- *      -> Automatically assigns it to that agent.
- * 3. Agent opens their own ticket:
- *      -> Access granted.
- * 4. Agent opens another agent's ticket:
- *      -> Access denied.
+ * Opening an unassigned ticket DOES NOT assign it.
+ *
+ * Agent must explicitly click "Assign to Me".
  *
  * =========================================================
  */
@@ -659,10 +897,6 @@ export const getAgentTicketById = async (req, res) => {
     const role = getUserRole(req);
     const { ticketId } = req.params;
 
-    // =======================================================
-    // AUTHENTICATION
-    // =======================================================
-
     if (!agentId) {
       return res.status(401).json({
         success: false,
@@ -670,20 +904,12 @@ export const getAgentTicketById = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // VALIDATE TICKET ID
-    // =======================================================
-
     if (!ticketId || !mongoose.Types.ObjectId.isValid(ticketId)) {
       return res.status(400).json({
         success: false,
         message: "Invalid ticket ID",
       });
     }
-
-    // =======================================================
-    // FIND TICKET
-    // =======================================================
 
     const ticket = await Ticket.findById(ticketId)
       .populate("customer", "name email avatar profileImage phone company")
@@ -697,21 +923,22 @@ export const getAgentTicketById = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // ADMIN ACCESS
-    // =======================================================
+    ensureTicketSla(ticket);
+
+    /*
+     * =======================================================
+     * ADMIN ACCESS
+     * =======================================================
+     */
 
     if (role === "admin") {
       return res.status(200).json({
         success: true,
         message: "Ticket loaded successfully",
         ticket,
+        slaStatus: getTicketSlaStatus(ticket),
       });
     }
-
-    // =======================================================
-    // CURRENT ASSIGNMENT
-    // =======================================================
 
     const assignedAgentId = normalizeId(
       ticket.assignedAgent?._id || ticket.assignedAgent,
@@ -719,27 +946,28 @@ export const getAgentTicketById = async (req, res) => {
 
     const currentAgentId = normalizeId(agentId);
 
-    // =======================================================
-    // UNASSIGNED TICKET
-    // =======================================================
-    // IMPORTANT:
-    // Opening an unassigned ticket DOES NOT assign it.
-    //
-    // Any agent can view an unassigned ticket.
-    // The agent must explicitly click "Assign to Me"
-    // to take ownership of the ticket.
+    /*
+     * =======================================================
+     * UNASSIGNED TICKET
+     * =======================================================
+     *
+     * DO NOT ASSIGN.
+     */
 
     if (!assignedAgentId) {
       return res.status(200).json({
         success: true,
         message: "Unassigned ticket loaded successfully",
         ticket,
+        slaStatus: getTicketSlaStatus(ticket),
       });
     }
 
-    // =======================================================
-    // TICKET BELONGS TO ANOTHER AGENT
-    // =======================================================
+    /*
+     * =======================================================
+     * ANOTHER AGENT
+     * =======================================================
+     */
 
     if (assignedAgentId !== currentAgentId) {
       return res.status(403).json({
@@ -748,14 +976,11 @@ export const getAgentTicketById = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // CURRENT AGENT OWNS THE TICKET
-    // =======================================================
-
     return res.status(200).json({
       success: true,
       message: "Ticket loaded successfully",
       ticket,
+      slaStatus: getTicketSlaStatus(ticket),
     });
   } catch (error) {
     console.error("========================================");
@@ -793,6 +1018,13 @@ export const assignTicketToMe = async (req, res) => {
 
     const { ticketId } = req.params;
 
+    if (!ticketId || !mongoose.Types.ObjectId.isValid(ticketId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID",
+      });
+    }
+
     const ticket = await Ticket.findById(ticketId);
 
     if (!ticket) {
@@ -802,17 +1034,15 @@ export const assignTicketToMe = async (req, res) => {
       });
     }
 
+    ensureTicketSla(ticket);
+
     /*
-     * Already assigned to another agent
+     * Already assigned to another agent.
      */
     if (
       ticket.assignedAgent &&
       normalizeId(ticket.assignedAgent) !== normalizeId(agentId)
     ) {
-      /*
-       * Admin can reassign.
-       * Normal agents cannot steal an assigned ticket.
-       */
       if (role !== "admin") {
         return res.status(409).json({
           success: false,
@@ -826,16 +1056,13 @@ export const assignTicketToMe = async (req, res) => {
     ticket.assignedAgent = agentId;
 
     /*
-     * When claiming an open/waiting ticket,
-     * move it into the agent's working state.
+     * Claiming open/waiting moves it into
+     * agent working state.
      */
     if (["open", "waiting"].includes(ticket.status)) {
       ticket.status = "in-progress";
     }
 
-    /*
-     * Record assignment
-     */
     addStatusHistory({
       ticket,
       status: ticket.status,
@@ -847,9 +1074,6 @@ export const assignTicketToMe = async (req, res) => {
           : "Ticket assigned and moved to in-progress",
     });
 
-    /*
-     * Update timestamps when status changes
-     */
     if (previousStatus !== ticket.status) {
       updateLifecycleTimestamps(ticket, previousStatus, ticket.status);
     }
@@ -864,6 +1088,7 @@ export const assignTicketToMe = async (req, res) => {
       success: true,
       message: "Ticket assigned successfully",
       ticket,
+      slaStatus: getTicketSlaStatus(ticket),
     });
   } catch (error) {
     console.error("ASSIGN TICKET ERROR:", error);
@@ -890,20 +1115,12 @@ export const updateTicketStatus = async (req, res) => {
     const { ticketId } = req.params;
     const { status } = req.body;
 
-    // =======================================================
-    // AUTHENTICATION
-    // =======================================================
-
     if (!agentId) {
       return res.status(401).json({
         success: false,
         message: "Authentication required.",
       });
     }
-
-    // =======================================================
-    // VALIDATE STATUS
-    // =======================================================
 
     const allowedStatuses = [
       "open",
@@ -922,9 +1139,12 @@ export const updateTicketStatus = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // FIND TICKET
-    // =======================================================
+    if (!ticketId || !mongoose.Types.ObjectId.isValid(ticketId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID.",
+      });
+    }
 
     const ticket = await Ticket.findById(ticketId);
 
@@ -935,30 +1155,24 @@ export const updateTicketStatus = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // OWNERSHIP / ACCESS CONTROL
-    // =======================================================
+    ensureTicketSla(ticket);
 
     const assignedAgentId = normalizeId(ticket.assignedAgent);
+
     const currentAgentId = normalizeId(agentId);
 
     const isAdmin = role === "admin";
+
     const isUnassigned = !assignedAgentId;
+
     const isAssignedAgent = assignedAgentId === currentAgentId;
 
     /*
-     * ADMIN
-     * Can update any ticket.
+     * Admin can update any ticket.
      *
-     * CURRENT AGENT
-     * Can update their own ticket.
+     * Assigned agent can update own ticket.
      *
-     * UNASSIGNED
-     * Agent can update it and will automatically become
-     * the assigned agent.
-     *
-     * ANOTHER AGENT
-     * Cannot update the ticket.
+     * Unassigned agent can update it.
      */
     if (!isAdmin && !isAssignedAgent && !isUnassigned) {
       return res.status(403).json({
@@ -967,23 +1181,21 @@ export const updateTicketStatus = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // AUTO ASSIGN UNASSIGNED TICKET
-    // =======================================================
-
+    /*
+     * Explicit status update by an agent is allowed
+     * to claim an unassigned ticket.
+     */
     if (isUnassigned) {
       ticket.assignedAgent = agentId;
     }
 
-    // =======================================================
-    // PREVIOUS STATUS
-    // =======================================================
-
     const previousStatus = ticket.status;
 
-    // =======================================================
-    // STATUS UNCHANGED
-    // =======================================================
+    /*
+     * =======================================================
+     * STATUS UNCHANGED
+     * =======================================================
+     */
 
     if (previousStatus === status) {
       await ticket.populate([
@@ -1001,24 +1213,19 @@ export const updateTicketStatus = async (req, res) => {
         success: true,
         message: "Ticket status unchanged.",
         ticket,
+        slaStatus: getTicketSlaStatus(ticket),
       });
     }
 
-    // =======================================================
-    // UPDATE STATUS
-    // =======================================================
+    /*
+     * =======================================================
+     * UPDATE STATUS
+     * =======================================================
+     */
 
     ticket.status = status;
 
-    // =======================================================
-    // LIFECYCLE TIMESTAMPS
-    // =======================================================
-
     updateLifecycleTimestamps(ticket, previousStatus, status);
-
-    // =======================================================
-    // STATUS HISTORY
-    // =======================================================
 
     addStatusHistory({
       ticket,
@@ -1028,15 +1235,7 @@ export const updateTicketStatus = async (req, res) => {
       note: `Status changed from ${previousStatus} to ${status}`,
     });
 
-    // =======================================================
-    // SAVE
-    // =======================================================
-
     await ticket.save();
-
-    // =======================================================
-    // POPULATE
-    // =======================================================
 
     await ticket.populate([
       {
@@ -1049,10 +1248,6 @@ export const updateTicketStatus = async (req, res) => {
       },
     ]);
 
-    // =======================================================
-    // SOCKET.IO
-    // =======================================================
-
     const io = getSocketIO();
 
     if (io) {
@@ -1060,17 +1255,15 @@ export const updateTicketStatus = async (req, res) => {
 
       io.to(room).emit("ticket:update", {
         ticket,
+        slaStatus: getTicketSlaStatus(ticket),
       });
     }
-
-    // =======================================================
-    // RESPONSE
-    // =======================================================
 
     return res.status(200).json({
       success: true,
       message: "Ticket status updated successfully.",
       ticket,
+      slaStatus: getTicketSlaStatus(ticket),
     });
   } catch (error) {
     console.error("========================================");
@@ -1102,9 +1295,6 @@ export const updateTicketPriority = async (req, res) => {
     const { ticketId } = req.params;
     const { priority } = req.body;
 
-    /*
-     * Authentication check
-     */
     if (!agentId) {
       return res.status(401).json({
         success: false,
@@ -1112,9 +1302,6 @@ export const updateTicketPriority = async (req, res) => {
       });
     }
 
-    /*
-     * Validate priority
-     */
     const allowedPriorities = ["low", "medium", "high", "urgent"];
 
     if (!allowedPriorities.includes(priority)) {
@@ -1126,9 +1313,13 @@ export const updateTicketPriority = async (req, res) => {
       });
     }
 
-    /*
-     * Find ticket
-     */
+    if (!ticketId || !mongoose.Types.ObjectId.isValid(ticketId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ticket ID.",
+      });
+    }
+
     const ticket = await Ticket.findById(ticketId);
 
     if (!ticket) {
@@ -1138,30 +1329,16 @@ export const updateTicketPriority = async (req, res) => {
       });
     }
 
-    /*
-     * =========================================================
-     * ACCESS CONTROL
-     * =========================================================
-     *
-     * Admin:
-     *   Can update any ticket.
-     *
-     * Assigned agent:
-     *   Can update their own ticket.
-     *
-     * Unassigned:
-     *   Current agent can update it and it will automatically
-     *   become assigned to them.
-     *
-     * Another agent:
-     *   Access denied.
-     */
+    ensureTicketSla(ticket);
 
     const assignedAgentId = normalizeId(ticket.assignedAgent);
+
     const currentAgentId = normalizeId(agentId);
 
     const isAdmin = role === "admin";
+
     const isUnassigned = !assignedAgentId;
+
     const isAssignedAgent = assignedAgentId === currentAgentId;
 
     if (!isAdmin && !isAssignedAgent && !isUnassigned) {
@@ -1172,14 +1349,10 @@ export const updateTicketPriority = async (req, res) => {
     }
 
     /*
-     * =========================================================
-     * AUTOMATIC ASSIGNMENT
-     * =========================================================
-     *
-     * If the ticket has no assigned agent, assign it to the
-     * current authenticated user.
+     * Explicit priority change can claim an
+     * unassigned ticket.
      */
-    if (!ticket.assignedAgent) {
+    if (isUnassigned) {
       ticket.assignedAgent = agentId;
 
       addStatusHistory({
@@ -1187,15 +1360,10 @@ export const updateTicketPriority = async (req, res) => {
         status: ticket.status,
         changedBy: agentId,
         changedByRole: isAdmin ? "admin" : "agent",
-        note: "Ticket automatically assigned when priority was updated.",
+        note: "Ticket assigned when priority was updated.",
       });
     }
 
-    /*
-     * =========================================================
-     * CHECK IF PRIORITY IS ALREADY THE SAME
-     * =========================================================
-     */
     const previousPriority = ticket.priority;
 
     if (previousPriority === priority) {
@@ -1213,41 +1381,32 @@ export const updateTicketPriority = async (req, res) => {
         success: true,
         message: "Ticket priority unchanged.",
         ticket,
+        slaStatus: getTicketSlaStatus(ticket),
       });
     }
 
-    /*
-     * =========================================================
-     * UPDATE PRIORITY
-     * =========================================================
-     */
     ticket.priority = priority;
 
     /*
-     * =========================================================
-     * RECORD PRIORITY CHANGE
-     * =========================================================
+     * NOTE:
      *
-     * statusHistory requires a valid status, so we keep the
-     * current ticket status and describe the priority change
-     * inside the note.
+     * We intentionally do not recalculate an existing
+     * ticket's SLA when priority changes.
+     *
+     * The SLA clock started at ticket creation.
      */
     addStatusHistory({
       ticket,
       status: ticket.status,
       changedBy: agentId,
       changedByRole: isAdmin ? "admin" : "agent",
-      note: `Priority changed from ${previousPriority || "none"} to ${priority}.`,
+      note: `Priority changed from ${
+        previousPriority || "none"
+      } to ${priority}.`,
     });
 
-    /*
-     * Save ticket
-     */
     await ticket.save();
 
-    /*
-     * Populate related users
-     */
     await ticket.populate(
       "customer",
       "name email avatar profileImage phone company",
@@ -1258,11 +1417,6 @@ export const updateTicketPriority = async (req, res) => {
       "name email avatar profileImage phone company role",
     );
 
-    /*
-     * =========================================================
-     * SOCKET.IO UPDATE
-     * =========================================================
-     */
     const io = getSocketIO();
 
     if (io) {
@@ -1270,18 +1424,15 @@ export const updateTicketPriority = async (req, res) => {
 
       io.to(room).emit("ticket:update", {
         ticket,
+        slaStatus: getTicketSlaStatus(ticket),
       });
     }
 
-    /*
-     * =========================================================
-     * RESPONSE
-     * =========================================================
-     */
     return res.status(200).json({
       success: true,
       message: "Ticket priority updated successfully.",
       ticket,
+      slaStatus: getTicketSlaStatus(ticket),
     });
   } catch (error) {
     console.error("========================================");
@@ -1303,6 +1454,24 @@ export const updateTicketPriority = async (req, res) => {
  * =========================================================
  * SEND AGENT REPLY
  * =========================================================
+ *
+ * IMPORTANT SLA RULE:
+ *
+ * This is the place where first human response is recorded.
+ *
+ * Agent/admin public reply:
+ *      YES -> first human response
+ *
+ * Internal note:
+ *      NO
+ *
+ * AI reply:
+ *      NO
+ *
+ * Customer reply:
+ *      NO
+ *
+ * =========================================================
  */
 
 export const sendAgentReply = async (req, res) => {
@@ -1317,9 +1486,11 @@ export const sendAgentReply = async (req, res) => {
 
     const files = Array.isArray(req.files) ? req.files : [];
 
-    // =======================================================
-    // AUTHENTICATION
-    // =======================================================
+    /*
+     * =======================================================
+     * AUTHENTICATION
+     * =======================================================
+     */
 
     if (!userId) {
       return res.status(401).json({
@@ -1328,9 +1499,11 @@ export const sendAgentReply = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // TICKET ID VALIDATION
-    // =======================================================
+    /*
+     * =======================================================
+     * TICKET ID
+     * =======================================================
+     */
 
     if (!ticketId || !mongoose.Types.ObjectId.isValid(ticketId)) {
       return res.status(400).json({
@@ -1339,9 +1512,11 @@ export const sendAgentReply = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // MESSAGE / ATTACHMENT VALIDATION
-    // =======================================================
+    /*
+     * =======================================================
+     * MESSAGE / ATTACHMENTS
+     * =======================================================
+     */
 
     if (!cleanMessage && files.length === 0) {
       return res.status(400).json({
@@ -1350,9 +1525,11 @@ export const sendAgentReply = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // FIND TICKET
-    // =======================================================
+    /*
+     * =======================================================
+     * FIND TICKET
+     * =======================================================
+     */
 
     const ticket = await Ticket.findById(ticketId);
 
@@ -1363,11 +1540,16 @@ export const sendAgentReply = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // ACCESS CONTROL
-    // =======================================================
+    ensureTicketSla(ticket);
+
+    /*
+     * =======================================================
+     * ACCESS CONTROL
+     * =======================================================
+     */
 
     const assignedAgentId = normalizeId(ticket.assignedAgent);
+
     const currentUserId = normalizeId(userId);
 
     const isAdmin = userRole === "admin";
@@ -1384,9 +1566,16 @@ export const sendAgentReply = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // AUTO ASSIGN UNASSIGNED TICKET
-    // =======================================================
+    /*
+     * =======================================================
+     * AUTO ASSIGN WHEN REPLYING
+     * =======================================================
+     *
+     * This is intentional.
+     *
+     * Opening = NO assignment
+     * Replying = assignment is required
+     */
 
     if (isUnassigned) {
       ticket.assignedAgent = userId;
@@ -1396,94 +1585,119 @@ export const sendAgentReply = async (req, res) => {
         status: "in-progress",
         changedBy: userId,
         changedByRole: isAdmin ? "admin" : "agent",
-        note: "Ticket automatically assigned when agent replied.",
+        note: "Ticket assigned when agent replied.",
       });
     }
 
-    // =======================================================
-    // BUILD ATTACHMENTS
-    // =======================================================
+    /*
+     * =======================================================
+     * BUILD ATTACHMENTS
+     * =======================================================
+     */
+
+    const agentReplyAt = new Date();
 
     const attachments = files.map((file) => ({
       filename: file.filename || file.originalname || "",
+
       originalName: file.originalname || file.filename || "",
+
       mimetype: file.mimetype || "",
+
       size: Number(file.size || 0),
+
       path: file.path || file.filename || "",
-      uploadedAt: new Date(),
+
+      uploadedAt: agentReplyAt,
     }));
 
-    // =======================================================
-    // ENSURE CONVERSATION EXISTS
-    // =======================================================
+    /*
+     * =======================================================
+     * ENSURE CONVERSATION
+     * =======================================================
+     */
 
     if (!Array.isArray(ticket.conversation)) {
       ticket.conversation = [];
     }
 
-    // ==========================================
-    // FIRST AGENT RESPONSE TIME
-    // ==========================================
+    /*
+     * =======================================================
+     * SLA - FIRST HUMAN RESPONSE
+     * =======================================================
+     *
+     * This is a public agent/admin reply.
+     *
+     * Only the first one is recorded.
+     */
+
+    markFirstHumanResponse({
+      ticket,
+      respondedAt: agentReplyAt,
+    });
+
+    /*
+     * =======================================================
+     * LEGACY RESPONSE FIELDS
+     * =======================================================
+     *
+     * Keep these fields synchronized so your existing
+     * analytics/frontend does not break.
+     */
 
     if (!ticket.firstAgentResponseAt) {
-      const firstCustomerMessage = ticket.conversation
-        .filter(
-          (message) =>
-            message.senderRole === "customer" && message.isInternal !== true,
-        )
-        .sort(
-          (a, b) =>
-            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-        )[0];
-
-      if (firstCustomerMessage) {
-        const customerMessageTime = new Date(
-          firstCustomerMessage.createdAt,
-        ).getTime();
-
-        const agentResponseTime = Date.now();
-
-        const responseTime = agentResponseTime - customerMessageTime;
-
-        if (responseTime >= 0) {
-          ticket.firstAgentResponseAt = new Date(agentResponseTime);
-
-          ticket.firstAgentResponseTime = responseTime;
-        }
-      }
+      ticket.firstAgentResponseAt = agentReplyAt;
     }
 
-    // =======================================================
-    // ADD NORMAL AGENT REPLY
-    // =======================================================
+    if (
+      !ticket.firstAgentResponseTime &&
+      ticket.createdAt &&
+      ticket.firstAgentResponseAt
+    ) {
+      ticket.firstAgentResponseTime =
+        new Date(ticket.firstAgentResponseAt).getTime() -
+        new Date(ticket.createdAt).getTime();
+    }
+
+    /*
+     * =======================================================
+     * ADD PUBLIC AGENT REPLY
+     * =======================================================
+     */
 
     ticket.conversation.push({
       sender: userId,
+
       senderRole: isAdmin ? "admin" : "agent",
+
       message: cleanMessage || "Attachment",
+
       attachments,
+
       isInternal: false,
+
       isRead: false,
-      createdAt: new Date(),
+
+      createdAt: agentReplyAt,
     });
 
-    // =======================================================
-    // UPDATE REPLY COUNTER
-    // =======================================================
+    /*
+     * =======================================================
+     * REPLY COUNTERS
+     * =======================================================
+     */
 
     ticket.replies = Number(ticket.replies || 0) + 1;
-    ticket.lastReplyAt = new Date();
 
-    // =======================================================
-    // STATUS
-    // =======================================================
+    ticket.lastReplyAt = agentReplyAt;
 
-    if (
-      ticket.status === "open" ||
-      ticket.status === "waiting" ||
-      ticket.status === "resolved" ||
-      ticket.status === "closed"
-    ) {
+    /*
+     * =======================================================
+     * STATUS
+     * =======================================================
+     */
+
+    if (["open", "waiting", "resolved", "closed"].includes(ticket.status)) {
       const previousStatus = ticket.status;
 
       ticket.status = "in-progress";
@@ -1499,15 +1713,19 @@ export const sendAgentReply = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // SAVE
-    // =======================================================
+    /*
+     * =======================================================
+     * SAVE
+     * =======================================================
+     */
 
     await ticket.save();
 
-    // =======================================================
-    // POPULATE
-    // =======================================================
+    /*
+     * =======================================================
+     * POPULATE
+     * =======================================================
+     */
 
     await ticket.populate([
       {
@@ -1524,52 +1742,60 @@ export const sendAgentReply = async (req, res) => {
       },
     ]);
 
-    // =======================================================
-    // GET SAVED MESSAGE
-    // =======================================================
+    /*
+     * =======================================================
+     * GET SAVED MESSAGE
+     * =======================================================
+     */
 
     const latestMessage = ticket.conversation[ticket.conversation.length - 1];
 
-    // =======================================================
-    // SOCKET.IO
-    // =======================================================
+    /*
+     * =======================================================
+     * SOCKET.IO
+     * =======================================================
+     */
 
     const io = getSocketIO();
 
     if (io) {
       const room = getTicketRoom(ticket._id);
 
-      // -------------------------------------------------------
-      // Normal agent reply is PUBLIC
-      // -------------------------------------------------------
-
+      /*
+       * Public agent reply
+       */
       io.to(room).emit("ticket:new-message", {
         ticketId: ticket._id.toString(),
         message: latestMessage,
       });
 
-      // -------------------------------------------------------
-      // Update ticket status / metadata
-      // -------------------------------------------------------
-
+      /*
+       * Ticket metadata update
+       */
       io.to(room).emit("ticket:update", {
         ticket: {
           ...ticket.toObject(),
+
           conversation: ticket.conversation.filter(
             (item) => item?.isInternal !== true,
           ),
         },
+
+        slaStatus: getTicketSlaStatus(ticket),
       });
     }
 
-    // =======================================================
-    // RESPONSE
-    // =======================================================
+    /*
+     * =======================================================
+     * RESPONSE
+     * =======================================================
+     */
 
     return res.status(200).json({
       success: true,
       message: "Reply sent successfully.",
       ticket,
+      slaStatus: getTicketSlaStatus(ticket),
     });
   } catch (error) {
     console.error("========================================");
@@ -1587,6 +1813,12 @@ export const sendAgentReply = async (req, res) => {
   }
 };
 
+/*
+ * =========================================================
+ * GET ALL ASSIGNED TICKETS
+ * =========================================================
+ */
+
 export const getAllAssignedTickets = async (req, res) => {
   try {
     const {
@@ -1602,14 +1834,16 @@ export const getAllAssignedTickets = async (req, res) => {
 
     const pageLimit = Math.min(Math.max(Number(limit) || 100, 1), 100);
 
-    // Only tickets that already have an agent.
     const filter = {
       assignedAgent: {
         $ne: null,
       },
     };
 
-    // STATUS FILTER
+    /*
+     * STATUS
+     */
+
     if (
       status &&
       status !== "all" &&
@@ -1618,21 +1852,30 @@ export const getAllAssignedTickets = async (req, res) => {
       filter.status = status;
     }
 
-    // PRIORITY FILTER
+    /*
+     * PRIORITY
+     */
+
     if (
       priority &&
       priority !== "all" &&
-      ["low", "medium", "high"].includes(priority)
+      ["low", "medium", "high", "urgent"].includes(priority)
     ) {
       filter.priority = priority;
     }
 
-    // AGENT FILTER
+    /*
+     * AGENT
+     */
+
     if (agentId && agentId !== "all") {
       filter.assignedAgent = agentId;
     }
 
-    // SEARCH
+    /*
+     * SEARCH
+     */
+
     if (search?.trim()) {
       const searchRegex = new RegExp(search.trim(), "i");
 
@@ -1665,10 +1908,15 @@ export const getAllAssignedTickets = async (req, res) => {
       Ticket.countDocuments(filter),
     ]);
 
+    const ticketsWithSla = tickets.map((ticket) => ({
+      ...ticket,
+      slaStatus: getTicketSlaStatus(ticket),
+    }));
+
     return res.status(200).json({
       success: true,
 
-      tickets,
+      tickets: ticketsWithSla,
 
       totalAssignedTickets: total,
 
@@ -1692,9 +1940,11 @@ export const getAllAssignedTickets = async (req, res) => {
   }
 };
 
-// //
-//   MY-TICKETS
-//  //
+/*
+ * =========================================================
+ * MY TICKETS
+ * =========================================================
+ */
 
 export const getMyTickets = async (req, res) => {
   try {
@@ -1716,18 +1966,16 @@ export const getMyTickets = async (req, res) => {
     /*
      * SECURITY:
      *
-     * Always use the authenticated user's ID.
-     *
-     * The frontend cannot choose which agent's
-     * tickets to retrieve.
+     * Always use authenticated user's ID.
      */
+
     const filter = {
       assignedAgent: agentId,
     };
 
-    /* =====================================================
-       STATUS
-    ===================================================== */
+    /*
+     * STATUS
+     */
 
     if (
       status &&
@@ -1737,9 +1985,9 @@ export const getMyTickets = async (req, res) => {
       filter.status = status;
     }
 
-    /* =====================================================
-       PRIORITY
-    ===================================================== */
+    /*
+     * PRIORITY
+     */
 
     if (
       priority &&
@@ -1749,9 +1997,9 @@ export const getMyTickets = async (req, res) => {
       filter.priority = priority;
     }
 
-    /* =====================================================
-       SEARCH
-    ===================================================== */
+    /*
+     * SEARCH
+     */
 
     if (search?.trim()) {
       const searchRegex = new RegExp(search.trim(), "i");
@@ -1785,10 +2033,15 @@ export const getMyTickets = async (req, res) => {
       Ticket.countDocuments(filter),
     ]);
 
+    const ticketsWithSla = tickets.map((ticket) => ({
+      ...ticket,
+      slaStatus: getTicketSlaStatus(ticket),
+    }));
+
     return res.status(200).json({
       success: true,
 
-      tickets,
+      tickets: ticketsWithSla,
 
       pagination: {
         page: currentPage,
@@ -1816,14 +2069,10 @@ export const getMyTickets = async (req, res) => {
  * =========================================================
  *
  * Internal notes:
- * - Are visible only to agents/admins
- * - Are NOT customer replies
- * - Are stored inside ticket.conversation
- * - Use isInternal: true
- * - Assigned agents can add notes to their own tickets
- * - Admins can add notes to any ticket
- * - Unassigned tickets are automatically assigned to the
- *   current agent when they add a note
+ *
+ * - NOT customer-visible
+ * - NOT a human first response
+ * - DO NOT modify SLA firstRespondedAt
  *
  * =========================================================
  */
@@ -1831,16 +2080,14 @@ export const getMyTickets = async (req, res) => {
 export const addInternalNote = async (req, res) => {
   try {
     const { ticketId } = req.params;
+
     const { message = "" } = req.body;
 
     const userId = getUserId(req);
+
     const userRole = getUserRole(req);
 
     const cleanMessage = String(message || "").trim();
-
-    // =======================================================
-    // AUTHENTICATION
-    // =======================================================
 
     if (!userId) {
       return res.status(401).json({
@@ -1849,20 +2096,12 @@ export const addInternalNote = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // VALIDATE TICKET ID
-    // =======================================================
-
     if (!ticketId || !mongoose.Types.ObjectId.isValid(ticketId)) {
       return res.status(400).json({
         success: false,
         message: "Invalid ticket ID.",
       });
     }
-
-    // =======================================================
-    // VALIDATE MESSAGE
-    // =======================================================
 
     if (!cleanMessage) {
       return res.status(400).json({
@@ -1878,10 +2117,6 @@ export const addInternalNote = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // FIND TICKET
-    // =======================================================
-
     const ticket = await Ticket.findById(ticketId);
 
     if (!ticket) {
@@ -1891,11 +2126,10 @@ export const addInternalNote = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // ACCESS CONTROL
-    // =======================================================
+    ensureTicketSla(ticket);
 
     const assignedAgentId = normalizeId(ticket.assignedAgent);
+
     const currentUserId = normalizeId(userId);
 
     const isAdmin = userRole === "admin";
@@ -1905,20 +2139,6 @@ export const addInternalNote = async (req, res) => {
 
     const isUnassigned = !assignedAgentId;
 
-    /*
-     * Admin:
-     * Can add an internal note to any ticket.
-     *
-     * Assigned agent:
-     * Can add an internal note to their own ticket.
-     *
-     * Unassigned:
-     * Agent can add a note and becomes assigned.
-     *
-     * Another agent:
-     * Cannot add a note.
-     */
-
     if (!isAdmin && !isAssignedAgent && !isUnassigned) {
       return res.status(403).json({
         success: false,
@@ -1927,40 +2147,37 @@ export const addInternalNote = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // AUTO ASSIGN UNASSIGNED TICKET
-    // =======================================================
+    /*
+     * Explicit action on unassigned ticket
+     * can assign it.
+     */
 
     if (isUnassigned) {
       ticket.assignedAgent = userId;
 
-      /*
-       * Record assignment in status history.
-       */
       addStatusHistory({
         ticket,
         status: ticket.status,
         changedBy: userId,
         changedByRole: isAdmin ? "admin" : "agent",
-        note: "Ticket automatically assigned when internal note was added.",
+        note: "Ticket assigned when internal note was added.",
       });
     }
 
-    // =======================================================
-    // CREATE INTERNAL NOTE
-    // =======================================================
+    /*
+     * IMPORTANT:
+     *
+     * Internal notes DO NOT call
+     * markFirstHumanResponse().
+     */
 
     const internalNote = {
       sender: userId,
+
       senderRole: isAdmin ? "admin" : "agent",
+
       message: cleanMessage,
 
-      /*
-       * VERY IMPORTANT
-       *
-       * This distinguishes the note from a normal
-       * customer-visible agent reply.
-       */
       isInternal: true,
 
       attachments: [],
@@ -1970,21 +2187,13 @@ export const addInternalNote = async (req, res) => {
       createdAt: new Date(),
     };
 
-    // =======================================================
-    // ADD TO CONVERSATION
-    // =======================================================
+    if (!Array.isArray(ticket.conversation)) {
+      ticket.conversation = [];
+    }
 
     ticket.conversation.push(internalNote);
 
-    // =======================================================
-    // SAVE
-    // =======================================================
-
     await ticket.save();
-
-    // =======================================================
-    // POPULATE
-    // =======================================================
 
     await ticket.populate([
       {
@@ -2001,38 +2210,25 @@ export const addInternalNote = async (req, res) => {
       },
     ]);
 
-    // =======================================================
-    // GET SAVED NOTE
-    // =======================================================
-
     const savedNote = ticket.conversation[ticket.conversation.length - 1];
-
-    // =======================================================
-    // SOCKET.IO
-    // =======================================================
 
     const io = getSocketIO();
 
     if (io) {
       const agentRoom = getAgentTicketRoom(ticket._id);
 
-      // Internal notes are private.
-      // Only agents and admins should receive them.
       io.to(agentRoom).emit("ticket:internal-note", {
         ticketId: ticket._id.toString(),
         note: savedNote,
       });
     }
 
-    // =======================================================
-    // RESPONSE
-    // =======================================================
-
     return res.status(201).json({
       success: true,
       message: "Internal note added successfully.",
       note: savedNote,
       ticket,
+      slaStatus: getTicketSlaStatus(ticket),
     });
   } catch (error) {
     console.error("========================================");
@@ -2054,30 +2250,17 @@ export const addInternalNote = async (req, res) => {
  * =========================================================
  * ESCALATE TICKET
  * =========================================================
- *
- * Agent can escalate their own ticket to:
- *
- * 1. A specific admin
- * 2. A senior agent
- *
- * The ticket remains associated with the original agent,
- * but escalation information identifies who needs to handle it.
- *
- * =========================================================
  */
 
 export const escalateTicket = async (req, res) => {
   try {
     const agentId = getUserId(req);
+
     const role = getUserRole(req);
 
     const { ticketId } = req.params;
 
     const { escalatedTo = null, reason = "", note = "" } = req.body;
-
-    // =======================================================
-    // AUTHENTICATION
-    // =======================================================
 
     if (!agentId) {
       return res.status(401).json({
@@ -2086,10 +2269,6 @@ export const escalateTicket = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // VALIDATE TICKET ID
-    // =======================================================
-
     if (!ticketId || !mongoose.Types.ObjectId.isValid(ticketId)) {
       return res.status(400).json({
         success: false,
@@ -2097,11 +2276,8 @@ export const escalateTicket = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // VALIDATE REASON
-    // =======================================================
-
     const cleanReason = String(reason || "").trim();
+
     const cleanNote = String(note || "").trim();
 
     if (!cleanReason) {
@@ -2125,10 +2301,6 @@ export const escalateTicket = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // FIND TICKET
-    // =======================================================
-
     const ticket = await Ticket.findById(ticketId);
 
     if (!ticket) {
@@ -2138,11 +2310,10 @@ export const escalateTicket = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // ACCESS CONTROL
-    // =======================================================
+    ensureTicketSla(ticket);
 
     const assignedAgentId = normalizeId(ticket.assignedAgent);
+
     const currentAgentId = normalizeId(agentId);
 
     const isAdmin = role === "admin";
@@ -2152,14 +2323,6 @@ export const escalateTicket = async (req, res) => {
 
     const isUnassigned = !assignedAgentId;
 
-    /*
-     * Admin can escalate any ticket.
-     *
-     * Agent can escalate:
-     * - their own ticket
-     * - an unassigned ticket
-     */
-
     if (!isAdmin && !isAssignedAgent && !isUnassigned) {
       return res.status(403).json({
         success: false,
@@ -2167,20 +2330,12 @@ export const escalateTicket = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // CHECK EXISTING ESCALATION
-    // =======================================================
-
     if (ticket.escalation?.isEscalated) {
       return res.status(409).json({
         success: false,
         message: "This ticket is already escalated.",
       });
     }
-
-    // =======================================================
-    // VALIDATE ESCALATION TARGET
-    // =======================================================
 
     let targetUser = null;
 
@@ -2203,20 +2358,12 @@ export const escalateTicket = async (req, res) => {
         });
       }
 
-      /*
-       * Only admin or agent can receive escalations.
-       */
-
       if (!["admin", "agent"].includes(targetUser.role)) {
         return res.status(400).json({
           success: false,
           message: "Ticket can only be escalated to an admin or agent.",
         });
       }
-
-      /*
-       * Do not allow escalation to yourself.
-       */
 
       if (normalizeId(targetUser._id) === currentAgentId) {
         return res.status(400).json({
@@ -2226,47 +2373,31 @@ export const escalateTicket = async (req, res) => {
       }
     }
 
-    // =======================================================
-    // AUTO ASSIGN UNASSIGNED TICKET
-    // =======================================================
-
     if (isUnassigned) {
       ticket.assignedAgent = agentId;
     }
 
-    // =======================================================
-    // ESCALATION DATA
-    // =======================================================
-
     ticket.escalation = {
       isEscalated: true,
+
       escalatedBy: agentId,
+
       escalatedTo: targetUser?._id || null,
+
       reason: cleanReason,
+
       note: cleanNote,
+
       escalatedAt: new Date(),
+
       resolvedAt: null,
     };
 
-    // =======================================================
-    // UPDATE STATUS
-    // =======================================================
-
     const previousStatus = ticket.status;
-
-    /*
-     * Escalated tickets should remain actionable.
-     *
-     * If currently open/waiting, move to in-progress.
-     */
 
     if (["open", "waiting"].includes(ticket.status)) {
       ticket.status = "in-progress";
     }
-
-    // =======================================================
-    // STATUS HISTORY
-    // =======================================================
 
     addStatusHistory({
       ticket,
@@ -2280,15 +2411,11 @@ export const escalateTicket = async (req, res) => {
       }`,
     });
 
-    // =======================================================
-    // SAVE
-    // =======================================================
+    if (previousStatus !== ticket.status) {
+      updateLifecycleTimestamps(ticket, previousStatus, ticket.status);
+    }
 
     await ticket.save();
-
-    // =======================================================
-    // POPULATE
-    // =======================================================
 
     await ticket.populate([
       {
@@ -2309,10 +2436,6 @@ export const escalateTicket = async (req, res) => {
       },
     ]);
 
-    // =======================================================
-    // SOCKET.IO
-    // =======================================================
-
     const io = getSocketIO();
 
     if (io) {
@@ -2325,17 +2448,15 @@ export const escalateTicket = async (req, res) => {
 
       io.to(room).emit("ticket:update", {
         ticket,
+        slaStatus: getTicketSlaStatus(ticket),
       });
     }
-
-    // =======================================================
-    // RESPONSE
-    // =======================================================
 
     return res.status(200).json({
       success: true,
       message: "Ticket escalated successfully.",
       ticket,
+      slaStatus: getTicketSlaStatus(ticket),
     });
   } catch (error) {
     console.error("========================================");
@@ -2353,18 +2474,17 @@ export const escalateTicket = async (req, res) => {
   }
 };
 
-// =======================================================
-// GET ESCALATED TICKETS
-// =======================================================
+/*
+ * =========================================================
+ * GET ESCALATED TICKETS
+ * =========================================================
+ */
 
 export const getEscalatedTickets = async (req, res) => {
   try {
     const userId = getUserId(req);
-    const role = getUserRole(req);
 
-    // =====================================================
-    // AUTHENTICATION
-    // =====================================================
+    const role = getUserRole(req);
 
     if (!userId) {
       return res.status(401).json({
@@ -2373,10 +2493,6 @@ export const getEscalatedTickets = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // ONLY AGENT / ADMIN
-    // =====================================================
-
     if (!["agent", "admin"].includes(role)) {
       return res.status(403).json({
         success: false,
@@ -2384,24 +2500,9 @@ export const getEscalatedTickets = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // QUERY
-    // =====================================================
-
     const query = {
       "escalation.isEscalated": true,
     };
-
-    /*
-     * If an escalation has a specific target,
-     * only that target should see it.
-     *
-     * Admin can see all escalated tickets.
-     *
-     * Agents see:
-     * - tickets specifically escalated to them
-     * - tickets escalated without a specific target
-     */
 
     if (role === "agent") {
       query.$or = [
@@ -2414,10 +2515,6 @@ export const getEscalatedTickets = async (req, res) => {
       ];
     }
 
-    // =====================================================
-    // GET TICKETS
-    // =====================================================
-
     const tickets = await Ticket.find(query)
       .populate("customer", "name email avatar profileImage")
       .populate("assignedAgent", "name email avatar profileImage role")
@@ -2428,14 +2525,15 @@ export const getEscalatedTickets = async (req, res) => {
       })
       .lean();
 
-    // =====================================================
-    // RESPONSE
-    // =====================================================
+    const ticketsWithSla = tickets.map((ticket) => ({
+      ...ticket,
+      slaStatus: getTicketSlaStatus(ticket),
+    }));
 
     return res.status(200).json({
       success: true,
-      count: tickets.length,
-      tickets,
+      count: ticketsWithSla.length,
+      tickets: ticketsWithSla,
     });
   } catch (error) {
     console.error("========================================");
@@ -2453,15 +2551,15 @@ export const getEscalatedTickets = async (req, res) => {
   }
 };
 
-// GET CUSTOMER PROFILE FUNCTION
+/*
+ * =========================================================
+ * GET CUSTOMER PROFILE
+ * =========================================================
+ */
 
 export const getAgentCustomerProfile = async (req, res) => {
   try {
     const { customerId } = req.params;
-
-    // =====================================================
-    // VALIDATE CUSTOMER ID
-    // =====================================================
 
     if (!customerId) {
       return res.status(400).json({
@@ -2477,10 +2575,6 @@ export const getAgentCustomerProfile = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // FIND CUSTOMER
-    // =====================================================
-
     const customer = await User.findById(customerId)
       .select("name email avatar phone company status lastSeen createdAt")
       .lean();
@@ -2492,53 +2586,56 @@ export const getAgentCustomerProfile = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // FIND CUSTOMER TICKETS
-    // =====================================================
-
     const tickets = await Ticket.find({
       customer: customerId,
     })
       .select(
-        "_id ticketNumber subject category priority status createdAt updatedAt",
+        "_id ticketNumber subject category priority status createdAt updatedAt resolvedAt sla",
       )
-      .sort({ updatedAt: -1 })
+      .sort({
+        updatedAt: -1,
+      })
       .lean();
 
-    // =====================================================
-    // TICKET STATS
-    // =====================================================
+    const ticketsWithSla = tickets.map((ticket) => ({
+      ...ticket,
+      slaStatus: getTicketSlaStatus(ticket),
+    }));
 
-    const totalTickets = tickets.length;
+    const totalTickets = ticketsWithSla.length;
 
-    const openTickets = tickets.filter((ticket) =>
+    const openTickets = ticketsWithSla.filter((ticket) =>
       ["open", "in-progress", "waiting"].includes(
         String(ticket.status || "").toLowerCase(),
       ),
     ).length;
 
-    const resolvedTickets = tickets.filter((ticket) =>
+    const resolvedTickets = ticketsWithSla.filter((ticket) =>
       ["resolved", "closed"].includes(
         String(ticket.status || "").toLowerCase(),
       ),
     ).length;
-
-    // =====================================================
-    // RESPONSE
-    // =====================================================
 
     return res.status(200).json({
       success: true,
 
       customer: {
         _id: customer._id,
+
         name: customer.name || "",
+
         email: customer.email || "",
+
         avatar: customer.avatar || "",
+
         phone: customer.phone || "",
+
         company: customer.company || "",
+
         status: customer.status || "active",
+
         lastSeen: customer.lastSeen || null,
+
         createdAt: customer.createdAt || null,
       },
 
@@ -2548,7 +2645,7 @@ export const getAgentCustomerProfile = async (req, res) => {
         resolvedTickets,
       },
 
-      tickets,
+      tickets: ticketsWithSla,
     });
   } catch (error) {
     console.error("=================================");
@@ -2568,27 +2665,13 @@ export const getAgentCustomerProfile = async (req, res) => {
  * =========================================================
  * GET AGENT AVAILABILITY
  * =========================================================
- *
- * Returns the availability status of the currently
- * authenticated agent.
- *
- * Possible values:
- * - online
- * - away
- * - busy
- * - offline
- *
- * =========================================================
  */
 
 export const getAgentAvailability = async (req, res) => {
   try {
     const userId = getUserId(req);
-    const role = getUserRole(req);
 
-    // =======================================================
-    // AUTHENTICATION
-    // =======================================================
+    const role = getUserRole(req);
 
     if (!userId) {
       return res.status(401).json({
@@ -2597,20 +2680,12 @@ export const getAgentAvailability = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // ROLE CHECK
-    // =======================================================
-
     if (!["agent", "admin"].includes(role)) {
       return res.status(403).json({
         success: false,
         message: "You are not authorized to access agent availability.",
       });
     }
-
-    // =======================================================
-    // FIND CURRENT USER
-    // =======================================================
 
     const user = await User.findById(userId)
       .select("name email role availability lastSeen")
@@ -2623,10 +2698,6 @@ export const getAgentAvailability = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // RESPONSE
-    // =======================================================
-
     return res.status(200).json({
       success: true,
 
@@ -2636,10 +2707,15 @@ export const getAgentAvailability = async (req, res) => {
 
       user: {
         _id: user._id,
+
         name: user.name,
+
         email: user.email,
+
         role: user.role,
+
         availability: user.availability || "offline",
+
         lastSeen: user.lastSeen || null,
       },
     });
@@ -2647,6 +2723,7 @@ export const getAgentAvailability = async (req, res) => {
     console.error("========================================");
     console.error("GET AGENT AVAILABILITY ERROR");
     console.error("MESSAGE:", error.message);
+    console.error("NAME:", error.name);
     console.error("STACK:", error.stack);
     console.error("========================================");
 
@@ -2662,28 +2739,13 @@ export const getAgentAvailability = async (req, res) => {
  * =========================================================
  * UPDATE AGENT AVAILABILITY
  * =========================================================
- *
- * Updates the availability of the currently authenticated
- * agent.
- *
- * Allowed values:
- *
- * online
- * away
- * busy
- * offline
- *
- * =========================================================
  */
 
 export const updateAgentAvailability = async (req, res) => {
   try {
     const userId = getUserId(req);
-    const role = getUserRole(req);
 
-    // =======================================================
-    // AUTHENTICATION
-    // =======================================================
+    const role = getUserRole(req);
 
     if (!userId) {
       return res.status(401).json({
@@ -2692,10 +2754,6 @@ export const updateAgentAvailability = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // ROLE CHECK
-    // =======================================================
-
     if (!["agent", "admin"].includes(role)) {
       return res.status(403).json({
         success: false,
@@ -2703,19 +2761,11 @@ export const updateAgentAvailability = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // VALID AVAILABILITY VALUES
-    // =======================================================
-
     const allowedAvailability = ["online", "away", "busy", "offline"];
 
     const availability = String(req.body?.availability || "")
       .trim()
       .toLowerCase();
-
-    // =======================================================
-    // VALIDATE AVAILABILITY
-    // =======================================================
 
     if (!allowedAvailability.includes(availability)) {
       return res.status(400).json({
@@ -2725,10 +2775,6 @@ export const updateAgentAvailability = async (req, res) => {
         )}`,
       });
     }
-
-    // =======================================================
-    // UPDATE USER
-    // =======================================================
 
     const user = await User.findByIdAndUpdate(
       userId,
@@ -2744,10 +2790,6 @@ export const updateAgentAvailability = async (req, res) => {
       .select("name email role availability lastSeen")
       .lean();
 
-    // =======================================================
-    // USER NOT FOUND
-    // =======================================================
-
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -2755,12 +2797,9 @@ export const updateAgentAvailability = async (req, res) => {
       });
     }
 
-    // =======================================================
-    // RESPONSE
-    // =======================================================
-
     return res.status(200).json({
       success: true,
+
       message: "Agent availability updated successfully.",
 
       availability: user.availability,
@@ -2769,10 +2808,15 @@ export const updateAgentAvailability = async (req, res) => {
 
       user: {
         _id: user._id,
+
         name: user.name,
+
         email: user.email,
+
         role: user.role,
+
         availability: user.availability,
+
         lastSeen: user.lastSeen,
       },
     });
@@ -2780,6 +2824,7 @@ export const updateAgentAvailability = async (req, res) => {
     console.error("========================================");
     console.error("UPDATE AGENT AVAILABILITY ERROR");
     console.error("MESSAGE:", error.message);
+    console.error("NAME:", error.name);
     console.error("STACK:", error.stack);
     console.error("========================================");
 
@@ -2791,13 +2836,16 @@ export const updateAgentAvailability = async (req, res) => {
   }
 };
 
-// ==========================================
-// AGENT ANALYTICS
-// ==========================================
+/*
+ * =========================================================
+ * AGENT ANALYTICS
+ * =========================================================
+ */
 
 export const getAgentAnalytics = async (req, res) => {
   try {
     const agentId = getUserId(req);
+
     const role = getUserRole(req);
 
     if (!agentId) {
@@ -2822,16 +2870,19 @@ export const getAgentAnalytics = async (req, res) => {
 
     if (range === "7d") {
       startDate = new Date(now);
+
       startDate.setDate(startDate.getDate() - 7);
     }
 
     if (range === "30d") {
       startDate = new Date(now);
+
       startDate.setDate(startDate.getDate() - 30);
     }
 
     if (range === "90d") {
       startDate = new Date(now);
+
       startDate.setDate(startDate.getDate() - 90);
     }
 
@@ -2857,6 +2908,7 @@ export const getAgentAnalytics = async (req, res) => {
           "closedAt",
           "firstAgentResponseAt",
           "firstAgentResponseTime",
+          "sla",
           "conversation",
         ].join(" "),
       )
@@ -2865,9 +2917,11 @@ export const getAgentAnalytics = async (req, res) => {
       })
       .lean();
 
-    // ==========================================
-    // BASIC COUNTS
-    // ==========================================
+    /*
+     * =======================================================
+     * BASIC COUNTS
+     * =======================================================
+     */
 
     const ticketsHandled = tickets.length;
 
@@ -2895,22 +2949,54 @@ export const getAgentAnalytics = async (req, res) => {
       (ticket) => ticket.status === "closed",
     ).length;
 
-    // ==========================================
-    // RESOLUTION RATE
-    // ==========================================
+    /*
+     * =======================================================
+     * RESOLUTION RATE
+     * =======================================================
+     */
 
     const resolutionRate =
       ticketsHandled > 0
         ? Math.round((resolvedTickets / ticketsHandled) * 100)
         : 0;
 
-    // ==========================================
-    // RESPONSE TIMES
-    // ==========================================
+    /*
+     * =======================================================
+     * RESPONSE TIMES
+     * =======================================================
+     *
+     * SLA firstRespondedAt is the canonical source.
+     *
+     * Legacy firstAgentResponseTime is used as fallback.
+     */
 
     const responseTimes = [];
 
     tickets.forEach((ticket) => {
+      /*
+       * ---------------------------------------------------
+       * CANONICAL SLA RESPONSE TIME
+       * ---------------------------------------------------
+       */
+
+      if (ticket.sla?.firstRespondedAt && ticket.createdAt) {
+        const responseTime =
+          new Date(ticket.sla.firstRespondedAt).getTime() -
+          new Date(ticket.createdAt).getTime();
+
+        if (responseTime >= 0) {
+          responseTimes.push(responseTime);
+
+          return;
+        }
+      }
+
+      /*
+       * ---------------------------------------------------
+       * LEGACY FIELD
+       * ---------------------------------------------------
+       */
+
       if (
         typeof ticket.firstAgentResponseTime === "number" &&
         ticket.firstAgentResponseTime >= 0
@@ -2920,7 +3006,12 @@ export const getAgentAnalytics = async (req, res) => {
         return;
       }
 
-      // Fallback for older tickets
+      /*
+       * ---------------------------------------------------
+       * LEGACY CONVERSATION FALLBACK
+       * ---------------------------------------------------
+       */
+
       const conversation = Array.isArray(ticket.conversation)
         ? ticket.conversation
         : [];
@@ -2939,10 +3030,14 @@ export const getAgentAnalytics = async (req, res) => {
         return;
       }
 
+      /*
+       * Admin and agent both count as human
+       * responses.
+       */
       const firstAgentReply = conversation
         .filter(
           (message) =>
-            message.senderRole === "agent" &&
+            ["agent", "admin"].includes(message.senderRole) &&
             message.sender &&
             normalizeId(message.sender) === normalizeId(agentId) &&
             message.isInternal !== true &&
@@ -2967,9 +3062,11 @@ export const getAgentAnalytics = async (req, res) => {
       }
     });
 
-    // ==========================================
-    // RESPONSE TIME CALCULATIONS
-    // ==========================================
+    /*
+     * =======================================================
+     * RESPONSE TIME CALCULATIONS
+     * =======================================================
+     */
 
     const totalResponseTime = responseTimes.reduce(
       (total, time) => total + time,
@@ -2987,9 +3084,11 @@ export const getAgentAnalytics = async (req, res) => {
     const slowestResponseTime =
       responseTimes.length > 0 ? Math.max(...responseTimes) : 0;
 
-    // ==========================================
-    // FORMAT DURATION
-    // ==========================================
+    /*
+     * =======================================================
+     * FORMAT DURATION
+     * =======================================================
+     */
 
     const formatDuration = (milliseconds) => {
       if (!milliseconds || milliseconds < 0) {
@@ -3015,9 +3114,11 @@ export const getAgentAnalytics = async (req, res) => {
       return `${seconds}s`;
     };
 
-    // ==========================================
-    // STATUS BREAKDOWN
-    // ==========================================
+    /*
+     * =======================================================
+     * STATUS BREAKDOWN
+     * =======================================================
+     */
 
     const statusBreakdown = {
       open: openTickets,
@@ -3031,9 +3132,11 @@ export const getAgentAnalytics = async (req, res) => {
       closed: closedTickets,
     };
 
-    // ==========================================
-    // PRIORITY BREAKDOWN
-    // ==========================================
+    /*
+     * =======================================================
+     * PRIORITY BREAKDOWN
+     * =======================================================
+     */
 
     const priorityBreakdown = {
       low: tickets.filter((ticket) => ticket.priority === "low").length,
@@ -3045,9 +3148,59 @@ export const getAgentAnalytics = async (req, res) => {
       urgent: tickets.filter((ticket) => ticket.priority === "urgent").length,
     };
 
-    // ==========================================
-    // PERFORMANCE TREND
-    // ==========================================
+    /*
+     * =======================================================
+     * SLA ANALYTICS
+     * =======================================================
+     */
+
+    let responseSlaMet = 0;
+
+    let responseSlaBreached = 0;
+
+    let resolutionSlaMet = 0;
+
+    let resolutionSlaBreached = 0;
+
+    tickets.forEach((ticket) => {
+      const slaStatus = getTicketSlaStatus(ticket, now);
+
+      if (slaStatus?.responseStatus === "met") {
+        responseSlaMet += 1;
+      }
+
+      if (slaStatus?.responseStatus === "breached") {
+        responseSlaBreached += 1;
+      }
+
+      if (slaStatus?.resolutionStatus === "met") {
+        resolutionSlaMet += 1;
+      }
+
+      if (slaStatus?.resolutionStatus === "breached") {
+        resolutionSlaBreached += 1;
+      }
+    });
+
+    const responseSlaTotal = responseSlaMet + responseSlaBreached;
+
+    const resolutionSlaTotal = resolutionSlaMet + resolutionSlaBreached;
+
+    const responseSlaCompliance =
+      responseSlaTotal > 0
+        ? Math.round((responseSlaMet / responseSlaTotal) * 100)
+        : 0;
+
+    const resolutionSlaCompliance =
+      resolutionSlaTotal > 0
+        ? Math.round((resolutionSlaMet / resolutionSlaTotal) * 100)
+        : 0;
+
+    /*
+     * =======================================================
+     * PERFORMANCE TREND
+     * =======================================================
+     */
 
     const trendMap = {};
 
@@ -3084,9 +3237,11 @@ export const getAgentAnalytics = async (req, res) => {
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
       .slice(-30);
 
-    // ==========================================
-    // RESPONSE RATE
-    // ==========================================
+    /*
+     * =======================================================
+     * RESPONSE RATE
+     * =======================================================
+     */
 
     const respondedTickets = responseTimes.length;
 
@@ -3095,9 +3250,11 @@ export const getAgentAnalytics = async (req, res) => {
         ? Math.round((respondedTickets / ticketsHandled) * 100)
         : 0;
 
-    // ==========================================
-    // RESPONSE
-    // ==========================================
+    /*
+     * =======================================================
+     * RESPONSE
+     * =======================================================
+     */
 
     return res.status(200).json({
       success: true,
@@ -3135,6 +3292,21 @@ export const getAgentAnalytics = async (req, res) => {
 
         slowestResponseTimeFormatted: formatDuration(slowestResponseTime),
 
+        /*
+         * SLA metrics
+         */
+        responseSlaMet,
+
+        responseSlaBreached,
+
+        responseSlaCompliance,
+
+        resolutionSlaMet,
+
+        resolutionSlaBreached,
+
+        resolutionSlaCompliance,
+
         statusBreakdown,
 
         priorityBreakdown,
@@ -3148,6 +3320,7 @@ export const getAgentAnalytics = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to load agent analytics",
+
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowUpRight,
+  CheckCircle2,
   Clock3,
   Filter,
   Loader2,
@@ -9,6 +10,7 @@ import {
   Search,
   Ticket,
   UserRound,
+  XCircle,
 } from "lucide-react";
 
 import { Link, useSearchParams } from "react-router-dom";
@@ -120,6 +122,225 @@ const getStatusLabel = (status) => {
 };
 
 /* =========================================================
+   DATE HELPER
+========================================================= */
+
+const getValidDate = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+/* =========================================================
+   FORMAT DURATION
+========================================================= */
+
+const formatDuration = (milliseconds) => {
+  if (!Number.isFinite(milliseconds)) {
+    return "—";
+  }
+
+  if (milliseconds <= 0) {
+    return "Breached";
+  }
+
+  const totalMinutes = Math.floor(milliseconds / 60000);
+
+  const days = Math.floor(totalMinutes / 1440);
+
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) {
+    return `${days}d ${hours}h`;
+  }
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  if (minutes > 0) {
+    return `${minutes}m`;
+  }
+
+  return "<1m";
+};
+
+/* =========================================================
+   SLA STATUS CALCULATOR
+========================================================= */
+
+const getSlaStatus = (dueAt, completedAt, now = Date.now()) => {
+  const dueDate = getValidDate(dueAt);
+
+  const completedDate = getValidDate(completedAt);
+
+  if (completedDate) {
+    if (!dueDate) {
+      return {
+        status: "met",
+        label: "Met",
+        remaining: null,
+        dueAt: null,
+      };
+    }
+
+    const completedTime = completedDate.getTime();
+
+    const dueTime = dueDate.getTime();
+
+    if (completedTime <= dueTime) {
+      return {
+        status: "met",
+        label: "Met",
+        remaining: Math.max(dueTime - completedTime, 0),
+        dueAt: dueDate,
+      };
+    }
+
+    return {
+      status: "breached",
+      label: "Breached",
+      remaining: completedTime - dueTime,
+      dueAt: dueDate,
+    };
+  }
+
+  if (!dueDate) {
+    return {
+      status: "unknown",
+      label: "Not set",
+      remaining: null,
+      dueAt: null,
+    };
+  }
+
+  const remaining = dueDate.getTime() - now;
+
+  if (remaining <= 0) {
+    return {
+      status: "breached",
+      label: "Breached",
+      remaining: Math.abs(remaining),
+      dueAt: dueDate,
+    };
+  }
+
+  return {
+    status: "pending",
+    label: "Pending",
+    remaining,
+    dueAt: dueDate,
+  };
+};
+
+/* =========================================================
+   SLA STYLE
+========================================================= */
+
+const getSlaStyles = (status) => {
+  if (status === "met") {
+    return {
+      container: "border-emerald-500/20 bg-emerald-500/5 text-emerald-400",
+      icon: "text-emerald-400",
+      label: "text-emerald-400",
+      value: "text-emerald-300",
+    };
+  }
+
+  if (status === "breached") {
+    return {
+      container: "border-red-500/20 bg-red-500/5 text-red-400",
+      icon: "text-red-400",
+      label: "text-red-400",
+      value: "text-red-300",
+    };
+  }
+
+  if (status === "pending") {
+    return {
+      container: "border-amber-500/20 bg-amber-500/5 text-amber-400",
+      icon: "text-amber-400",
+      label: "text-amber-400",
+      value: "text-amber-300",
+    };
+  }
+
+  return {
+    container: "border-slate-800 bg-slate-900/40 text-slate-500",
+    icon: "text-slate-500",
+    label: "text-slate-500",
+    value: "text-slate-400",
+  };
+};
+
+/* =========================================================
+   SLA ICON
+========================================================= */
+
+const SlaIcon = ({ status }) => {
+  if (status === "met") {
+    return <CheckCircle2 size={15} />;
+  }
+
+  if (status === "breached") {
+    return <XCircle size={15} />;
+  }
+
+  return <Clock3 size={15} />;
+};
+
+/* =========================================================
+   SLA CARD
+========================================================= */
+
+const SlaCard = ({ label, slaStatus, completedAt, compact = false }) => {
+  const styles = getSlaStyles(slaStatus.status);
+
+  let value = "Not set";
+
+  if (slaStatus.status === "met") {
+    value = "Completed";
+  } else if (slaStatus.status === "breached") {
+    value =
+      completedAt && slaStatus.remaining
+        ? `${formatDuration(slaStatus.remaining)} late`
+        : "Breached";
+  } else if (slaStatus.status === "pending") {
+    value = `${formatDuration(slaStatus.remaining)} left`;
+  }
+
+  return (
+    <div
+      className={`flex items-center gap-3 rounded-2xl border ${styles.container} ${
+        compact ? "px-3 py-2" : "px-4 py-3"
+      }`}
+    >
+      <div className={styles.icon}>
+        <SlaIcon status={slaStatus.status} />
+      </div>
+
+      <div className="min-w-0">
+        <p
+          className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${styles.label}`}
+        >
+          {label}
+        </p>
+
+        <p className={`mt-0.5 text-xs font-semibold ${styles.value}`}>
+          {value}
+        </p>
+      </div>
+    </div>
+  );
+};
+
+/* =========================================================
    TICKET QUEUE
 ========================================================= */
 
@@ -144,6 +365,12 @@ const TicketQueue = () => {
   const [error, setError] = useState("");
 
   /*
+   * This clock allows pending SLA timers to update while
+   * the agent remains on the queue page.
+   */
+  const [now, setNow] = useState(Date.now());
+
+  /*
    * Initialize search from the URL.
    *
    * Example:
@@ -156,6 +383,20 @@ const TicketQueue = () => {
 
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+
+  /* =========================================================
+     SLA CLOCK
+  ========================================================= */
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setNow(Date.now());
+    }, 30000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, []);
 
   /* =========================================================
      LOAD TICKETS
@@ -172,11 +413,8 @@ const TicketQueue = () => {
       setError("");
 
       /*
-       * We intentionally load the available queue and perform
-       * the visible filters on the client.
-       *
-       * Backend already guarantees that only unassigned tickets
-       * are returned.
+       * Backend already guarantees that only unassigned
+       * tickets are returned.
        */
 
       const response = await getTicketQueue();
@@ -317,9 +555,6 @@ const TicketQueue = () => {
     setPriorityFilter("all");
     setStatusFilter("all");
 
-    /*
-     * Also remove the search parameter from the URL.
-     */
     setSearchParams({});
   };
 
@@ -535,114 +770,194 @@ const TicketQueue = () => {
               ticket?.customerName ||
               "Customer";
 
+            /* ---------------------------------------------
+               SLA
+            --------------------------------------------- */
+
+            const responseSla = getSlaStatus(
+              ticket?.sla?.responseDueAt,
+              ticket?.sla?.firstRespondedAt,
+              now,
+            );
+
+            const resolutionSla = getSlaStatus(
+              ticket?.sla?.resolutionDueAt,
+              ticket?.sla?.resolvedAt,
+              now,
+            );
+
             return (
               <div
                 key={id}
-                className="group rounded-3xl border border-slate-800 bg-[#0a1425] p-6 transition duration-300 hover:border-slate-700 hover:bg-[#0c172a]"
+                className="group rounded-3xl border border-slate-800 bg-[#0a1425] p-5 transition duration-300 hover:border-slate-700 hover:bg-[#0c172a] sm:p-6"
               >
-                <div className="flex flex-col gap-5 xl:flex-row xl:items-center">
+                <div className="flex flex-col gap-5">
                   {/* =================================================
-                      ICON
+                      MAIN TICKET CONTENT
                   ================================================= */}
 
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-400">
-                    <MessageSquareIcon />
-                  </div>
+                  <div className="flex flex-col gap-5 xl:flex-row xl:items-center">
+                    {/* ICON */}
 
-                  {/* =================================================
-                      CONTENT
-                  ================================================= */}
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-400">
+                      <MessageSquareIcon />
+                    </div>
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-medium text-slate-600">
-                        #
-                        {ticket?.ticketNumber ||
-                          ticket?.number ||
-                          String(id || "").slice(-6)}
-                      </span>
+                    {/* CONTENT */}
 
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium text-slate-600">
+                          #
+                          {ticket?.ticketNumber ||
+                            ticket?.number ||
+                            String(id || "").slice(-6)}
+                        </span>
+
+                        <span
+                          className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${getPriorityStyles(
+                            ticket?.priority,
+                          )}`}
+                        >
+                          {ticket?.priority
+                            ? String(ticket.priority).charAt(0).toUpperCase() +
+                              String(ticket.priority).slice(1)
+                            : "Low"}
+                        </span>
+                      </div>
+
+                      <h3 className="mt-2 truncate text-lg font-semibold text-slate-100">
+                        {ticket?.subject || ticket?.title || "Support request"}
+                      </h3>
+
+                      <p className="mt-1 line-clamp-1 text-sm text-slate-600">
+                        {ticket?.description ||
+                          ticket?.message ||
+                          "No description provided."}
+                      </p>
+
+                      <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-slate-600">
+                        <span className="flex items-center gap-2">
+                          <UserRound size={14} />
+                          {customer}
+                        </span>
+
+                        <span className="flex items-center gap-2">
+                          <Clock3 size={14} />
+
+                          {ticket?.createdAt
+                            ? new Date(ticket.createdAt).toLocaleString()
+                            : "Recently"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* STATUS */}
+
+                    <div className="flex items-center gap-3">
                       <span
-                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${getPriorityStyles(
-                          ticket?.priority,
+                        className={`rounded-full border px-3 py-1.5 text-xs font-medium ${getStatusStyles(
+                          ticket?.status,
                         )}`}
                       >
-                        {ticket?.priority
-                          ? String(ticket.priority).charAt(0).toUpperCase() +
-                            String(ticket.priority).slice(1)
-                          : "Low"}
+                        {getStatusLabel(ticket?.status)}
                       </span>
                     </div>
 
-                    <h3 className="mt-2 truncate text-lg font-semibold text-slate-100">
-                      {ticket?.subject || ticket?.title || "Support request"}
-                    </h3>
+                    {/* ACTIONS */}
 
-                    <p className="mt-1 line-clamp-1 text-sm text-slate-600">
-                      {ticket?.description ||
-                        ticket?.message ||
-                        "No description provided."}
-                    </p>
-
-                    <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-slate-600">
-                      <span className="flex items-center gap-2">
-                        <UserRound size={14} />
-                        {customer}
-                      </span>
-
-                      <span className="flex items-center gap-2">
-                        <Clock3 size={14} />
-
-                        {ticket?.createdAt
-                          ? new Date(ticket.createdAt).toLocaleString()
-                          : "Recently"}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* =================================================
-                      STATUS
-                  ================================================= */}
-
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`rounded-full border px-3 py-1.5 text-xs font-medium ${getStatusStyles(
-                        ticket?.status,
-                      )}`}
-                    >
-                      {getStatusLabel(ticket?.status)}
-                    </span>
-                  </div>
-
-                  {/* =================================================
-                      ACTIONS
-                  ================================================= */}
-
-                  <div className="flex flex-wrap gap-2">
-                    <Link
-                      to={id ? `/agent/tickets/${id}` : "/agent/queue"}
-                      className="flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-4 text-sm font-medium text-slate-300 transition hover:border-blue-500/30 hover:text-white"
-                    >
-                      View
-                      <ArrowUpRight size={16} />
-                    </Link>
-
-                    {id && (
-                      <button
-                        type="button"
-                        disabled={assigningId === id}
-                        onClick={() => handleAssign(id)}
-                        className="flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    <div className="flex flex-wrap gap-2">
+                      <Link
+                        to={id ? `/agent/tickets/${id}` : "/agent/queue"}
+                        className="flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-4 text-sm font-medium text-slate-300 transition hover:border-blue-500/30 hover:text-white"
                       >
-                        {assigningId === id ? (
-                          <>
-                            <Loader2 size={16} className="animate-spin" />
-                            Assigning...
-                          </>
-                        ) : (
-                          "Assign to me"
+                        View
+                        <ArrowUpRight size={16} />
+                      </Link>
+
+                      {id && (
+                        <button
+                          type="button"
+                          disabled={assigningId === id}
+                          onClick={() => handleAssign(id)}
+                          className="flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {assigningId === id ? (
+                            <>
+                              <Loader2 size={16} className="animate-spin" />
+                              Assigning...
+                            </>
+                          ) : (
+                            "Assign to me"
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* =================================================
+                      SLA SECTION
+                  ================================================= */}
+
+                  <div className="border-t border-slate-800/80 pt-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Clock3 size={15} className="text-slate-500" />
+
+                        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                          Service Level Agreement
+                        </span>
+                      </div>
+
+                      {responseSla.status === "breached" ||
+                      resolutionSla.status === "breached" ? (
+                        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-red-400">
+                          <AlertCircle size={13} />
+                          SLA breach
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-600">
+                          Live SLA tracking
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <SlaCard
+                        label="First Response"
+                        slaStatus={responseSla}
+                        completedAt={ticket?.sla?.firstRespondedAt}
+                      />
+
+                      <SlaCard
+                        label="Resolution"
+                        slaStatus={resolutionSla}
+                        completedAt={ticket?.sla?.resolvedAt}
+                      />
+                    </div>
+
+                    {/* SLA DUE DATES */}
+
+                    {(responseSla.dueAt || resolutionSla.dueAt) && (
+                      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-slate-600">
+                        {responseSla.dueAt && (
+                          <span>
+                            Response due{" "}
+                            <span className="text-slate-400">
+                              {responseSla.dueAt.toLocaleString()}
+                            </span>
+                          </span>
                         )}
-                      </button>
+
+                        {resolutionSla.dueAt && (
+                          <span>
+                            Resolution due{" "}
+                            <span className="text-slate-400">
+                              {resolutionSla.dueAt.toLocaleString()}
+                            </span>
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

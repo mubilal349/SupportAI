@@ -5,6 +5,8 @@ import mongoose from "mongoose";
 import Ticket from "../models/Ticket.js";
 import User from "../models/User.js";
 
+import { createSlaDates } from "../utils/sla.js";
+
 import { generateAIResponse } from "../services/aiService.js";
 
 import {
@@ -16,6 +18,186 @@ import {
   sendTicketCreatedEmail,
   sendTicketResolvedEmail,
 } from "../services/emailService.js";
+
+/*
+ * =========================================================
+ * SLA HELPERS
+ * =========================================================
+ */
+
+/**
+ * Ensure an existing/legacy ticket has an SLA object.
+ *
+ * Older tickets may have been created before SLA tracking
+ * was introduced. This safely initializes the SLA structure.
+ */
+const ensureTicketSla = (ticket) => {
+  if (!ticket) {
+    return null;
+  }
+
+  if (!ticket.sla) {
+    const createdAt = ticket.createdAt || new Date();
+
+    ticket.sla = {
+      ...createSlaDates({
+        createdAt,
+        priority: ticket.priority || "medium",
+      }),
+
+      firstRespondedAt: null,
+
+      resolvedAt: null,
+    };
+  }
+
+  return ticket.sla;
+};
+
+/**
+ * Mark the first HUMAN response.
+ *
+ * IMPORTANT:
+ * - AI does NOT count.
+ * - Customer does NOT count.
+ * - Only agent/admin should call this helper.
+ * - It is completed only once.
+ */
+export const markFirstHumanResponse = ({
+  ticket,
+  respondedAt = new Date(),
+}) => {
+  if (!ticket) {
+    return false;
+  }
+
+  const sla = ensureTicketSla(ticket);
+
+  if (!sla) {
+    return false;
+  }
+
+  /*
+   * Never overwrite the original first human response.
+   *
+   * Reopening a ticket must not reset this.
+   */
+  if (sla.firstRespondedAt) {
+    return false;
+  }
+
+  sla.firstRespondedAt = respondedAt;
+
+  return true;
+};
+
+/**
+ * Mark ticket resolution in SLA.
+ */
+const markTicketResolvedForSla = ({ ticket, resolvedAt = new Date() }) => {
+  if (!ticket) {
+    return false;
+  }
+
+  const sla = ensureTicketSla(ticket);
+
+  if (!sla) {
+    return false;
+  }
+
+  sla.resolvedAt = resolvedAt;
+
+  return true;
+};
+
+/**
+ * Reopen SLA state.
+ *
+ * IMPORTANT:
+ * Only clear resolvedAt.
+ *
+ * firstRespondedAt remains untouched.
+ */
+const reopenTicketSla = (ticket) => {
+  if (!ticket) {
+    return false;
+  }
+
+  const sla = ensureTicketSla(ticket);
+
+  if (!sla) {
+    return false;
+  }
+
+  sla.resolvedAt = null;
+
+  return true;
+};
+
+/**
+ * Calculate current SLA status.
+ *
+ * This does not create additional MongoDB fields.
+ */
+const getTicketSlaStatus = (ticket, now = new Date()) => {
+  if (!ticket) {
+    return null;
+  }
+
+  const sla = ticket.sla;
+
+  if (!sla) {
+    return null;
+  }
+
+  const responseDueAt = sla.responseDueAt ? new Date(sla.responseDueAt) : null;
+
+  const resolutionDueAt = sla.resolutionDueAt
+    ? new Date(sla.resolutionDueAt)
+    : null;
+
+  const firstRespondedAt = sla.firstRespondedAt
+    ? new Date(sla.firstRespondedAt)
+    : null;
+
+  const resolvedAt = sla.resolvedAt ? new Date(sla.resolvedAt) : null;
+
+  const responseBreached =
+    Boolean(responseDueAt) &&
+    !firstRespondedAt &&
+    now.getTime() > responseDueAt.getTime();
+
+  const resolutionBreached =
+    Boolean(resolutionDueAt) &&
+    !resolvedAt &&
+    now.getTime() > resolutionDueAt.getTime();
+
+  return {
+    responseDueAt: sla.responseDueAt || null,
+
+    resolutionDueAt: sla.resolutionDueAt || null,
+
+    firstRespondedAt: sla.firstRespondedAt || null,
+
+    resolvedAt: sla.resolvedAt || null,
+
+    responseBreached,
+
+    resolutionBreached,
+
+    responseStatus: firstRespondedAt
+      ? "completed"
+      : responseBreached
+        ? "breached"
+        : "pending",
+
+    resolutionStatus: resolvedAt
+      ? "completed"
+      : resolutionBreached
+        ? "breached"
+        : "pending",
+  };
+};
 
 /*
  * =========================================================
@@ -205,6 +387,11 @@ const broadcastTicketUpdate = (req, ticket) => {
     resolvedAt: ticket.resolvedAt || null,
 
     closedAt: ticket.closedAt || null,
+
+    /*
+     * SLA state
+     */
+    sla: getTicketSlaStatus(ticket),
   });
 };
 
@@ -256,6 +443,25 @@ export const createTicket = async (req, res) => {
 
     /*
      * =====================================================
+     * NORMALIZE PRIORITY
+     * =====================================================
+     */
+
+    const ticketPriority = priority || "medium";
+
+    /*
+     * =====================================================
+     * CREATE SLA DATES
+     * =====================================================
+     */
+
+    const sla = createSlaDates({
+      createdAt: now,
+      priority: ticketPriority,
+    });
+
+    /*
+     * =====================================================
      * INITIAL CUSTOMER MESSAGE
      * =====================================================
      */
@@ -289,9 +495,30 @@ export const createTicket = async (req, res) => {
 
       category: category || "General",
 
-      priority: priority || "medium",
+      priority: ticketPriority,
 
       status: "open",
+
+      /*
+       * ===================================================
+       * SLA
+       * ===================================================
+       *
+       * No human response has happened yet.
+       */
+      sla: {
+        ...sla,
+
+        firstRespondedAt: null,
+
+        resolvedAt: null,
+      },
+
+      /*
+       * ===================================================
+       * STATUS HISTORY
+       * ===================================================
+       */
 
       statusHistory: [
         {
@@ -306,6 +533,12 @@ export const createTicket = async (req, res) => {
           createdAt: now,
         },
       ],
+
+      /*
+       * ===================================================
+       * INITIAL CONVERSATION
+       * ===================================================
+       */
 
       conversation: [initialConversationMessage],
 
@@ -333,11 +566,6 @@ export const createTicket = async (req, res) => {
      * =====================================================
      * EMAIL NOTIFICATION
      * =====================================================
-     *
-     * Customer receives an email when the ticket is created.
-     *
-     * Email failure must NOT fail ticket creation.
-     * =====================================================
      */
 
     try {
@@ -361,43 +589,32 @@ export const createTicket = async (req, res) => {
 
     /*
      * =====================================================
-     * GENERATE INITIAL AI RESPONSE
+     * INITIAL AI RESPONSE
      * =====================================================
      */
 
     try {
-      /*
-       * IMPORTANT:
-       * Your aiService.js expects:
-       *
-       * generateAIResponse({
-       *   messages: [...]
-       * })
-       */
-
       const aiResponse = await generateAIResponse({
         messages: [
           {
             role: "user",
+
             content: description.trim(),
           },
         ],
       });
 
-      /*
-       * Support both:
-       *
-       * string
-       *
-       * OR
-       *
-       * { text, model }
-       */
-
       const aiText =
         typeof aiResponse === "string" ? aiResponse : aiResponse?.text;
 
       if (aiText?.trim()) {
+        /*
+         * IMPORTANT:
+         *
+         * AI response does NOT complete the human
+         * response SLA.
+         */
+
         ticket.conversation.push({
           sender: null,
 
@@ -417,8 +634,9 @@ export const createTicket = async (req, res) => {
         await ticket.save();
 
         /*
-         * Notify customer through existing
-         * in-app notification system.
+         * =================================================
+         * NOTIFY CUSTOMER
+         * =================================================
          */
 
         try {
@@ -434,11 +652,6 @@ export const createTicket = async (req, res) => {
         }
       }
     } catch (aiError) {
-      /*
-       * Ticket creation must continue even if
-       * Ollama is unavailable.
-       */
-
       console.error("INITIAL AI RESPONSE ERROR:", aiError);
     }
 
@@ -454,20 +667,24 @@ export const createTicket = async (req, res) => {
       .populate("conversation.sender", "name username email avatar role")
       .lean();
 
+    const sanitizedTicket = sanitizeCustomerTicket(populatedTicket);
+
     /*
      * =====================================================
      * RESPONSE
      * =====================================================
      */
 
-    const sanitizedTicket = sanitizeCustomerTicket(populatedTicket);
-
     return res.status(201).json({
       success: true,
 
       message: "Ticket created successfully.",
 
-      ticket: sanitizedTicket,
+      ticket: {
+        ...sanitizedTicket,
+
+        slaStatus: getTicketSlaStatus(sanitizedTicket),
+      },
     });
   } catch (error) {
     console.error("CREATE TICKET ERROR:", error);
@@ -498,7 +715,15 @@ export const getCustomerTickets = async (req, res) => {
       .lean();
 
     const sanitizedTickets = Array.isArray(tickets)
-      ? tickets.map(sanitizeCustomerTicket)
+      ? tickets.map((ticket) => {
+          const sanitized = sanitizeCustomerTicket(ticket);
+
+          return {
+            ...sanitized,
+
+            slaStatus: getTicketSlaStatus(ticket),
+          };
+        })
       : [];
 
     return res.status(200).json({
@@ -567,10 +792,16 @@ export const getCustomerTicket = async (req, res) => {
       });
     }
 
+    const sanitizedTicket = sanitizeCustomerTicket(ticket);
+
     return res.status(200).json({
       success: true,
 
-      ticket,
+      ticket: {
+        ...sanitizedTicket,
+
+        slaStatus: getTicketSlaStatus(ticket),
+      },
     });
   } catch (error) {
     console.error("GET CUSTOMER TICKET ERROR:", error);
@@ -596,12 +827,17 @@ export const addTicketReply = async (req, res) => {
     const { message } = req.body;
 
     console.log("==========================================");
+
     console.log("ADD REPLY REQUEST");
+
     console.log({
       ticketId: id,
+
       userId: req.user?.id,
+
       message,
     });
+
     console.log("==========================================");
 
     /*
@@ -676,7 +912,7 @@ export const addTicketReply = async (req, res) => {
 
     /*
      * =====================================================
-     * ENSURE CONVERSATION EXISTS
+     * ENSURE DATA STRUCTURES
      * =====================================================
      */
 
@@ -684,15 +920,17 @@ export const addTicketReply = async (req, res) => {
       ticket.conversation = [];
     }
 
-    /*
-     * =====================================================
-     * ENSURE STATUS HISTORY EXISTS
-     * =====================================================
-     */
-
     if (!Array.isArray(ticket.statusHistory)) {
       ticket.statusHistory = [];
     }
+
+    /*
+     * =====================================================
+     * ENSURE SLA
+     * =====================================================
+     */
+
+    ensureTicketSla(ticket);
 
     const now = new Date();
 
@@ -713,10 +951,6 @@ export const addTicketReply = async (req, res) => {
 
       createdAt: now,
     });
-
-    /*
-     * Exact reference to customer message.
-     */
 
     const customerMessage = ticket.conversation[ticket.conversation.length - 1];
 
@@ -741,7 +975,19 @@ export const addTicketReply = async (req, res) => {
 
       ticket.resolvedAt = null;
 
-      ticket.statusHistory.push({
+      /*
+       * SLA:
+       *
+       * Keep firstRespondedAt.
+       *
+       * Clear only the previous resolution timestamp.
+       */
+
+      reopenTicketSla(ticket);
+
+      addStatusHistory({
+        ticket,
+
         status: "open",
 
         changedBy: req.user.id,
@@ -756,13 +1002,16 @@ export const addTicketReply = async (req, res) => {
       console.log(`TICKET STATUS CHANGED: ${previousStatus} → open`);
     } else if (ticket.status === "waiting") {
       /*
-       * =====================================================
+       * ===================================================
        * WAITING → OPEN
-       * =====================================================
+       * ===================================================
        */
+
       ticket.status = "open";
 
-      ticket.statusHistory.push({
+      addStatusHistory({
+        ticket,
+
         status: "open",
 
         changedBy: req.user.id,
@@ -789,7 +1038,7 @@ export const addTicketReply = async (req, res) => {
 
     /*
      * =====================================================
-     * SAVE CUSTOMER MESSAGE + STATUS
+     * SAVE CUSTOMER MESSAGE
      * =====================================================
      */
 
@@ -834,6 +1083,8 @@ export const addTicketReply = async (req, res) => {
         closedAt: ticket.closedAt || null,
 
         statusHistory: ticket.statusHistory || [],
+
+        sla: getTicketSlaStatus(ticket),
       });
     }
 
@@ -846,10 +1097,6 @@ export const addTicketReply = async (req, res) => {
     const ollamaMessages = ticket.conversation
       .filter((item) => item.message && item.message.trim())
       .map((item) => {
-        /*
-         * Customer → user
-         */
-
         if (item.senderRole === "customer") {
           return {
             role: "user",
@@ -858,10 +1105,6 @@ export const addTicketReply = async (req, res) => {
           };
         }
 
-        /*
-         * AI → assistant
-         */
-
         if (item.senderRole === "ai") {
           return {
             role: "assistant",
@@ -869,10 +1112,6 @@ export const addTicketReply = async (req, res) => {
             content: item.message,
           };
         }
-
-        /*
-         * Agent/admin → assistant
-         */
 
         if (item.senderRole === "agent" || item.senderRole === "admin") {
           return {
@@ -927,9 +1166,13 @@ Status: ${ticket.status || "open"}
 
     try {
       console.log("==========================================");
+
       console.log("CALLING OLLAMA");
+
       console.log("MODEL:", process.env.OLLAMA_MODEL || "gemma4:31b-cloud");
+
       console.log("URL:", process.env.OLLAMA_URL || "http://localhost:11434");
+
       console.log("==========================================");
 
       aiResult = await generateAIResponse({
@@ -937,13 +1180,10 @@ Status: ${ticket.status || "open"}
       });
 
       console.log("OLLAMA RESPONSE RECEIVED:");
+
       console.log(aiResult);
     } catch (aiError) {
       console.error("OLLAMA RESPONSE ERROR:", aiError);
-
-      /*
-       * Customer message is already saved.
-       */
 
       aiResult = null;
     }
@@ -975,15 +1215,21 @@ Status: ${ticket.status || "open"}
         createdAt: new Date(),
       });
 
-      /*
-       * Exact AI message reference.
-       */
-
       const aiMessage = ticket.conversation[ticket.conversation.length - 1];
 
       ticket.replies = ticket.conversation.length;
 
       ticket.lastReplyAt = new Date();
+
+      /*
+       * IMPORTANT:
+       *
+       * We intentionally DO NOT call:
+       *
+       * markFirstHumanResponse()
+       *
+       * AI is not a human response.
+       */
 
       await ticket.save();
 
@@ -1035,13 +1281,13 @@ Status: ${ticket.status || "open"}
       .populate("conversation.sender", "name username email avatar role")
       .lean();
 
+    const sanitizedUpdatedTicket = sanitizeCustomerTicket(updatedTicket);
+
     /*
      * =====================================================
      * RESPONSE
      * =====================================================
      */
-
-    const sanitizedUpdatedTicket = sanitizeCustomerTicket(updatedTicket);
 
     return res.status(200).json({
       success: true,
@@ -1050,7 +1296,11 @@ Status: ${ticket.status || "open"}
         ? "Reply sent and AI response generated successfully."
         : "Reply sent successfully, but AI response could not be generated.",
 
-      ticket: sanitizedUpdatedTicket,
+      ticket: {
+        ...sanitizedUpdatedTicket,
+
+        slaStatus: getTicketSlaStatus(updatedTicket),
+      },
 
       conversation: sanitizedUpdatedTicket?.conversation || [],
 
@@ -1137,6 +1387,14 @@ export const resolveCustomerTicket = async (req, res) => {
 
     /*
      * =====================================================
+     * ENSURE SLA
+     * =====================================================
+     */
+
+    ensureTicketSla(ticket);
+
+    /*
+     * =====================================================
      * SAVE PREVIOUS STATUS
      * =====================================================
      */
@@ -1154,6 +1412,18 @@ export const resolveCustomerTicket = async (req, res) => {
     ticket.status = "resolved";
 
     ticket.resolvedAt = now;
+
+    /*
+     * =====================================================
+     * SLA RESOLUTION
+     * =====================================================
+     */
+
+    markTicketResolvedForSla({
+      ticket,
+
+      resolvedAt: now,
+    });
 
     /*
      * =====================================================
@@ -1187,9 +1457,6 @@ export const resolveCustomerTicket = async (req, res) => {
      * =====================================================
      * SEND RESOLVED EMAIL
      * =====================================================
-     *
-     * Email failure must not fail the resolve action.
-     * =====================================================
      */
 
     try {
@@ -1198,6 +1465,7 @@ export const resolveCustomerTicket = async (req, res) => {
       if (customer?.email) {
         await sendTicketResolvedEmail({
           customer,
+
           ticket,
         });
 
@@ -1219,7 +1487,7 @@ export const resolveCustomerTicket = async (req, res) => {
 
     if (io) {
       /*
-       * Status changed event
+       * Status changed
        */
 
       io.to(getTicketRoom(ticket._id)).emit("ticket:status-changed", {
@@ -1236,10 +1504,12 @@ export const resolveCustomerTicket = async (req, res) => {
         closedAt: ticket.closedAt || null,
 
         statusHistory: ticket.statusHistory || [],
+
+        sla: getTicketSlaStatus(ticket),
       });
 
       /*
-       * General ticket update
+       * General update
        */
 
       io.to(getTicketRoom(ticket._id)).emit("ticket:updated", {
@@ -1256,6 +1526,8 @@ export const resolveCustomerTicket = async (req, res) => {
         resolvedAt: ticket.resolvedAt,
 
         closedAt: ticket.closedAt || null,
+
+        sla: getTicketSlaStatus(ticket),
       });
     }
 
@@ -1271,6 +1543,8 @@ export const resolveCustomerTicket = async (req, res) => {
       .populate("conversation.sender", "name username email avatar role")
       .lean();
 
+    const sanitizedTicket = sanitizeCustomerTicket(updatedTicket);
+
     /*
      * =====================================================
      * RESPONSE
@@ -1282,7 +1556,11 @@ export const resolveCustomerTicket = async (req, res) => {
 
       message: "Ticket marked as resolved successfully.",
 
-      ticket: updatedTicket,
+      ticket: {
+        ...sanitizedTicket,
+
+        slaStatus: getTicketSlaStatus(updatedTicket),
+      },
     });
   } catch (error) {
     console.error("RESOLVE CUSTOMER TICKET ERROR:", error);
@@ -1420,7 +1698,11 @@ export const uploadTicketAttachments = async (req, res) => {
 
       attachments: ticket.attachments,
 
-      ticket,
+      ticket: {
+        ...ticket.toObject(),
+
+        slaStatus: getTicketSlaStatus(ticket),
+      },
     });
   } catch (error) {
     console.error("UPLOAD TICKET ATTACHMENTS ERROR:", error);
@@ -1444,10 +1726,15 @@ export const deleteTicketAttachment = async (req, res) => {
     const { id, attachmentId } = req.params;
 
     console.log("==========================================");
+
     console.log("DELETE ATTACHMENT REQUEST");
+
     console.log("Ticket ID:", id);
+
     console.log("Attachment ID:", attachmentId);
+
     console.log("User ID:", req.user?.id);
+
     console.log("==========================================");
 
     /*
@@ -1541,7 +1828,7 @@ export const deleteTicketAttachment = async (req, res) => {
 
     /*
      * =====================================================
-     * REMOVE ATTACHMENT FROM DATABASE
+     * REMOVE FROM DATABASE
      * =====================================================
      */
 
@@ -1572,7 +1859,11 @@ export const deleteTicketAttachment = async (req, res) => {
 
       attachments: ticket.attachments,
 
-      ticket,
+      ticket: {
+        ...ticket.toObject(),
+
+        slaStatus: getTicketSlaStatus(ticket),
+      },
     });
   } catch (error) {
     console.error("DELETE TICKET ATTACHMENT ERROR:", error);
@@ -1609,7 +1900,7 @@ export const getTicketStatusHistory = async (req, res) => {
       customer: req.user.id,
     })
       .select(
-        "_id ticketNumber status statusHistory createdAt resolvedAt reopenedAt closedAt",
+        "_id ticketNumber status statusHistory createdAt resolvedAt reopenedAt closedAt sla",
       )
       .populate("statusHistory.changedBy", "name username email avatar role")
       .lean();
@@ -1638,6 +1929,8 @@ export const getTicketStatusHistory = async (req, res) => {
       reopenedAt: ticket.reopenedAt || null,
 
       closedAt: ticket.closedAt || null,
+
+      sla: getTicketSlaStatus(ticket),
 
       statusHistory: ticket.statusHistory || [],
     });
@@ -2040,6 +2333,7 @@ export const getCustomerAnalytics = async (req, res) => {
           "isEscalated",
           "escalatedAt",
           "attachments",
+          "sla",
         ].join(" "),
       )
       .lean();
@@ -2077,6 +2371,7 @@ export const getCustomerAnalytics = async (req, res) => {
           "ratedAt",
           "isEscalated",
           "attachments",
+          "sla",
         ].join(" "),
       )
       .lean();
@@ -2108,6 +2403,7 @@ export const getCustomerAnalytics = async (req, res) => {
           "isEscalated",
           "escalatedAt",
           "attachments",
+          "sla",
         ].join(" "),
       )
       .lean();
@@ -2278,7 +2574,6 @@ export const getCustomerAnalytics = async (req, res) => {
             break;
 
           case "agent":
-
           case "admin":
             agentMessages++;
             break;
@@ -2420,8 +2715,14 @@ export const getCustomerAnalytics = async (req, res) => {
 
     /*
      * =====================================================
-     * RESPONSE TIME
+     * HUMAN RESPONSE TIME
      * =====================================================
+     *
+     * IMPORTANT:
+     *
+     * AI is intentionally excluded.
+     *
+     * Only agent/admin messages count.
      */
 
     const responseTimes = [];
@@ -2429,18 +2730,17 @@ export const getCustomerAnalytics = async (req, res) => {
     currentTickets.forEach((ticket) => {
       const createdAt = new Date(ticket.createdAt);
 
-      const firstResponse = (ticket.conversation || [])
+      const firstHumanResponse = (ticket.conversation || [])
         .filter(
           (message) =>
-            message.senderRole === "ai" ||
-            message.senderRole === "agent" ||
-            message.senderRole === "admin",
+            message.senderRole === "agent" || message.senderRole === "admin",
         )
         .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))[0];
 
-      if (firstResponse?.createdAt) {
+      if (firstHumanResponse?.createdAt) {
         const responseTime =
-          new Date(firstResponse.createdAt).getTime() - createdAt.getTime();
+          new Date(firstHumanResponse.createdAt).getTime() -
+          createdAt.getTime();
 
         if (responseTime >= 0) {
           responseTimes.push(responseTime);
@@ -2456,7 +2756,7 @@ export const getCustomerAnalytics = async (req, res) => {
 
     /*
      * =====================================================
-     * PREVIOUS RESPONSE TIME
+     * PREVIOUS HUMAN RESPONSE TIME
      * =====================================================
      */
 
@@ -2465,18 +2765,17 @@ export const getCustomerAnalytics = async (req, res) => {
     previousTickets.forEach((ticket) => {
       const createdAt = new Date(ticket.createdAt);
 
-      const firstResponse = (ticket.conversation || [])
+      const firstHumanResponse = (ticket.conversation || [])
         .filter(
           (message) =>
-            message.senderRole === "ai" ||
-            message.senderRole === "agent" ||
-            message.senderRole === "admin",
+            message.senderRole === "agent" || message.senderRole === "admin",
         )
         .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))[0];
 
-      if (firstResponse?.createdAt) {
+      if (firstHumanResponse?.createdAt) {
         const responseTime =
-          new Date(firstResponse.createdAt).getTime() - createdAt.getTime();
+          new Date(firstHumanResponse.createdAt).getTime() -
+          createdAt.getTime();
 
         if (responseTime >= 0) {
           previousResponseTimes.push(responseTime);
@@ -2600,6 +2899,58 @@ export const getCustomerAnalytics = async (req, res) => {
           100,
       );
     }
+
+    /*
+     * =====================================================
+     * SLA ANALYTICS
+     * =====================================================
+     */
+
+    let responseSlaCompleted = 0;
+
+    let responseSlaBreached = 0;
+
+    let resolutionSlaCompleted = 0;
+
+    let resolutionSlaBreached = 0;
+
+    currentTickets.forEach((ticket) => {
+      const slaStatus = getTicketSlaStatus(ticket, now);
+
+      if (!slaStatus) {
+        return;
+      }
+
+      if (slaStatus.responseStatus === "completed") {
+        responseSlaCompleted++;
+      }
+
+      if (slaStatus.responseStatus === "breached") {
+        responseSlaBreached++;
+      }
+
+      if (slaStatus.resolutionStatus === "completed") {
+        resolutionSlaCompleted++;
+      }
+
+      if (slaStatus.resolutionStatus === "breached") {
+        resolutionSlaBreached++;
+      }
+    });
+
+    const responseSlaTracked = responseSlaCompleted + responseSlaBreached;
+
+    const resolutionSlaTracked = resolutionSlaCompleted + resolutionSlaBreached;
+
+    const responseSlaCompliance =
+      responseSlaTracked > 0
+        ? Math.round((responseSlaCompleted / responseSlaTracked) * 100)
+        : 0;
+
+    const resolutionSlaCompliance =
+      resolutionSlaTracked > 0
+        ? Math.round((resolutionSlaCompleted / resolutionSlaTracked) * 100)
+        : 0;
 
     /*
      * =====================================================
@@ -2988,14 +3339,6 @@ export const getCustomerAnalytics = async (req, res) => {
       },
 
       overview: {
-        /*
-         * IMPORTANT:
-         *
-         * totalTickets is all-time,
-         * while conversations are
-         * selected-period data.
-         */
-
         totalTickets: totalHistoricalTickets,
 
         totalConversations,
@@ -3071,6 +3414,12 @@ export const getCustomerAnalytics = async (req, res) => {
         agentPercentage: agentMessagePercentage,
       },
 
+      /*
+       * ===================================================
+       * HUMAN RESPONSE TIME
+       * ===================================================
+       */
+
       responseTime: {
         average: formatDuration(averageResponseTimeMs),
 
@@ -3104,6 +3453,36 @@ export const getCustomerAnalytics = async (req, res) => {
           averageResolutionTimeMs > 0 &&
           previousAverageResolutionTimeMs > 0 &&
           averageResolutionTimeMs < previousAverageResolutionTimeMs,
+      },
+
+      /*
+       * ===================================================
+       * SLA
+       * ===================================================
+       */
+
+      sla: {
+        response: {
+          completed: responseSlaCompleted,
+
+          breached: responseSlaBreached,
+
+          tracked: responseSlaTracked,
+
+          compliance: responseSlaCompliance,
+        },
+
+        resolution: {
+          completed: resolutionSlaCompleted,
+
+          breached: resolutionSlaBreached,
+
+          tracked: resolutionSlaTracked,
+
+          compliance: resolutionSlaCompliance,
+        },
+
+        totalBreaches: responseSlaBreached + resolutionSlaBreached,
       },
 
       satisfaction: {
