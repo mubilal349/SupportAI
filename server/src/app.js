@@ -15,6 +15,7 @@ import customerRoutes from "./routes/customerRoutes.js";
 import aiTicketRoutes from "./routes/aiTicketRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import analyticsRoutes from "./routes/analyticsRoutes.js";
+import knowledgeBaseRoutes from "./routes/knowledgeBaseRoutes.js";
 
 // ==========
 //  AGENT ROUTES
@@ -53,6 +54,7 @@ app.use("/api/customer", customerRoutes);
 app.use("/api/ai-tickets", aiTicketRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api/knowledge-base", knowledgeBaseRoutes);
 
 // Agent APIS
 app.use("/api/agent", agentRoutes);

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
 import {
   AlertCircle,
   ArrowLeft,
@@ -7,6 +6,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronUp,
   Clock3,
   Download,
   File,
@@ -16,15 +16,18 @@ import {
   MessageSquare,
   Paperclip,
   RefreshCw,
+  Search,
   Send,
   ShieldAlert,
   User,
   UserCheck,
   X,
+  BookOpen,
+  ExternalLink,
+  Sparkles,
+  Copy,
 } from "lucide-react";
-
 import { io } from "socket.io-client";
-
 import { useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -39,84 +42,202 @@ import {
 
 import { useAuth } from "../../../context/AuthContext";
 
-/*
-|--------------------------------------------------------------------------
-| Helpers
-|--------------------------------------------------------------------------
-*/
+// ============================================================
+// CONFIG
+// ============================================================
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
 const SERVER_BASE_URL = API_BASE_URL.replace(/\/api\/?$/, "");
-
 const SOCKET_BASE_URL = SERVER_BASE_URL;
 
+// ============================================================
+// LOCAL KNOWLEDGE BASE
+// ============================================================
+//
+// This is intentionally local for now because you currently
+// only have AgentTicketDetails.jsx.
+//
+// Later these articles can come from:
+// GET /api/knowledge-base/search?q=...
+//
+// ============================================================
+
+const KNOWLEDGE_BASE_ARTICLES = [
+  {
+    id: "kb-001",
+    title: "How to reset your password",
+    category: "Account & Security",
+    tags: ["password", "reset", "login", "account", "security"],
+    content:
+      "Customers can reset their password from the login screen by selecting 'Forgot Password'. They should enter the email associated with their account and follow the password reset link sent to their inbox.",
+    solution:
+      "You can reset your password by selecting “Forgot Password” on the login screen. Enter the email associated with your account and follow the password reset link sent to your inbox. If you do not receive the email, please check your spam or junk folder.",
+  },
+  {
+    id: "kb-002",
+    title: "Troubleshooting login problems",
+    category: "Account & Security",
+    tags: ["login", "signin", "authentication", "password", "account"],
+    content:
+      "If a customer cannot sign in, first verify that they are using the correct email and password. Ask them to clear browser cache, try another browser, and confirm that their account is active.",
+    solution:
+      "Let's troubleshoot your login issue. Please verify that you are using the correct email and password. If the issue continues, clear your browser cache and try signing in from another browser. Also make sure your account is active.",
+  },
+  {
+    id: "kb-003",
+    title: "How to update account information",
+    category: "Account Management",
+    tags: ["profile", "account", "email", "name", "update"],
+    content:
+      "Customers can update supported profile information from their account settings. Changes should be saved before leaving the page.",
+    solution:
+      "You can update your account information from your account settings. Open your profile, make the required changes, and select Save. If the information cannot be changed from your account settings, let us know which field you need to update and we can assist you.",
+  },
+  {
+    id: "kb-004",
+    title: "Troubleshooting email notifications",
+    category: "Notifications",
+    tags: ["email", "notification", "notifications", "alerts", "messages"],
+    content:
+      "If customers are not receiving email notifications, verify their email address, check spam/junk folders, and confirm that notifications are enabled.",
+    solution:
+      "Please first check that the email address on your account is correct. Also check your spam or junk folder for our messages. If you still do not receive notifications, please confirm that email notifications are enabled in your account settings.",
+  },
+  {
+    id: "kb-005",
+    title: "How to create a support ticket",
+    category: "Support",
+    tags: ["ticket", "support", "request", "help"],
+    content:
+      "Customers can create a support ticket from the Support section. They should provide a clear subject, detailed description, category, and priority.",
+    solution:
+      "You can create a support ticket from the Support section of your account. Please provide a clear subject and detailed description of the issue. Selecting the appropriate category and priority will help our support team resolve your request faster.",
+  },
+  {
+    id: "kb-006",
+    title: "Understanding ticket statuses",
+    category: "Support",
+    tags: ["ticket", "status", "open", "pending", "resolved", "closed"],
+    content:
+      "Open means the request is awaiting support action. Pending means additional information may be required. In Progress means an agent is actively working on the request. Resolved means the issue has been addressed. Closed means the ticket is no longer active.",
+    solution:
+      "Your ticket status indicates where your request currently stands. Open means it is awaiting support action, In Progress means an agent is actively working on it, Pending may mean additional information is required, Resolved means the issue has been addressed, and Closed means the ticket is no longer active.",
+  },
+  {
+    id: "kb-007",
+    title: "How to attach files to a ticket",
+    category: "Tickets",
+    tags: ["attachment", "file", "upload", "image", "document"],
+    content:
+      "Customers can attach screenshots, documents, and other supported files to their support requests. Attachments should be relevant to the reported issue.",
+    solution:
+      "You can attach relevant screenshots or documents directly to your support ticket. Please make sure the files clearly show the issue you are experiencing and that they are in a supported format.",
+  },
+  {
+    id: "kb-008",
+    title: "When should a ticket be escalated?",
+    category: "Support Operations",
+    tags: ["escalation", "escalate", "urgent", "priority", "manager"],
+    content:
+      "Escalate a ticket when it requires a higher level of technical expertise, involves a serious service impact, or cannot be resolved within the normal support workflow.",
+    solution:
+      "I understand the importance of this issue. I am escalating your ticket to the appropriate support team so it can receive further investigation and assistance.",
+  },
+  {
+    id: "kb-009",
+    title: "Common browser troubleshooting steps",
+    category: "Troubleshooting",
+    tags: ["browser", "cache", "cookies", "chrome", "firefox", "edge"],
+    content:
+      "Common browser troubleshooting includes refreshing the page, clearing cache and cookies, disabling problematic extensions, trying an incognito/private window, and testing another browser.",
+    solution:
+      "Please try refreshing the page first. If the issue continues, clear your browser cache and cookies and try again. You can also test the issue in an incognito/private window or another browser to determine whether the problem is browser-specific.",
+  },
+  {
+    id: "kb-010",
+    title: "How to report a technical issue",
+    category: "Technical Support",
+    tags: ["bug", "technical", "issue", "error", "problem"],
+    content:
+      "A useful technical issue report should include the affected feature, steps to reproduce the problem, expected behavior, actual behavior, error messages, and relevant screenshots.",
+    solution:
+      "To help us investigate this technical issue, please provide the steps that led to the problem, what you expected to happen, what actually happened, and any error message you received. Screenshots are also helpful if available.",
+  },
+];
+
+// ============================================================
+// HELPERS
+// ============================================================
+
 const getId = (value) => {
-  if (!value) return null;
+  if (!value) return "";
 
-  if (typeof value === "string") {
-    return value;
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
   }
 
-  if (typeof value === "object") {
-    return value._id || value.id || value.userId || null;
-  }
+  if (value._id) return String(value._id);
+  if (value.id) return String(value.id);
+  if (value.userId) return String(value.userId);
 
-  return null;
+  return "";
 };
 
 const getAvatarUrl = (avatar) => {
   if (!avatar) return "";
 
-  if (/^(https?:\/\/|data:|blob:)/i.test(avatar)) {
-    return avatar;
+  if (avatar.startsWith("http")) return avatar;
+
+  if (avatar.startsWith("/")) {
+    return `${SERVER_BASE_URL}${avatar}`;
   }
 
-  return `${SERVER_BASE_URL}/${String(avatar).replace(/^\/+/, "")}`;
+  return `${SERVER_BASE_URL}/${avatar}`;
 };
 
 const getFileUrl = (file) => {
   if (!file) return "";
 
-  const filePath =
-    file.path || file.url || file.filePath || file.filename || "";
+  const rawUrl =
+    typeof file === "string"
+      ? file
+      : file.url || file.path || file.fileUrl || file.location || "";
 
-  if (!filePath) return "";
+  if (!rawUrl) return "";
 
-  if (/^(https?:\/\/|blob:|data:)/i.test(filePath)) {
-    return filePath;
+  if (rawUrl.startsWith("http")) return rawUrl;
+
+  if (rawUrl.startsWith("/")) {
+    return `${SERVER_BASE_URL}${rawUrl}`;
   }
 
-  return `${SERVER_BASE_URL}/${String(filePath).replace(/^\/+/, "")}`;
+  return `${SERVER_BASE_URL}/${rawUrl}`;
 };
 
 const formatDate = (date) => {
-  if (!date) return "";
+  if (!date) return "Unknown date";
 
-  const parsed = new Date(date);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return "";
+  try {
+    return new Date(date).toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return "Unknown date";
   }
-
-  return parsed.toLocaleString([], {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
 };
 
 const formatFileSize = (bytes) => {
-  if (!bytes || Number(bytes) <= 0) {
-    return "";
-  }
+  if (!bytes || Number.isNaN(Number(bytes))) return "";
 
   const size = Number(bytes);
 
-  if (size < 1024) {
-    return `${size} B`;
-  }
-
+  if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) {
     return `${(size / 1024).toFixed(1)} KB`;
   }
@@ -124,184 +245,170 @@ const formatFileSize = (bytes) => {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-const getPriorityClasses = (priority) => {
-  switch (String(priority || "").toLowerCase()) {
-    case "high":
-      return "border-red-500/30 bg-red-500/10 text-red-400";
-
-    case "low":
-      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-400";
-
-    default:
-      return "border-amber-500/30 bg-amber-500/10 text-amber-400";
-  }
-};
-
-const getStatusClasses = (status) => {
-  switch (String(status || "").toLowerCase()) {
-    case "open":
-      return "border-blue-500/30 bg-blue-500/10 text-blue-400";
-
-    case "in-progress":
-      return "border-violet-500/30 bg-violet-500/10 text-violet-400";
-
-    case "waiting":
-      return "border-amber-500/30 bg-amber-500/10 text-amber-400";
-
-    case "resolved":
-      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-400";
-
-    case "closed":
-      return "border-slate-600/80 bg-slate-800/80 text-slate-300";
-
-    default:
-      return "border-slate-700 bg-slate-800 text-slate-300";
-  }
-};
-
-const formatStatus = (status) => {
-  if (!status) return "Unknown";
-
+const formatStatus = (status = "") => {
   return String(status)
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
-const getSenderName = (message, ticket) => {
-  if (message?.sender?.name) {
-    return message.sender.name;
-  }
+const getSenderName = (message, fallback = "User") => {
+  if (!message) return fallback;
 
-  if (message?.senderName) {
-    return message.senderName;
-  }
-
-  if (String(message?.senderRole || "").toLowerCase() === "customer") {
-    return ticket?.customer?.name || "Customer";
-  }
-
-  if (String(message?.senderRole || "").toLowerCase() === "agent") {
-    return "Agent";
-  }
-
-  if (String(message?.senderRole || "").toLowerCase() === "admin") {
-    return "Admin";
-  }
-
-  if (String(message?.senderRole || "").toLowerCase() === "ai") {
-    return "AI Assistant";
-  }
-
-  return "Support";
+  return (
+    message.senderName ||
+    message.sender?.name ||
+    message.sender?.username ||
+    message.user?.name ||
+    message.user?.username ||
+    fallback
+  );
 };
 
 const isImageFile = (file) => {
-  const mime = String(file?.mimetype || "").toLowerCase();
+  const type = file?.mimeType || file?.type || "";
+  const name = file?.name || file?.filename || file?.originalName || "";
 
-  if (mime.startsWith("image/")) {
-    return true;
-  }
-
-  const name = String(
-    file?.originalName || file?.filename || file?.name || "",
-  ).toLowerCase();
-
-  return /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(name);
+  return (
+    type.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(name)
+  );
 };
 
 const isPdfFile = (file) => {
-  const mime = String(file?.mimetype || "").toLowerCase();
+  const type = file?.mimeType || file?.type || "";
+  const name = file?.name || file?.filename || file?.originalName || "";
 
-  if (mime === "application/pdf") {
-    return true;
-  }
-
-  const name = String(
-    file?.originalName || file?.filename || file?.name || "",
-  ).toLowerCase();
-
-  return name.endsWith(".pdf");
+  return type === "application/pdf" || /\.pdf$/i.test(name);
 };
 
-/*
-|--------------------------------------------------------------------------
-| Component
-|--------------------------------------------------------------------------
-*/
+const getPriorityClasses = (priority = "") => {
+  const value = String(priority).toLowerCase();
+
+  if (value === "urgent") {
+    return "border-red-500/30 bg-red-500/10 text-red-300";
+  }
+
+  if (value === "high") {
+    return "border-orange-500/30 bg-orange-500/10 text-orange-300";
+  }
+
+  if (value === "medium") {
+    return "border-yellow-500/30 bg-yellow-500/10 text-yellow-300";
+  }
+
+  return "border-slate-700 bg-slate-900 text-slate-300";
+};
+
+const getStatusClasses = (status = "") => {
+  const value = String(status).toLowerCase();
+
+  if (value === "resolved" || value === "closed") {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+  }
+
+  if (value === "in-progress") {
+    return "border-blue-500/30 bg-blue-500/10 text-blue-300";
+  }
+
+  if (value === "pending" || value === "waiting") {
+    return "border-yellow-500/30 bg-yellow-500/10 text-yellow-300";
+  }
+
+  return "border-slate-700 bg-slate-900 text-slate-300";
+};
+
+// ============================================================
+// COMPONENT
+// ============================================================
 
 const AgentTicketDetails = () => {
   const { ticketId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const [ticket, setTicket] = useState(null);
+  // ==========================================================
+  // TICKET STATE
+  // ==========================================================
 
+  const [ticket, setTicket] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const [previewImage, setPreviewImage] = useState(null);
+
+  // ==========================================================
+  // REPLY STATE
+  // ==========================================================
+
   const [reply, setReply] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
-
   const [sendingReply, setSendingReply] = useState(false);
+
+  // ==========================================================
+  // TICKET UPDATE STATE
+  // ==========================================================
+
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [updatingPriority, setUpdatingPriority] = useState(false);
 
-  const [previewImage, setPreviewImage] = useState(null);
+  // ==========================================================
+  // ASSIGNMENT
+  // ==========================================================
 
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState("");
 
+  // ==========================================================
+  // COMPOSER
+  // ==========================================================
+
   const [composerMode, setComposerMode] = useState("reply");
+
+  // ==========================================================
+  // INTERNAL NOTE
+  // ==========================================================
 
   const [internalNote, setInternalNote] = useState("");
   const [isAddingInternalNote, setIsAddingInternalNote] = useState(false);
   const [internalNoteError, setInternalNoteError] = useState("");
 
-  /*
-  |--------------------------------------------------------------------------
-  | Ticket Escalation
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // ESCALATION
+  // ==========================================================
 
   const [showEscalateModal, setShowEscalateModal] = useState(false);
-
   const [escalationReason, setEscalationReason] = useState("");
-
   const [escalationNote, setEscalationNote] = useState("");
-
   const [escalating, setEscalating] = useState(false);
-
   const [escalationError, setEscalationError] = useState("");
 
-  /*
-  |--------------------------------------------------------------------------
-  | Customer Typing Indicator
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // SOCKET
+  // ==========================================================
 
   const [customerTyping, setCustomerTyping] = useState(false);
 
   const socketRef = useRef(null);
-
   const fileInputRef = useRef(null);
   const conversationEndRef = useRef(null);
 
-  /*
-  |--------------------------------------------------------------------------
-  | Load ticket
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // KNOWLEDGE BASE STATE
+  // ==========================================================
+
+  const [knowledgeBaseOpen, setKnowledgeBaseOpen] = useState(false);
+  const [knowledgeSearch, setKnowledgeSearch] = useState("");
+  const [expandedArticle, setExpandedArticle] = useState(null);
+
+  // ==========================================================
+  // LOAD TICKET
+  // ==========================================================
 
   const loadTicket = useCallback(
     async (showLoader = true) => {
-      if (!ticketId) {
-        setError("Ticket ID is missing.");
-        setLoading(false);
-        return;
-      }
+      if (!ticketId) return;
 
       try {
         if (showLoader) {
@@ -314,15 +421,6 @@ const AgentTicketDetails = () => {
 
         const response = await getAgentTicketById(ticketId);
 
-        /*
-         * Support all common API response structures:
-         *
-         * { ticket: {...} }
-         * { data: {...} }
-         * { data: { ticket: {...} } }
-         * direct ticket object
-         */
-
         const rawTicket =
           response?.ticket ||
           response?.data?.ticket ||
@@ -330,15 +428,13 @@ const AgentTicketDetails = () => {
           response;
 
         if (!rawTicket) {
-          throw new Error("Ticket data was not returned by the server.");
+          throw new Error("Ticket not found.");
         }
 
         const normalizedTicket = {
           ...rawTicket,
 
-          id: rawTicket.id || rawTicket._id || ticketId,
-
-          _id: rawTicket._id || rawTicket.id || ticketId,
+          id: getId(rawTicket) || ticketId,
 
           conversation: Array.isArray(rawTicket.conversation)
             ? rawTicket.conversation
@@ -352,33 +448,20 @@ const AgentTicketDetails = () => {
             ? rawTicket.statusHistory
             : [],
 
-          /*
-           * Keep escalation information available even when
-           * the backend doesn't return an escalation object.
-           */
           escalation: rawTicket.escalation || {
             isEscalated: false,
-            escalatedBy: null,
-            escalatedTo: null,
-            reason: "",
-            note: "",
-            escalatedAt: null,
-            resolvedAt: null,
           },
         };
 
-        console.log("========================================");
-        console.log("AGENT TICKET LOADED");
-        console.log("TICKET:", normalizedTicket);
-        console.log("DESCRIPTION:", normalizedTicket.description);
-        console.log("CONVERSATION:", normalizedTicket.conversation);
-        console.log("ATTACHMENTS:", normalizedTicket.attachments);
-        console.log("ESCALATION:", normalizedTicket.escalation);
-        console.log("========================================");
-
         setTicket(normalizedTicket);
+
+        console.log("Agent Ticket:", normalizedTicket);
+        console.log("Description:", normalizedTicket.description);
+        console.log("Conversation:", normalizedTicket.conversation);
+        console.log("Attachments:", normalizedTicket.attachments);
+        console.log("Escalation:", normalizedTicket.escalation);
       } catch (err) {
-        console.error("LOAD AGENT TICKET ERROR:", err);
+        console.error("Failed to load ticket:", err);
 
         setError(
           err?.response?.data?.message ||
@@ -397,218 +480,160 @@ const AgentTicketDetails = () => {
     loadTicket(true);
   }, [loadTicket]);
 
-  /*
-  |--------------------------------------------------------------------------
-  | Customer Typing Socket
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // SOCKET.IO
+  // ==========================================================
 
   useEffect(() => {
-    if (!ticketId) {
-      return;
-    }
+    if (!ticketId) return;
 
     const token = localStorage.getItem("supportai_token");
 
     if (!token) {
-      console.warn("AGENT TYPING SOCKET: No supportai_token found.");
       return;
     }
 
-    let socket;
+    const socket = io(SOCKET_BASE_URL, {
+      auth: {
+        token,
+      },
+      transports: ["websocket", "polling"],
+      withCredentials: true,
+      autoConnect: true,
+    });
 
-    try {
-      socket = io(SOCKET_BASE_URL, {
-        auth: {
-          token,
-        },
-        transports: ["websocket", "polling"],
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      console.log("Agent socket connected:", socket.id);
+
+      socket.emit("ticket:join", {
+        ticketId,
       });
+    });
 
-      socketRef.current = socket;
+    socket.on("ticket:joined", (payload) => {
+      console.log("Joined ticket room:", payload);
+    });
 
-      const handleConnect = () => {
-        console.log("AGENT TYPING SOCKET CONNECTED:", socket.id);
+    socket.on("ticket:typing", (payload) => {
+      if (!payload) return;
 
-        socket.emit("ticket:join", {
-          ticketId,
-        });
-      };
+      const payloadTicketId =
+        payload.ticketId || payload.id || payload.ticket?._id;
 
-      const handleJoined = (data) => {
-        console.log("AGENT JOINED TICKET ROOM:", data);
-      };
-
-      const handleCustomerTyping = (data) => {
-        if (String(data?.ticketId || "") !== String(ticketId)) {
-          return;
-        }
-
-        const role = String(data?.role || "").toLowerCase();
-
-        if (role !== "customer") {
-          return;
-        }
-
-        console.log("CUSTOMER TYPING:", data?.isTyping);
-
-        setCustomerTyping(Boolean(data?.isTyping));
-      };
-
-      const handleSocketError = (data) => {
-        console.warn("AGENT TYPING SOCKET ERROR:", data);
-      };
-
-      socket.on("connect", handleConnect);
-
-      socket.on("ticket:joined", handleJoined);
-
-      socket.on("ticket:typing", handleCustomerTyping);
-
-      socket.on("ticket:error", handleSocketError);
-
-      if (socket.connected) {
-        handleConnect();
+      if (payloadTicketId && String(payloadTicketId) !== String(ticketId)) {
+        return;
       }
 
-      return () => {
-        console.log("LEAVING AGENT TICKET SOCKET:", ticketId);
+      const role =
+        payload.senderRole || payload.role || payload.user?.role || "";
 
-        setCustomerTyping(false);
+      if (String(role).toLowerCase() !== "customer") {
+        return;
+      }
 
-        if (socket.connected) {
-          socket.emit("ticket:leave", {
-            ticketId,
-          });
-        }
+      setCustomerTyping(Boolean(payload.isTyping));
+    });
 
-        socket.off("connect", handleConnect);
+    socket.on("ticket:error", (payload) => {
+      console.error("Ticket socket error:", payload);
+    });
 
-        socket.off("ticket:joined", handleJoined);
+    return () => {
+      try {
+        socket.emit("ticket:leave", {
+          ticketId,
+        });
+      } catch {
+        // Ignore cleanup errors.
+      }
 
-        socket.off("ticket:typing", handleCustomerTyping);
+      socket.removeAllListeners();
+      socket.disconnect();
 
-        socket.off("ticket:error", handleSocketError);
-
-        socket.disconnect();
-
-        if (socketRef.current === socket) {
-          socketRef.current = null;
-        }
-      };
-    } catch (socketError) {
-      console.error("AGENT TYPING SOCKET INITIALIZATION ERROR:", socketError);
-
-      setCustomerTyping(false);
-    }
+      socketRef.current = null;
+    };
   }, [ticketId]);
 
-  /*
-  |--------------------------------------------------------------------------
-  | Build conversation with original customer ticket message
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // CONVERSATION
+  // ==========================================================
 
   const conversation = useMemo(() => {
-    if (!ticket) {
-      return [];
-    }
+    if (!ticket) return [];
 
-    const existingConversation = Array.isArray(ticket.conversation)
+    const existing = Array.isArray(ticket.conversation)
       ? ticket.conversation
       : [];
 
-    const description = String(
-      ticket.description || ticket.initialMessage || ticket.message || "",
-    ).trim();
-
-    console.log("CONVERSATION BUILDER - DESCRIPTION:", description);
-
-    console.log("CONVERSATION BUILDER - EXISTING:", existingConversation);
+    const description = String(ticket.description || "").trim();
 
     if (!description) {
-      return existingConversation;
+      return existing;
     }
 
-    const originalAlreadyExists = existingConversation.some((message) => {
-      const messageText = String(message?.message || "").trim();
+    const hasOriginalMessage = existing.some((message) => {
+      const messageText = String(
+        message?.message || message?.content || "",
+      ).trim();
 
-      const senderRole = String(
-        message?.senderRole || message?.sender?.role || "",
-      ).toLowerCase();
-
-      return messageText === description && senderRole === "customer";
+      return messageText === description;
     });
 
-    if (originalAlreadyExists) {
-      return existingConversation;
+    if (hasOriginalMessage) {
+      return existing;
     }
 
-    const originalTicketMessage = {
-      _id: `initial-ticket-${ticket.id || ticket._id}`,
-
+    const syntheticMessage = {
       id: `initial-ticket-${ticket.id || ticket._id}`,
-
-      sender: ticket.customer || {
-        name: "Customer",
-      },
-
+      _id: `initial-ticket-${ticket.id || ticket._id}`,
       senderRole: "customer",
-
+      sender: ticket.customer,
+      senderName:
+        ticket.customer?.name || ticket.customer?.username || "Customer",
       message: description,
-
-      attachments: Array.isArray(ticket.attachments) ? ticket.attachments : [],
-
+      content: description,
+      attachments: ticket.attachments || [],
       createdAt:
         ticket.createdAt || ticket.updatedAt || new Date().toISOString(),
-
-      isRead: true,
-
-      isInitialTicketMessage: true,
+      isOriginalTicket: true,
     };
 
-    return [originalTicketMessage, ...existingConversation];
+    return [syntheticMessage, ...existing];
   }, [ticket]);
 
-  /*
-  |--------------------------------------------------------------------------
-  | Scroll to latest message
-  |--------------------------------------------------------------------------
-  */
-
   useEffect(() => {
-    if (!conversation.length) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      conversationEndRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "end",
-      });
-    }, 100);
-
-    return () => clearTimeout(timer);
+    conversationEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
   }, [conversation.length]);
 
-  /*
-  |--------------------------------------------------------------------------
-  | File selection
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // FILE HANDLING
+  // ==========================================================
 
-  const handleFileChange = (event) => {
+  const handleFileSelection = (event) => {
     const files = Array.from(event.target.files || []);
 
-    if (!files.length) {
-      return;
-    }
+    if (!files.length) return;
 
-    const availableSlots = Math.max(0, 5 - selectedFiles.length);
+    setSelectedFiles((previous) => {
+      const combined = [...previous, ...files];
 
-    const filesToAdd = files.slice(0, availableSlots);
+      const uniqueFiles = combined.filter(
+        (file, index, array) =>
+          index ===
+          array.findIndex(
+            (item) =>
+              item.name === file.name &&
+              item.size === file.size &&
+              item.lastModified === file.lastModified,
+          ),
+      );
 
-    setSelectedFiles((previous) => [...previous, ...filesToAdd]);
+      return uniqueFiles.slice(0, 5);
+    });
 
     event.target.value = "";
   };
@@ -619,31 +644,21 @@ const AgentTicketDetails = () => {
     );
   };
 
-  /*
-  |--------------------------------------------------------------------------
-  | Assign ticket to current agent
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // ASSIGN TICKET
+  // ==========================================================
 
   const handleAssignToMe = async () => {
     const id = ticket?.id || ticket?._id;
 
-    if (!id) {
-      setAssignError("Ticket ID is missing.");
-      return;
-    }
-
-    if (assigning) {
-      return;
-    }
+    if (!id || assigning) return;
 
     if (isAssignedToCurrentUser) {
-      setSuccess("This ticket is already assigned to you.");
       return;
     }
 
-    if (assignedAgent && !isAssignedToCurrentUser) {
-      setAssignError("This ticket is already assigned to another agent.");
+    if (isAssignedToAnotherAgent) {
+      setAssignError("This ticket is assigned to another agent.");
       return;
     }
 
@@ -653,87 +668,63 @@ const AgentTicketDetails = () => {
       setError("");
       setSuccess("");
 
-      console.log("ASSIGNING TICKET:", id);
-
       const response = await assignTicketToMe(id);
-
-      console.log("ASSIGN TICKET RESPONSE:", response);
 
       const updatedTicket =
         response?.ticket || response?.data?.ticket || response?.data || null;
 
-      if (updatedTicket) {
-        setTicket((previous) => {
-          if (!previous) {
-            return previous;
-          }
+      setTicket((previous) => {
+        if (!previous) return previous;
 
+        if (updatedTicket) {
           return {
             ...previous,
             ...updatedTicket,
-
-            id: updatedTicket.id || updatedTicket._id || previous.id,
-
-            _id: updatedTicket._id || updatedTicket.id || previous._id,
-
-            assignedAgent:
-              updatedTicket.assignedAgent || user || previous.assignedAgent,
-
-            conversation: Array.isArray(updatedTicket.conversation)
-              ? updatedTicket.conversation
-              : previous.conversation || [],
-
-            attachments: Array.isArray(updatedTicket.attachments)
-              ? updatedTicket.attachments
-              : previous.attachments || [],
-
-            statusHistory: Array.isArray(updatedTicket.statusHistory)
-              ? updatedTicket.statusHistory
-              : previous.statusHistory || [],
-
-            escalation: updatedTicket.escalation || previous.escalation,
+            conversation:
+              updatedTicket.conversation || previous.conversation || [],
+            attachments:
+              updatedTicket.attachments || previous.attachments || [],
+            statusHistory:
+              updatedTicket.statusHistory || previous.statusHistory || [],
+            escalation: updatedTicket.escalation ||
+              previous.escalation || {
+                isEscalated: false,
+              },
           };
-        });
-      } else {
-        await loadTicket(false);
-      }
+        }
 
-      setSuccess("Ticket assigned to you successfully.");
+        return {
+          ...previous,
+          assignedAgent: user,
+        };
+      });
 
-      setTimeout(() => {
-        setSuccess("");
-      }, 3000);
+      setSuccess("Ticket assigned to you.");
     } catch (err) {
-      console.error("ASSIGN TICKET ERROR:", err);
+      console.error("Assign ticket error:", err);
 
-      const message =
+      setAssignError(
         err?.response?.data?.message ||
-        err?.response?.data?.error ||
-        err?.message ||
-        "Failed to assign ticket.";
-
-      setAssignError(message);
+          err?.message ||
+          "Failed to assign ticket.",
+      );
     } finally {
       setAssigning(false);
     }
   };
 
-  /*
-  |--------------------------------------------------------------------------
-  | Add Internal Note
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // INTERNAL NOTE
+  // ==========================================================
 
   const handleAddInternalNote = async () => {
+    const id = ticket?.id || ticket?._id;
     const cleanNote = internalNote.trim();
 
-    if (!ticket?.id && !ticket?._id) {
-      setInternalNoteError("Ticket information is missing.");
-      return;
-    }
+    if (!id) return;
 
     if (!cleanNote) {
-      setInternalNoteError("Please enter an internal note.");
+      setInternalNoteError("Please write an internal note.");
       return;
     }
 
@@ -745,36 +736,45 @@ const AgentTicketDetails = () => {
     try {
       setIsAddingInternalNote(true);
       setInternalNoteError("");
-
-      const id = ticket.id || ticket._id;
+      setError("");
+      setSuccess("");
 
       const response = await addInternalNote(id, cleanNote);
 
-      const updatedTicket = response?.ticket || response?.data?.ticket || null;
+      const updatedTicket =
+        response?.ticket || response?.data?.ticket || response?.data || null;
 
-      const newNote = response?.note || response?.data?.note || null;
-
-      if (updatedTicket) {
-        setTicket(updatedTicket);
-      } else if (newNote) {
-        setTicket((previousTicket) => {
-          if (!previousTicket) return previousTicket;
-
-          return {
-            ...previousTicket,
-
-            conversation: [...(previousTicket.conversation || []), newNote],
-          };
-        });
+      if (updatedTicket && typeof updatedTicket === "object") {
+        setTicket((previous) => ({
+          ...previous,
+          ...updatedTicket,
+          conversation:
+            updatedTicket.conversation || previous?.conversation || [],
+          attachments: updatedTicket.attachments || previous?.attachments || [],
+          statusHistory:
+            updatedTicket.statusHistory || previous?.statusHistory || [],
+          escalation: updatedTicket.escalation ||
+            previous?.escalation || {
+              isEscalated: false,
+            },
+        }));
+      } else if (response?.note) {
+        setTicket((previous) => ({
+          ...previous,
+          conversation: [...(previous?.conversation || []), response.note],
+        }));
+      } else {
+        await loadTicket(false);
       }
 
       setInternalNote("");
-    } catch (error) {
-      console.error("ADD INTERNAL NOTE ERROR:", error);
+      setSuccess("Internal note added.");
+    } catch (err) {
+      console.error("Add internal note error:", err);
 
       setInternalNoteError(
-        error?.response?.data?.message ||
-          error?.message ||
+        err?.response?.data?.message ||
+          err?.message ||
           "Failed to add internal note.",
       );
     } finally {
@@ -782,40 +782,34 @@ const AgentTicketDetails = () => {
     }
   };
 
-  /*
-  |--------------------------------------------------------------------------
-  | Escalate Ticket
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // ESCALATION
+  // ==========================================================
 
-  const handleEscalateTicket = async () => {
-    if (!ticket) {
-      return;
-    }
+  const handleEscalate = async () => {
+    const id = ticket?.id || ticket?._id;
 
-    const id = ticket.id || ticket._id;
+    const cleanReason = escalationReason.trim();
+    const cleanNote = escalationNote.trim();
 
-    if (!id) {
-      setEscalationError("Ticket ID is missing.");
-      return;
-    }
+    if (!id) return;
 
-    if (!escalationReason.trim()) {
+    if (!cleanReason) {
       setEscalationError("Please select an escalation reason.");
       return;
     }
 
-    if (escalationReason.trim().length > 500) {
+    if (cleanReason.length > 500) {
       setEscalationError("Escalation reason cannot exceed 500 characters.");
       return;
     }
 
-    if (escalationNote.trim().length > 5000) {
+    if (cleanNote.length > 5000) {
       setEscalationError("Escalation note cannot exceed 5,000 characters.");
       return;
     }
 
-    if (ticket?.escalation?.isEscalated) {
+    if (isEscalated) {
       setEscalationError("This ticket is already escalated.");
       return;
     }
@@ -824,79 +818,41 @@ const AgentTicketDetails = () => {
       setEscalating(true);
       setEscalationError("");
       setError("");
-      setSuccess("");
 
       const response = await escalateAgentTicket(id, {
-        /*
-         * No target is selected here.
-         *
-         * Backend can route this to senior support/admin
-         * depending on your escalation implementation.
-         */
         escalatedTo: null,
-
-        reason: escalationReason.trim(),
-
-        note: escalationNote.trim(),
+        reason: cleanReason,
+        note: cleanNote,
       });
-
-      console.log("ESCALATE TICKET RESPONSE:", response);
 
       const updatedTicket =
         response?.ticket || response?.data?.ticket || response?.data || null;
 
       if (updatedTicket) {
-        setTicket((previous) => {
-          if (!previous) {
-            return previous;
-          }
-
-          return {
-            ...previous,
-            ...updatedTicket,
-
-            id: updatedTicket.id || updatedTicket._id || previous.id,
-
-            _id: updatedTicket._id || updatedTicket.id || previous._id,
-
-            conversation: Array.isArray(updatedTicket.conversation)
-              ? updatedTicket.conversation
-              : previous.conversation || [],
-
-            attachments: Array.isArray(updatedTicket.attachments)
-              ? updatedTicket.attachments
-              : previous.attachments || [],
-
-            statusHistory: Array.isArray(updatedTicket.statusHistory)
-              ? updatedTicket.statusHistory
-              : previous.statusHistory || [],
-
-            escalation: updatedTicket.escalation || previous.escalation,
-          };
-        });
+        setTicket((previous) => ({
+          ...previous,
+          ...updatedTicket,
+          conversation:
+            updatedTicket.conversation || previous?.conversation || [],
+          attachments: updatedTicket.attachments || previous?.attachments || [],
+          statusHistory:
+            updatedTicket.statusHistory || previous?.statusHistory || [],
+          escalation: updatedTicket.escalation || previous?.escalation || {},
+        }));
       } else {
         await loadTicket(false);
       }
 
       setShowEscalateModal(false);
-
       setEscalationReason("");
-
       setEscalationNote("");
 
-      setSuccess(
-        "Ticket escalated successfully. Senior support has been notified.",
-      );
-
-      setTimeout(() => {
-        setSuccess("");
-      }, 4000);
+      setSuccess("Ticket escalated successfully.");
     } catch (err) {
-      console.error("ESCALATE TICKET ERROR:", err);
+      console.error("Escalation error:", err);
 
       setEscalationError(
         err?.response?.data?.message ||
-          err?.response?.data?.error ||
           err?.message ||
           "Failed to escalate ticket.",
       );
@@ -905,20 +861,14 @@ const AgentTicketDetails = () => {
     }
   };
 
-  /*
-  |--------------------------------------------------------------------------
-  | Status
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // STATUS
+  // ==========================================================
 
-  const handleStatusChange = async (event) => {
-    const newStatus = event.target.value;
+  const handleStatusChange = async (newStatus) => {
+    const id = ticket?.id || ticket?._id;
 
-    if (!newStatus || !ticket) {
-      return;
-    }
-
-    const id = ticket.id || ticket._id;
+    if (!id || updatingStatus) return;
 
     try {
       setUpdatingStatus(true);
@@ -934,20 +884,15 @@ const AgentTicketDetails = () => {
         setTicket((previous) => ({
           ...previous,
           ...updatedTicket,
-
-          conversation: Array.isArray(updatedTicket.conversation)
-            ? updatedTicket.conversation
-            : previous.conversation || [],
-
-          attachments: Array.isArray(updatedTicket.attachments)
-            ? updatedTicket.attachments
-            : previous.attachments || [],
-
-          statusHistory: Array.isArray(updatedTicket.statusHistory)
-            ? updatedTicket.statusHistory
-            : previous.statusHistory || [],
-
-          escalation: updatedTicket.escalation || previous.escalation,
+          conversation:
+            updatedTicket.conversation || previous?.conversation || [],
+          attachments: updatedTicket.attachments || previous?.attachments || [],
+          statusHistory:
+            updatedTicket.statusHistory || previous?.statusHistory || [],
+          escalation: updatedTicket.escalation ||
+            previous?.escalation || {
+              isEscalated: false,
+            },
         }));
       } else {
         setTicket((previous) => ({
@@ -956,9 +901,9 @@ const AgentTicketDetails = () => {
         }));
       }
 
-      setSuccess("Ticket status updated.");
+      setSuccess(`Ticket status updated to ${formatStatus(newStatus)}.`);
     } catch (err) {
-      console.error("UPDATE STATUS ERROR:", err);
+      console.error("Status update error:", err);
 
       setError(
         err?.response?.data?.message ||
@@ -970,20 +915,14 @@ const AgentTicketDetails = () => {
     }
   };
 
-  /*
-  |--------------------------------------------------------------------------
-  | Priority
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // PRIORITY
+  // ==========================================================
 
-  const handlePriorityChange = async (event) => {
-    const newPriority = event.target.value;
+  const handlePriorityChange = async (newPriority) => {
+    const id = ticket?.id || ticket?._id;
 
-    if (!newPriority || !ticket) {
-      return;
-    }
-
-    const id = ticket.id || ticket._id;
+    if (!id || updatingPriority) return;
 
     try {
       setUpdatingPriority(true);
@@ -999,20 +938,15 @@ const AgentTicketDetails = () => {
         setTicket((previous) => ({
           ...previous,
           ...updatedTicket,
-
-          conversation: Array.isArray(updatedTicket.conversation)
-            ? updatedTicket.conversation
-            : previous.conversation || [],
-
-          attachments: Array.isArray(updatedTicket.attachments)
-            ? updatedTicket.attachments
-            : previous.attachments || [],
-
-          statusHistory: Array.isArray(updatedTicket.statusHistory)
-            ? updatedTicket.statusHistory
-            : previous.statusHistory || [],
-
-          escalation: updatedTicket.escalation || previous.escalation,
+          conversation:
+            updatedTicket.conversation || previous?.conversation || [],
+          attachments: updatedTicket.attachments || previous?.attachments || [],
+          statusHistory:
+            updatedTicket.statusHistory || previous?.statusHistory || [],
+          escalation: updatedTicket.escalation ||
+            previous?.escalation || {
+              isEscalated: false,
+            },
         }));
       } else {
         setTicket((previous) => ({
@@ -1021,9 +955,9 @@ const AgentTicketDetails = () => {
         }));
       }
 
-      setSuccess("Ticket priority updated.");
+      setSuccess(`Ticket priority updated to ${formatStatus(newPriority)}.`);
     } catch (err) {
-      console.error("UPDATE PRIORITY ERROR:", err);
+      console.error("Priority update error:", err);
 
       setError(
         err?.response?.data?.message ||
@@ -1035,34 +969,27 @@ const AgentTicketDetails = () => {
     }
   };
 
-  /*
-  |--------------------------------------------------------------------------
-  | Send reply
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // SEND REPLY
+  // ==========================================================
 
-  const handleSendReply = async (event) => {
-    event?.preventDefault();
+  const handleSendReply = async () => {
+    const id = ticket?.id || ticket?._id;
+    const cleanReply = reply.trim();
 
-    const message = reply.trim();
+    if (!id || sendingReply) return;
 
-    if (!message && selectedFiles.length === 0) {
-      setError("Please enter a message or attach a file.");
+    if (!cleanReply && selectedFiles.length === 0) {
+      setError("Please write a reply or attach a file.");
       return;
     }
-
-    if (!ticket) {
-      return;
-    }
-
-    const id = ticket.id || ticket._id;
 
     try {
       setSendingReply(true);
       setError("");
       setSuccess("");
 
-      const response = await sendAgentReply(id, message, selectedFiles);
+      const response = await sendAgentReply(id, cleanReply, selectedFiles);
 
       const updatedTicket =
         response?.ticket || response?.data?.ticket || response?.data || null;
@@ -1071,24 +998,15 @@ const AgentTicketDetails = () => {
         setTicket((previous) => ({
           ...previous,
           ...updatedTicket,
-
-          id: updatedTicket.id || updatedTicket._id || previous.id,
-
-          _id: updatedTicket._id || updatedTicket.id || previous._id,
-
-          conversation: Array.isArray(updatedTicket.conversation)
-            ? updatedTicket.conversation
-            : previous.conversation || [],
-
-          attachments: Array.isArray(updatedTicket.attachments)
-            ? updatedTicket.attachments
-            : previous.attachments || [],
-
-          statusHistory: Array.isArray(updatedTicket.statusHistory)
-            ? updatedTicket.statusHistory
-            : previous.statusHistory || [],
-
-          escalation: updatedTicket.escalation || previous.escalation,
+          conversation:
+            updatedTicket.conversation || previous?.conversation || [],
+          attachments: updatedTicket.attachments || previous?.attachments || [],
+          statusHistory:
+            updatedTicket.statusHistory || previous?.statusHistory || [],
+          escalation: updatedTicket.escalation ||
+            previous?.escalation || {
+              isEscalated: false,
+            },
         }));
       } else {
         await loadTicket(false);
@@ -1102,11 +1020,10 @@ const AgentTicketDetails = () => {
       setTimeout(() => {
         conversationEndRef.current?.scrollIntoView({
           behavior: "smooth",
-          block: "end",
         });
-      }, 150);
+      }, 100);
     } catch (err) {
-      console.error("SEND AGENT REPLY ERROR:", err);
+      console.error("Send reply error:", err);
 
       setError(
         err?.response?.data?.message || err?.message || "Failed to send reply.",
@@ -1116,208 +1033,163 @@ const AgentTicketDetails = () => {
     }
   };
 
-  /*
-  |--------------------------------------------------------------------------
-  | Refresh
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // KNOWLEDGE BASE SEARCH
+  // ==========================================================
 
-  const handleRefresh = async () => {
-    await loadTicket(false);
-  };
+  const knowledgeResults = useMemo(() => {
+    const query = knowledgeSearch.trim().toLowerCase();
 
-  /*
-  |--------------------------------------------------------------------------
-  | Attachment renderer
-  |--------------------------------------------------------------------------
-  */
-
-  const renderAttachment = (file, index) => {
-    const url = getFileUrl(file);
-
-    const filename =
-      file?.originalName ||
-      file?.filename ||
-      file?.name ||
-      `Attachment ${index + 1}`;
-
-    const size = formatFileSize(file?.size);
-
-    if (!url) {
-      return (
-        <div
-          key={`${filename}-${index}`}
-          className="flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/70 p-3"
-        >
-          <File className="h-5 w-5 text-slate-400" />
-
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-slate-200">
-              {filename}
-            </p>
-
-            {size && <p className="text-xs text-slate-500">{size}</p>}
-          </div>
-        </div>
-      );
+    if (!query) {
+      return KNOWLEDGE_BASE_ARTICLES;
     }
 
-    if (isImageFile(file)) {
-      return (
-        <div
-          key={`${filename}-${index}`}
-          className="overflow-hidden rounded-xl border border-slate-700 bg-slate-950"
-        >
+    const words = query
+      .split(/\s+/)
+      .map((word) => word.trim())
+      .filter(Boolean);
+
+    return KNOWLEDGE_BASE_ARTICLES.map((article) => {
+      const searchableText = [
+        article.title,
+        article.category,
+        article.content,
+        article.solution,
+        ...(article.tags || []),
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      let score = 0;
+
+      words.forEach((word) => {
+        if (article.title.toLowerCase().includes(word)) {
+          score += 10;
+        }
+
+        if (article.category.toLowerCase().includes(word)) {
+          score += 6;
+        }
+
+        if (article.tags?.some((tag) => tag.includes(word))) {
+          score += 5;
+        }
+
+        if (article.content.toLowerCase().includes(word)) {
+          score += 3;
+        }
+
+        if (article.solution.toLowerCase().includes(word)) {
+          score += 2;
+        }
+      });
+
+      return {
+        article,
+        score,
+        searchableText,
+      };
+    })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.article);
+  }, [knowledgeSearch]);
+
+  // ==========================================================
+  // KNOWLEDGE BASE - INSERT SOLUTION
+  // ==========================================================
+
+  const insertKnowledgeSolution = (article) => {
+    if (!article?.solution) return;
+
+    setComposerMode("reply");
+
+    setReply((previous) => {
+      const current = previous.trim();
+
+      if (!current) {
+        return article.solution;
+      }
+
+      return `${current}\n\n${article.solution}`;
+    });
+
+    setSuccess(`"${article.title}" solution inserted into your reply.`);
+
+    setTimeout(() => {
+      setSuccess("");
+    }, 3000);
+  };
+
+  // ==========================================================
+  // KNOWLEDGE BASE - COPY SOLUTION
+  // ==========================================================
+
+  const copyKnowledgeSolution = async (article) => {
+    if (!article?.solution) return;
+
+    try {
+      await navigator.clipboard.writeText(article.solution);
+
+      setSuccess("Solution copied to clipboard.");
+
+      setTimeout(() => {
+        setSuccess("");
+      }, 2500);
+    } catch (err) {
+      console.error("Copy solution error:", err);
+      setError("Unable to copy the solution.");
+    }
+  };
+
+  // ==========================================================
+  // DERIVED VALUES
+  // ==========================================================
+
+  if (!ticket && !loading) {
+    return (
+      <div className="min-h-screen bg-[#050b18] px-4 py-8 text-white">
+        <div className="mx-auto max-w-5xl">
           <button
             type="button"
-            onClick={() =>
-              setPreviewImage({
-                url,
-                name: filename,
-              })
-            }
-            className="block w-full text-left"
+            onClick={() => navigate("/agent/queue")}
+            className="mb-6 inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-blue-500/30 hover:text-white"
           >
-            <img
-              src={url}
-              alt={filename}
-              className="max-h-80 w-full object-contain"
-              onError={(event) => {
-                event.currentTarget.style.display = "none";
-              }}
-            />
+            <ArrowLeft size={17} />
+            Back to Queue
           </button>
 
-          <div className="flex items-center justify-between gap-3 border-t border-slate-800 p-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <ImageIcon className="h-4 w-4 shrink-0 text-blue-400" />
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-8 text-center">
+            <AlertCircle className="mx-auto mb-4 text-red-400" size={42} />
+            <h2 className="text-xl font-semibold text-white">
+              Ticket unavailable
+            </h2>
 
-              <span className="truncate text-xs text-slate-300">
-                {filename}
-              </span>
-            </div>
-
-            <a
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 text-xs font-medium text-blue-400 hover:text-blue-300"
-            >
-              Open
-            </a>
+            <p className="mt-2 text-sm text-slate-400">
+              {error || "The requested ticket could not be loaded."}
+            </p>
           </div>
         </div>
-      );
-    }
-
-    return (
-      <a
-        key={`${filename}-${index}`}
-        href={url}
-        target="_blank"
-        rel="noreferrer"
-        className="flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/70 p-3 transition hover:border-slate-600 hover:bg-slate-800"
-      >
-        {isPdfFile(file) ? (
-          <FileText className="h-5 w-5 shrink-0 text-red-400" />
-        ) : (
-          <File className="h-5 w-5 shrink-0 text-blue-400" />
-        )}
-
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-slate-200">
-            {filename}
-          </p>
-
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            {isPdfFile(file) && <span>PDF</span>}
-
-            {size && <span>{size}</span>}
-          </div>
-        </div>
-
-        <Download className="h-4 w-4 shrink-0 text-slate-500" />
-      </a>
+      </div>
     );
-  };
-
-  /*
-  |--------------------------------------------------------------------------
-  | Loading
-  |--------------------------------------------------------------------------
-  */
+  }
 
   if (loading) {
     return (
-      <div className="flex min-h-[70vh] items-center justify-center">
-        <div className="flex items-center gap-3 text-slate-400">
-          <Loader2 className="h-6 w-6 animate-spin" />
+      <div className="flex min-h-screen items-center justify-center bg-[#050b18]">
+        <div className="flex flex-col items-center gap-3 text-slate-400">
+          <Loader2 size={34} className="animate-spin text-blue-400" />
 
-          <span>Loading ticket...</span>
+          <p className="text-sm">Loading ticket...</p>
         </div>
       </div>
     );
   }
 
-  /*
-  |--------------------------------------------------------------------------
-  | Error / no ticket
-  |--------------------------------------------------------------------------
-  */
-
-  if (!ticket) {
-    return (
-      <div className="mx-auto max-w-4xl p-6">
-        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-6">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
-
-            <div>
-              <h2 className="font-semibold text-red-300">
-                Unable to load ticket
-              </h2>
-
-              <p className="mt-1 text-sm text-red-400">
-                {error || "Ticket not found."}
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-5 flex gap-3">
-            <button
-              type="button"
-              onClick={() => loadTicket(true)}
-              className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Try Again
-            </button>
-
-            <button
-              type="button"
-              onClick={() => navigate(-1)}
-              className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
-            >
-              Go Back
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | Derived data
-  |--------------------------------------------------------------------------
-  */
-
-  const ticketCustomer = ticket.customer || {};
-
-  const assignedAgent = ticket.assignedAgent || null;
+  const ticketCustomer = ticket?.customer || {};
+  const assignedAgent = ticket?.assignedAgent || null;
 
   const assignedAgentId = getId(assignedAgent);
-
   const currentUserId = getId(user);
 
   const isAssigned = Boolean(assignedAgentId);
@@ -1331,23 +1203,14 @@ const AgentTicketDetails = () => {
 
   const isUnassigned = !isAssigned;
 
-  const isClosed = String(ticket.status || "").toLowerCase() === "closed";
+  const isClosed = String(ticket?.status || "").toLowerCase() === "closed";
 
-  const isResolved = String(ticket.status || "").toLowerCase() === "resolved";
+  const isResolved = String(ticket?.status || "").toLowerCase() === "resolved";
 
   const isEscalated = ticket?.escalation?.isEscalated === true;
 
   const isAdmin = String(user?.role || "").toLowerCase() === "admin";
 
-  /*
-   * An agent can escalate:
-   *
-   * - their own assigned ticket
-   * - an unassigned ticket
-   * - admin can escalate any ticket
-   *
-   * Another agent's ticket cannot be escalated by this agent.
-   */
   const canEscalate =
     !isClosed &&
     !isEscalated &&
@@ -1355,1395 +1218,1271 @@ const AgentTicketDetails = () => {
 
   const canReply = !isClosed;
 
-  /*
-  |--------------------------------------------------------------------------
-  | Render
-  |--------------------------------------------------------------------------
-  */
+  // ==========================================================
+  // RENDER ATTACHMENT
+  // ==========================================================
+
+  const renderAttachment = (file, index, compact = false) => {
+    const fileUrl = getFileUrl(file);
+
+    const fileName =
+      file?.name ||
+      file?.filename ||
+      file?.originalName ||
+      `Attachment ${index + 1}`;
+
+    const fileSize = formatFileSize(
+      file?.size || file?.fileSize || file?.bytes,
+    );
+
+    if (!fileUrl) {
+      return (
+        <div
+          key={`${fileName}-${index}`}
+          className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3"
+        >
+          <FileText size={18} className="text-slate-400" />
+
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm text-slate-300">{fileName}</p>
+
+            {fileSize && <p className="text-xs text-slate-500">{fileSize}</p>}
+          </div>
+        </div>
+      );
+    }
+
+    if (isImageFile(file)) {
+      return (
+        <button
+          type="button"
+          key={`${fileUrl}-${index}`}
+          onClick={() => setPreviewImage(fileUrl)}
+          className={`group relative overflow-hidden rounded-xl border border-slate-800 bg-slate-950 ${
+            compact ? "h-20 w-20" : "h-40 w-40"
+          }`}
+        >
+          <img
+            src={fileUrl}
+            alt={fileName}
+            className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+          />
+
+          <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/40 group-hover:opacity-100">
+            <ImageIcon size={22} />
+          </span>
+        </button>
+      );
+    }
+
+    return (
+      <a
+        key={`${fileUrl}-${index}`}
+        href={fileUrl}
+        target="_blank"
+        rel="noreferrer"
+        download={!isPdfFile(file)}
+        className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3 transition hover:border-blue-500/30 hover:bg-slate-900"
+      >
+        {isPdfFile(file) ? (
+          <FileText size={20} className="text-red-400" />
+        ) : (
+          <File size={20} className="text-blue-400" />
+        )}
+
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm text-slate-300">{fileName}</p>
+
+          {fileSize && <p className="text-xs text-slate-500">{fileSize}</p>}
+        </div>
+
+        <Download size={16} className="shrink-0 text-slate-500" />
+      </a>
+    );
+  };
+
+  // ==========================================================
+  // RENDER
+  // ==========================================================
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        {/* =========================================================
-            HEADER
-        ========================================================= */}
+    <div className="min-h-screen bg-[#050b18] text-white">
+      <div className="mx-auto max-w-[1800px] px-4 py-5 sm:px-6 lg:px-8">
+        {/* ================================================== */}
+        {/* HEADER */}
+        {/* ================================================== */}
 
-        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-3">
+        <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
             <button
               type="button"
               onClick={() => navigate(-1)}
-              className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-300 transition hover:border-slate-700 hover:bg-slate-800 hover:text-white"
+              className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/70 text-slate-400 transition hover:border-blue-500/30 hover:text-white"
               title="Go back"
             >
-              <ArrowLeft className="h-5 w-5" />
+              <ArrowLeft size={18} />
             </button>
 
-            <div>
+            <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
-                  {ticket.subject || "Untitled Ticket"}
+                <h1 className="truncate text-xl font-semibold text-white sm:text-2xl">
+                  {ticket.subject || "Support Ticket"}
                 </h1>
 
-                {ticket.ticketNumber && (
-                  <span className="rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-400">
-                    #{ticket.ticketNumber}
-                  </span>
-                )}
-
                 {isEscalated && (
-                  <span className="inline-flex items-center gap-1.5 rounded-lg border border-orange-500/20 bg-orange-500/10 px-2.5 py-1 text-xs font-semibold text-orange-400">
-                    <ShieldAlert className="h-3.5 w-3.5" />
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-300">
+                    <ShieldAlert size={13} />
                     Escalated
                   </span>
                 )}
               </div>
 
-              <p className="mt-1 text-sm text-slate-500">
-                Created {formatDate(ticket.createdAt)}
-              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                <span>#{ticket.ticketNumber || ticket._id || ticket.id}</span>
+
+                <span className="hidden text-slate-700 sm:inline">•</span>
+
+                <span className="inline-flex items-center gap-1">
+                  <Clock3 size={13} />
+                  {formatDate(ticket.createdAt)}
+                </span>
+
+                {ticket.category && (
+                  <>
+                    <span className="hidden text-slate-700 sm:inline">•</span>
+
+                    <span>{ticket.category}</span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-slate-700 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <RefreshCw
-              className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
-            />
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => loadTicket(false)}
+              disabled={refreshing}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-3 text-sm font-medium text-slate-300 transition hover:border-blue-500/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RefreshCw
+                size={16}
+                className={refreshing ? "animate-spin" : ""}
+              />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
+          </div>
         </div>
 
-        {/* =========================================================
-            ALERTS
-        ========================================================= */}
+        {/* ================================================== */}
+        {/* ALERTS */}
+        {/* ================================================== */}
 
         {error && (
-          <div className="mb-5 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
-            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
+          <div className="mb-4 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            <AlertCircle size={18} className="mt-0.5 shrink-0" />
 
-            <p className="flex-1 text-sm text-red-300">{error}</p>
+            <p className="flex-1">{error}</p>
 
             <button
               type="button"
               onClick={() => setError("")}
-              className="text-red-400 hover:text-red-300"
+              className="text-red-400 transition hover:text-red-200"
             >
-              <X className="h-4 w-4" />
+              <X size={16} />
             </button>
           </div>
         )}
 
         {success && (
-          <div className="mb-5 flex items-center gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
-            <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+          <div className="mb-4 flex items-start gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+            <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
 
-            <p className="flex-1 text-sm text-emerald-300">{success}</p>
-
-            <button
-              type="button"
-              onClick={() => setSuccess("")}
-              className="text-emerald-400 hover:text-emerald-300"
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <p>{success}</p>
           </div>
         )}
 
-        {/* =========================================================
-            TICKET INFO
-        ========================================================= */}
+        {/* ================================================== */}
+        {/* TICKET INFO */}
+        {/* ================================================== */}
 
-        <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {/* Status */}
+        <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {/* STATUS */}
 
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-xs font-medium uppercase tracking-wider text-slate-500">
                 Status
               </span>
 
-              <CheckCircle2 className="h-4 w-4 text-slate-500" />
-            </div>
-
-            <div className="relative">
-              <select
-                value={ticket.status || "open"}
-                onChange={handleStatusChange}
-                disabled={updatingStatus}
-                className="w-full appearance-none rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 pr-10 text-sm font-medium text-slate-200 outline-none transition focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+              <span
+                className={`rounded-full border px-2 py-1 text-[11px] font-medium ${getStatusClasses(
+                  ticket.status,
+                )}`}
               >
-                <option value="open" className="bg-slate-900 text-blue-400">
-                  Open
-                </option>
-
-                <option
-                  value="in-progress"
-                  className="bg-slate-900 text-violet-400"
-                >
-                  In Progress
-                </option>
-
-                <option value="waiting" className="bg-slate-900 text-amber-400">
-                  Waiting
-                </option>
-
-                <option
-                  value="resolved"
-                  className="bg-slate-900 text-emerald-400"
-                >
-                  Resolved
-                </option>
-
-                <option value="closed" className="bg-slate-900 text-slate-300">
-                  Closed
-                </option>
-              </select>
-
-              <ChevronDown
-                size={16}
-                strokeWidth={2}
-                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
+                {formatStatus(ticket.status)}
+              </span>
             </div>
+
+            <select
+              value={ticket.status || "open"}
+              onChange={(event) => handleStatusChange(event.target.value)}
+              disabled={updatingStatus}
+              className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-slate-200 outline-none transition focus:border-blue-500/50 disabled:opacity-50"
+            >
+              <option value="open">Open</option>
+              <option value="waiting">Waiting</option>
+              <option value="pending">Pending</option>
+              <option value="in-progress">In Progress</option>
+              <option value="resolved">Resolved</option>
+              <option value="closed">Closed</option>
+            </select>
           </div>
 
-          {/* Priority */}
+          {/* PRIORITY */}
 
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-xs font-medium uppercase tracking-wider text-slate-500">
                 Priority
               </span>
-            </div>
 
-            <div className="relative">
-              <select
-                value={ticket.priority || "medium"}
-                onChange={handlePriorityChange}
-                disabled={updatingPriority}
-                className="w-full appearance-none rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 pr-10 text-sm font-medium text-slate-200 outline-none transition focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+              <span
+                className={`rounded-full border px-2 py-1 text-[11px] font-medium ${getPriorityClasses(
+                  ticket.priority,
+                )}`}
               >
-                <option value="low" className="bg-slate-900 text-emerald-400">
-                  Low
-                </option>
-
-                <option value="medium" className="bg-slate-900 text-amber-400">
-                  Medium
-                </option>
-
-                <option value="high" className="bg-slate-900 text-red-400">
-                  High
-                </option>
-              </select>
-
-              <ChevronDown
-                size={16}
-                strokeWidth={2}
-                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
+                {formatStatus(ticket.priority)}
+              </span>
             </div>
+
+            <select
+              value={ticket.priority || "medium"}
+              onChange={(event) => handlePriorityChange(event.target.value)}
+              disabled={updatingPriority}
+              className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-slate-200 outline-none transition focus:border-blue-500/50 disabled:opacity-50"
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
           </div>
 
-          {/* Category */}
+          {/* CATEGORY */}
 
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
             <span className="text-xs font-medium uppercase tracking-wider text-slate-500">
               Category
             </span>
 
-            <p className="mt-2 text-sm font-semibold text-white">
+            <p className="mt-3 truncate text-sm font-medium text-slate-200">
               {ticket.category || "General"}
             </p>
+
+            <p className="mt-1 text-xs text-slate-500">Ticket classification</p>
           </div>
 
-          {/* Assignment */}
+          {/* ASSIGNED AGENT */}
 
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
             <span className="text-xs font-medium uppercase tracking-wider text-slate-500">
               Assigned Agent
             </span>
 
-            {assignedAgent ? (
-              <div className="mt-2 flex items-center gap-2">
-                {assignedAgent.avatar ? (
-                  <img
-                    src={getAvatarUrl(assignedAgent.avatar)}
-                    alt={assignedAgent.name || "Agent"}
-                    className="h-8 w-8 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800">
-                    <User className="h-4 w-4 text-slate-400" />
-                  </div>
-                )}
-
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-white">
-                    {assignedAgent.name || "Agent"}
-                  </p>
-
-                  {assignedAgent.email && (
-                    <p className="truncate text-xs text-slate-500">
-                      {assignedAgent.email}
-                    </p>
+            <div className="mt-2 flex items-center gap-3">
+              {assignedAgent?.avatar ? (
+                <img
+                  src={getAvatarUrl(assignedAgent.avatar)}
+                  alt={getSenderName(
+                    {
+                      sender: assignedAgent,
+                    },
+                    "Agent",
                   )}
+                  className="h-9 w-9 rounded-xl object-cover"
+                />
+              ) : (
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
+                  <UserCheck size={17} />
                 </div>
+              )}
+
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-slate-200">
+                  {assignedAgent
+                    ? getSenderName(
+                        {
+                          sender: assignedAgent,
+                        },
+                        "Agent",
+                      )
+                    : "Unassigned"}
+                </p>
+
+                <p className="text-xs text-slate-500">
+                  {isAssignedToCurrentUser
+                    ? "Assigned to you"
+                    : isAssignedToAnotherAgent
+                      ? "Assigned to another agent"
+                      : "Available in queue"}
+                </p>
               </div>
-            ) : (
-              <p className="mt-2 text-sm text-slate-500">Unassigned</p>
-            )}
+            </div>
           </div>
         </div>
 
-        {/* =========================================================
-            MAIN CONTENT
-        ========================================================= */}
+        {/* ================================================== */}
+        {/* MAIN GRID */}
+        {/* ================================================== */}
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-          {/* =======================================================
-              CONVERSATION
-          ======================================================= */}
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+          {/* ================================================= */}
+          {/* LEFT - CONVERSATION */}
+          {/* ================================================= */}
 
-          <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
-            <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4 sm:px-6">
+          <section className="min-w-0 rounded-3xl border border-slate-800 bg-slate-900/40">
+            {/* CONVERSATION HEADER */}
+
+            <div className="flex items-center justify-between border-b border-slate-800 px-4 py-4 sm:px-6">
               <div>
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="h-5 w-5 text-blue-400" />
-
-                  <h2 className="font-semibold text-white">Conversation</h2>
-                </div>
+                <h2 className="flex items-center gap-2 text-base font-semibold text-white">
+                  <MessageSquare size={18} className="text-blue-400" />
+                  Conversation
+                </h2>
 
                 <p className="mt-1 text-xs text-slate-500">
-                  {conversation.length}{" "}
-                  {conversation.length === 1 ? "message" : "messages"}
+                  Customer and support communication
                 </p>
               </div>
 
-              <div className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 text-xs text-slate-500">
-                Ticket #{ticket.ticketNumber || ticket.id}
-              </div>
+              {customerTyping && (
+                <span className="flex items-center gap-2 text-xs text-blue-400">
+                  <span className="flex gap-1">
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-400" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-400 [animation-delay:120ms]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-blue-400 [animation-delay:240ms]" />
+                  </span>
+                  Customer typing...
+                </span>
+              )}
             </div>
 
-            <div className="max-h-[650px] overflow-y-auto p-4 sm:p-6">
+            {/* MESSAGES */}
+
+            <div className="max-h-[650px] min-h-[450px] overflow-y-auto p-4 sm:p-6">
               {conversation.length === 0 ? (
-                <div className="flex min-h-[300px] flex-col items-center justify-center text-center">
-                  <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-800">
-                    <MessageSquare className="h-6 w-6 text-slate-500" />
+                <div className="flex min-h-[350px] items-center justify-center text-center">
+                  <div>
+                    <MessageSquare
+                      size={38}
+                      className="mx-auto mb-3 text-slate-700"
+                    />
+
+                    <p className="text-sm text-slate-400">
+                      No conversation messages yet.
+                    </p>
                   </div>
-
-                  <h3 className="font-medium text-slate-300">
-                    No messages yet
-                  </h3>
-
-                  <p className="mt-1 max-w-sm text-sm text-slate-500">
-                    There are no conversation messages for this ticket.
-                  </p>
                 </div>
               ) : (
-                <div className="space-y-6">
+                <div className="space-y-5">
                   {conversation.map((message, index) => {
-                    const isInternalNote = message?.isInternal === true;
-
-                    const senderRole = String(
-                      message?.senderRole || message?.sender?.role || "",
+                    const role = String(
+                      message?.senderRole ||
+                        message?.role ||
+                        message?.sender?.role ||
+                        "",
                     ).toLowerCase();
 
-                    const isCustomer = senderRole === "customer";
+                    const isInternal =
+                      message?.isInternalNote === true ||
+                      role === "internal" ||
+                      role === "internal_note";
 
-                    const isAgent =
-                      senderRole === "agent" || senderRole === "admin";
+                    const isCustomer = role === "customer";
 
-                    const senderName = getSenderName(message, ticket);
+                    const isAgent = role === "agent" || role === "admin";
 
-                    const senderAvatar =
-                      message?.sender?.avatar ||
-                      (isCustomer ? ticketCustomer.avatar : null);
+                    const messageText =
+                      message?.message || message?.content || "";
 
-                    const attachments = Array.isArray(message?.attachments)
+                    const messageAttachments = Array.isArray(
+                      message?.attachments,
+                    )
                       ? message.attachments
                       : [];
 
-                    if (isInternalNote) {
-                      return (
-                        <div
-                          key={
-                            message?._id || message?.id || `message-${index}`
-                          }
-                          className="flex justify-start"
-                        >
-                          <div className="w-full max-w-[90%]">
-                            <div className="mb-2 flex items-center gap-2">
-                              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10">
-                                <span className="text-sm">🔒</span>
-                              </div>
-
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-xs font-semibold text-amber-300">
-                                    Internal Note
-                                  </span>
-
-                                  <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-400">
-                                    Private
-                                  </span>
-                                </div>
-
-                                <p className="text-[11px] text-slate-600">
-                                  {senderName}
-                                </p>
-                              </div>
-                            </div>
-
-                            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
-                              <p className="whitespace-pre-wrap break-words text-sm leading-6 text-amber-100">
-                                {message?.message || ""}
-                              </p>
-                            </div>
-
-                            <div className="mt-1.5 text-[11px] text-slate-600">
-                              {formatDate(message?.createdAt)}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    }
+                    const senderName = getSenderName(
+                      message,
+                      isCustomer ? "Customer" : isAgent ? "Agent" : "Support",
+                    );
 
                     return (
                       <div
                         key={message?._id || message?.id || `message-${index}`}
-                        className={`flex gap-3 ${
-                          isAgent ? "justify-end" : "justify-start"
+                        className={`flex ${
+                          isInternal
+                            ? "justify-center"
+                            : isCustomer
+                              ? "justify-start"
+                              : "justify-end"
                         }`}
                       >
-                        {!isAgent && (
-                          <div className="shrink-0">
-                            {senderAvatar ? (
-                              <img
-                                src={getAvatarUrl(senderAvatar)}
-                                alt={senderName}
-                                className="h-9 w-9 rounded-full object-cover"
-                              />
-                            ) : (
-                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-800">
-                                <User className="h-4 w-4 text-slate-400" />
-                              </div>
-                            )}
-                          </div>
-                        )}
-
                         <div
-                          className={`max-w-[85%] ${
-                            isAgent ? "items-end" : "items-start"
+                          className={`max-w-[90%] sm:max-w-[80%] ${
+                            isInternal ? "w-full" : ""
                           }`}
                         >
-                          <div
-                            className={`mb-1.5 flex flex-wrap items-center gap-2 ${
-                              isAgent ? "justify-end" : "justify-start"
-                            }`}
-                          >
-                            <span className="text-xs font-semibold text-slate-300">
-                              {senderName}
-                            </span>
+                          {isInternal ? (
+                            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+                              <div className="mb-2 flex items-center gap-2">
+                                <ShieldAlert
+                                  size={15}
+                                  className="text-amber-400"
+                                />
 
-                            {message?.isInitialTicketMessage && (
-                              <span className="rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-400">
-                                Original Ticket
-                              </span>
-                            )}
+                                <span className="text-xs font-semibold uppercase tracking-wide text-amber-300">
+                                  Internal Note
+                                </span>
 
-                            {senderRole === "ai" && (
-                              <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold text-violet-400">
-                                AI
-                              </span>
-                            )}
-                          </div>
+                                <span className="ml-auto text-[11px] text-slate-500">
+                                  {formatDate(message.createdAt)}
+                                </span>
+                              </div>
 
-                          <div
-                            className={`rounded-2xl border p-4 ${
-                              isAgent
-                                ? "border-blue-500/20 bg-blue-500/10"
-                                : "border-slate-800 bg-slate-950"
-                            }`}
-                          >
-                            <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-200">
-                              {message?.message || ""}
-                            </p>
+                              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                                {messageText}
+                              </p>
+                            </div>
+                          ) : (
+                            <div
+                              className={`rounded-2xl border p-4 ${
+                                isCustomer
+                                  ? "border-slate-800 bg-slate-950/60"
+                                  : "border-blue-500/20 bg-blue-500/5"
+                              }`}
+                            >
+                              <div className="mb-3 flex items-center gap-2">
+                                <div
+                                  className={`flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl ${
+                                    isCustomer
+                                      ? "bg-slate-800 text-slate-300"
+                                      : "bg-blue-500/10 text-blue-400"
+                                  }`}
+                                >
+                                  {message?.sender?.avatar ? (
+                                    <img
+                                      src={getAvatarUrl(message.sender.avatar)}
+                                      alt={senderName}
+                                      className="h-full w-full object-cover"
+                                    />
+                                  ) : (
+                                    <User size={15} />
+                                  )}
+                                </div>
 
-                            {attachments.length > 0 && (
-                              <div className="mt-4 space-y-2">
-                                {attachments.map((file, fileIndex) =>
-                                  renderAttachment(file, fileIndex),
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold text-slate-200">
+                                    {senderName}
+                                  </p>
+
+                                  <p className="text-[11px] text-slate-500">
+                                    {formatDate(message.createdAt)}
+                                  </p>
+                                </div>
+
+                                {message?.isAiGenerated && (
+                                  <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-purple-500/20 bg-purple-500/10 px-2 py-1 text-[10px] font-medium text-purple-300">
+                                    <Sparkles size={11} />
+                                    AI
+                                  </span>
+                                )}
+
+                                {message?.isOriginalTicket && (
+                                  <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-1 text-[10px] font-medium text-blue-300">
+                                    Original Ticket
+                                  </span>
                                 )}
                               </div>
-                            )}
-                          </div>
 
-                          <div
-                            className={`mt-1.5 flex items-center gap-2 ${
-                              isAgent ? "justify-end" : "justify-start"
-                            }`}
-                          >
-                            <span className="text-[11px] text-slate-600">
-                              {formatDate(message?.createdAt)}
-                            </span>
+                              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                                {messageText}
+                              </p>
 
-                            {isAgent && (
-                              <Check className="h-3 w-3 text-slate-600" />
-                            )}
-                          </div>
+                              {messageAttachments.length > 0 && (
+                                <div className="mt-4 flex flex-wrap gap-2">
+                                  {messageAttachments.map((file, fileIndex) =>
+                                    renderAttachment(file, fileIndex, true),
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
-
-                        {isAgent && (
-                          <div className="shrink-0">
-                            {message?.sender?.avatar ? (
-                              <img
-                                src={getAvatarUrl(message.sender.avatar)}
-                                alt={senderName}
-                                className="h-9 w-9 rounded-full object-cover"
-                              />
-                            ) : (
-                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-500/10">
-                                <UserCheck className="h-4 w-4 text-blue-400" />
-                              </div>
-                            )}
-                          </div>
-                        )}
                       </div>
                     );
                   })}
 
-                  <div ref={conversationEndRef} />
-                </div>
-              )}
-
-              {/* Customer typing */}
-
-              {customerTyping && (
-                <div className="mt-4 flex items-center gap-3">
-                  <div className="shrink-0">
-                    {ticketCustomer.avatar ? (
-                      <img
-                        src={getAvatarUrl(ticketCustomer.avatar)}
-                        alt={ticketCustomer.name || "Customer"}
-                        className="h-8 w-8 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800">
-                        <User className="h-4 w-4 text-slate-400" />
+                  {customerTyping && (
+                    <div className="flex justify-start">
+                      <div className="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-slate-500" />
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-slate-500 [animation-delay:120ms]" />
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-slate-500 [animation-delay:240ms]" />
+                        </div>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
-                  <div className="flex items-center gap-2 rounded-2xl border border-slate-800 bg-slate-950 px-4 py-2.5">
-                    <span className="text-xs font-medium text-slate-400">
-                      Customer is typing
-                    </span>
-
-                    <span className="flex items-center gap-1">
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.3s]" />
-
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.15s]" />
-
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-500" />
-                    </span>
-                  </div>
+                  <div ref={conversationEndRef} />
                 </div>
               )}
             </div>
 
-            {/* =====================================================
-                REPLY
-            ===================================================== */}
+            {/* ================================================= */}
+            {/* COMPOSER */}
+            {/* ================================================= */}
 
-            {canReply && (
-              <div className="border-t border-slate-800 p-4 sm:p-6">
-                <div className="mb-4 flex rounded-xl border border-slate-800 bg-slate-950 p-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setComposerMode("reply");
-                      setInternalNoteError("");
-                    }}
-                    className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition ${
-                      composerMode === "reply"
-                        ? "bg-blue-600 text-white shadow-sm"
-                        : "text-slate-500 hover:text-slate-300"
-                    }`}
-                  >
-                    Reply to Customer
-                  </button>
+            <div className="border-t border-slate-800 p-4 sm:p-6">
+              {/* COMPOSER TABS */}
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setComposerMode("internal");
-                      setInternalNoteError("");
-                    }}
-                    className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition ${
-                      composerMode === "internal"
-                        ? "bg-amber-500/10 text-amber-300"
-                        : "text-slate-500 hover:text-slate-300"
-                    }`}
-                  >
-                    🔒 Internal Note
-                  </button>
-                </div>
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setComposerMode("reply")}
+                  className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                    composerMode === "reply"
+                      ? "bg-blue-500/10 text-blue-300 ring-1 ring-blue-500/20"
+                      : "text-slate-500 hover:bg-slate-800/60 hover:text-slate-300"
+                  }`}
+                >
+                  <Send size={15} />
+                  Reply to Customer
+                </button>
 
-                {/* Customer Reply */}
+                <button
+                  type="button"
+                  onClick={() => setComposerMode("internal")}
+                  className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                    composerMode === "internal"
+                      ? "bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/20"
+                      : "text-slate-500 hover:bg-slate-800/60 hover:text-slate-300"
+                  }`}
+                >
+                  <ShieldAlert size={15} />
+                  Internal Note
+                </button>
 
-                {composerMode === "reply" && (
-                  <form onSubmit={handleSendReply}>
-                    <div className="mb-3">
-                      <h3 className="text-sm font-semibold text-white">
-                        Reply to Customer
-                      </h3>
+                {/* KNOWLEDGE BASE BUTTON */}
 
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        Send a message or attach files.
-                      </p>
+                <button
+                  type="button"
+                  onClick={() => setKnowledgeBaseOpen((previous) => !previous)}
+                  className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                    knowledgeBaseOpen
+                      ? "bg-purple-500/10 text-purple-300 ring-1 ring-purple-500/20"
+                      : "text-slate-500 hover:bg-slate-800/60 hover:text-slate-300"
+                  }`}
+                >
+                  <BookOpen size={15} />
+                  Knowledge Base
+                  {knowledgeBaseOpen ? (
+                    <ChevronUp size={14} />
+                  ) : (
+                    <ChevronDown size={14} />
+                  )}
+                </button>
+              </div>
+
+              {/* ================================================= */}
+              {/* KNOWLEDGE BASE PANEL */}
+              {/* ================================================= */}
+
+              {knowledgeBaseOpen && (
+                <div className="mb-5 overflow-hidden rounded-2xl border border-purple-500/20 bg-[#080d1c]">
+                  {/* KB HEADER */}
+
+                  <div className="border-b border-slate-800 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500/10 text-purple-400">
+                            <BookOpen size={16} />
+                          </div>
+
+                          <div>
+                            <h3 className="text-sm font-semibold text-white">
+                              Knowledge Base
+                            </h3>
+
+                            <p className="text-[11px] text-slate-500">
+                              Find solutions while replying
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <span className="text-xs text-slate-500">
+                        {knowledgeResults.length}{" "}
+                        {knowledgeResults.length === 1 ? "article" : "articles"}
+                      </span>
                     </div>
 
-                    <textarea
-                      value={reply}
-                      onChange={(event) => setReply(event.target.value)}
-                      placeholder="Write your reply..."
-                      rows={5}
-                      disabled={sendingReply}
-                      className="w-full resize-none rounded-2xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-60"
-                    />
+                    {/* SEARCH */}
 
-                    {selectedFiles.length > 0 && (
-                      <div className="mt-3 space-y-2">
-                        {selectedFiles.map((file, index) => (
-                          <div
-                            key={`${file.name}-${index}`}
-                            className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950 p-3"
-                          >
-                            {isImageFile({
-                              name: file.name,
-                              mimetype: file.type,
-                            }) ? (
-                              <ImageIcon className="h-5 w-5 text-blue-400" />
-                            ) : (
-                              <FileText className="h-5 w-5 text-slate-400" />
-                            )}
+                    <div className="relative mt-4">
+                      <Search
+                        size={17}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+                      />
 
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm text-slate-300">
-                                {file.name}
-                              </p>
+                      <input
+                        type="text"
+                        value={knowledgeSearch}
+                        onChange={(event) =>
+                          setKnowledgeSearch(event.target.value)
+                        }
+                        placeholder="Search solutions, passwords, login, tickets..."
+                        className="h-11 w-full rounded-xl border border-slate-800 bg-slate-950 pl-10 pr-10 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-purple-500/40"
+                      />
 
-                              <p className="text-xs text-slate-600">
-                                {formatFileSize(file.size)}
-                              </p>
-                            </div>
+                      {knowledgeSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setKnowledgeSearch("")}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 transition hover:text-slate-300"
+                        >
+                          <X size={16} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
 
-                            <button
-                              type="button"
-                              onClick={() => removeSelectedFile(index)}
-                              className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-800 hover:text-red-400"
+                  {/* KB RESULTS */}
+
+                  <div className="max-h-[420px] overflow-y-auto p-3">
+                    {knowledgeResults.length === 0 ? (
+                      <div className="px-4 py-10 text-center">
+                        <Search
+                          size={30}
+                          className="mx-auto mb-3 text-slate-700"
+                        />
+
+                        <p className="text-sm font-medium text-slate-400">
+                          No solutions found
+                        </p>
+
+                        <p className="mt-1 text-xs text-slate-600">
+                          Try searching with different keywords.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {knowledgeResults.map((article) => {
+                          const isExpanded = expandedArticle === article.id;
+
+                          return (
+                            <div
+                              key={article.id}
+                              className={`overflow-hidden rounded-xl border transition ${
+                                isExpanded
+                                  ? "border-purple-500/30 bg-purple-500/[0.03]"
+                                  : "border-slate-800 bg-slate-950/40 hover:border-slate-700"
+                              }`}
                             >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ))}
+                              {/* ARTICLE HEADER */}
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedArticle(
+                                    isExpanded ? null : article.id,
+                                  )
+                                }
+                                className="flex w-full items-start gap-3 p-4 text-left"
+                              >
+                                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 text-purple-400">
+                                  <FileText size={15} />
+                                </div>
+
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <h4 className="text-sm font-medium text-slate-200">
+                                      {article.title}
+                                    </h4>
+
+                                    <span className="rounded-full border border-slate-800 bg-slate-900 px-2 py-0.5 text-[10px] text-slate-500">
+                                      {article.category}
+                                    </span>
+                                  </div>
+
+                                  {!isExpanded && (
+                                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                                      {article.content}
+                                    </p>
+                                  )}
+                                </div>
+
+                                {isExpanded ? (
+                                  <ChevronUp
+                                    size={16}
+                                    className="mt-1 shrink-0 text-slate-500"
+                                  />
+                                ) : (
+                                  <ChevronDown
+                                    size={16}
+                                    className="mt-1 shrink-0 text-slate-500"
+                                  />
+                                )}
+                              </button>
+
+                              {/* ARTICLE DETAILS */}
+
+                              {isExpanded && (
+                                <div className="border-t border-slate-800 px-4 pb-4">
+                                  <div className="rounded-xl bg-slate-950/70 p-3">
+                                    <p className="text-xs font-medium uppercase tracking-wide text-slate-600">
+                                      Article
+                                    </p>
+
+                                    <p className="mt-2 text-sm leading-6 text-slate-400">
+                                      {article.content}
+                                    </p>
+                                  </div>
+
+                                  <div className="mt-3 rounded-xl border border-purple-500/10 bg-purple-500/[0.04] p-3">
+                                    <div className="flex items-center gap-2">
+                                      <Sparkles
+                                        size={14}
+                                        className="text-purple-400"
+                                      />
+
+                                      <p className="text-xs font-medium uppercase tracking-wide text-purple-300">
+                                        Suggested Solution
+                                      </p>
+                                    </div>
+
+                                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">
+                                      {article.solution}
+                                    </p>
+                                  </div>
+
+                                  {/* ACTIONS */}
+
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        insertKnowledgeSolution(article)
+                                      }
+                                      disabled={!canReply}
+                                      className="inline-flex items-center gap-2 rounded-xl bg-purple-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                      <ArrowRight size={14} />
+                                      Insert Solution
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        copyKnowledgeSolution(article)
+                                      }
+                                      className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-slate-700 hover:text-white"
+                                    >
+                                      <Copy size={14} />
+                                      Copy
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
 
-                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          multiple
-                          hidden
-                          onChange={handleFileChange}
-                          accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx"
-                        />
+              {/* ================================================= */}
+              {/* REPLY MODE */}
+              {/* ================================================= */}
+
+              {composerMode === "reply" && (
+                <div>
+                  {!canReply ? (
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5 text-center">
+                      <CheckCircle2
+                        size={30}
+                        className="mx-auto mb-2 text-emerald-400"
+                      />
+
+                      <p className="text-sm font-medium text-slate-300">
+                        This ticket is closed.
+                      </p>
+
+                      <p className="mt-1 text-xs text-slate-500">
+                        Reopen the ticket before sending a new reply.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <textarea
+                        value={reply}
+                        onChange={(event) => setReply(event.target.value)}
+                        placeholder="Write your reply to the customer..."
+                        rows={6}
+                        className="w-full resize-y rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm leading-6 text-slate-200 outline-none placeholder:text-slate-600 focus:border-blue-500/40"
+                      />
+
+                      {/* SELECTED FILES */}
+
+                      {selectedFiles.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {selectedFiles.map((file, index) => (
+                            <div
+                              key={`${file.name}-${file.lastModified}-${index}`}
+                              className="flex max-w-full items-center gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2"
+                            >
+                              <Paperclip
+                                size={14}
+                                className="shrink-0 text-slate-500"
+                              />
+
+                              <span className="max-w-[180px] truncate text-xs text-slate-300">
+                                {file.name}
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={() => removeSelectedFile(index)}
+                                className="text-slate-600 transition hover:text-red-400"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* COMPOSER FOOTER */}
+
+                      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-2">
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            multiple
+                            accept="image/*,.pdf,.doc,.docx,.txt"
+                            onChange={handleFileSelection}
+                            className="hidden"
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={selectedFiles.length >= 5}
+                            className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2.5 text-xs font-medium text-slate-400 transition hover:border-slate-700 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Paperclip size={15} />
+                            Attach
+                          </button>
+
+                          <span className="text-[11px] text-slate-600">
+                            {selectedFiles.length}/5 files
+                          </span>
+                        </div>
 
                         <button
                           type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          disabled={sendingReply || selectedFiles.length >= 5}
-                          className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-slate-700 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={handleSendReply}
+                          disabled={
+                            sendingReply ||
+                            (!reply.trim() && selectedFiles.length === 0)
+                          }
+                          className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                          <Paperclip className="h-4 w-4" />
-                          Attach File
+                          {sendingReply ? (
+                            <>
+                              <Loader2 size={16} className="animate-spin" />
+                              Sending...
+                            </>
+                          ) : (
+                            <>
+                              <Send size={16} />
+                              Send Reply
+                            </>
+                          )}
                         </button>
-
-                        <span className="ml-3 text-xs text-slate-600">
-                          {selectedFiles.length}/5
-                        </span>
                       </div>
+                    </>
+                  )}
+                </div>
+              )}
 
-                      <button
-                        type="submit"
-                        disabled={
-                          sendingReply ||
-                          (!reply.trim() && selectedFiles.length === 0)
-                        }
-                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {sendingReply ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Sending...
-                          </>
-                        ) : (
-                          <>
-                            <Send className="h-4 w-4" />
-                            Send Reply
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </form>
-                )}
+              {/* ================================================= */}
+              {/* INTERNAL NOTE MODE */}
+              {/* ================================================= */}
 
-                {/* Internal Note */}
-
-                {composerMode === "internal" && (
-                  <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
-                    <div className="mb-4 flex items-start gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10">
-                        <span className="text-lg">🔒</span>
-                      </div>
-
-                      <div>
-                        <h3 className="text-sm font-semibold text-amber-300">
-                          Internal Note
-                        </h3>
-
-                        <p className="mt-1 text-xs leading-5 text-amber-400/70">
-                          This note is private and can only be seen by agents
-                          and administrators.
-                        </p>
-                      </div>
-                    </div>
-
-                    <textarea
-                      value={internalNote}
-                      onChange={(event) => {
-                        setInternalNote(event.target.value);
-                        setInternalNoteError("");
-                      }}
-                      placeholder="Add a private note for your support team..."
-                      rows={5}
-                      maxLength={10000}
-                      disabled={isAddingInternalNote}
-                      className="w-full resize-none rounded-xl border border-amber-500/20 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-amber-400/50 focus:ring-2 focus:ring-amber-500/10 disabled:cursor-not-allowed disabled:opacity-60"
-                    />
-
-                    {internalNoteError && (
-                      <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/5 p-3">
-                        <div className="flex items-start gap-2">
-                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
-
-                          <p className="text-xs leading-5 text-red-300">
-                            {internalNoteError}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <span className="text-xs text-amber-500/60">
-                        {internalNote.length}/10000 characters
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={handleAddInternalNote}
-                        disabled={isAddingInternalNote || !internalNote.trim()}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {isAddingInternalNote ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Adding Note...
-                          </>
-                        ) : (
-                          <>
-                            <span>🔒</span>
-                            Add Internal Note
-                          </>
-                        )}
-                      </button>
+              {composerMode === "internal" && (
+                <div>
+                  <div className="mb-3 rounded-xl border border-amber-500/10 bg-amber-500/[0.03] px-3 py-2.5">
+                    <div className="flex items-center gap-2 text-xs text-amber-300">
+                      <ShieldAlert size={14} />
+                      Internal notes are visible to support staff only.
                     </div>
                   </div>
-                )}
-              </div>
-            )}
 
-            {!canReply && (
-              <div className="border-t border-slate-800 p-5">
-                <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-500">
-                  <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                  This ticket is closed and cannot receive new replies.
+                  <textarea
+                    value={internalNote}
+                    onChange={(event) => {
+                      setInternalNote(event.target.value);
+                      setInternalNoteError("");
+                    }}
+                    placeholder="Write an internal note for other agents..."
+                    rows={6}
+                    maxLength={10000}
+                    className="w-full resize-y rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm leading-6 text-slate-200 outline-none placeholder:text-slate-600 focus:border-amber-500/40"
+                  />
+
+                  {internalNoteError && (
+                    <p className="mt-2 flex items-center gap-1.5 text-xs text-red-400">
+                      <AlertCircle size={13} />
+                      {internalNoteError}
+                    </p>
+                  )}
+
+                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span className="text-[11px] text-slate-600">
+                      {internalNote.length}/10,000 characters
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={handleAddInternalNote}
+                      disabled={isAddingInternalNote || !internalNote.trim()}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {isAddingInternalNote ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin" />
+                          Adding...
+                        </>
+                      ) : (
+                        <>
+                          <ShieldAlert size={16} />
+                          Add Internal Note
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </section>
 
-          {/* =======================================================
-              RIGHT SIDEBAR
-          ======================================================= */}
+          {/* ================================================= */}
+          {/* RIGHT SIDEBAR */}
+          {/* ================================================= */}
 
           <aside className="space-y-5">
-            {/* Customer */}
+            {/* CUSTOMER */}
 
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-              <div className="mb-4 flex items-center gap-2">
-                <User className="h-5 w-5 text-blue-400" />
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/40 p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-white">Customer</h3>
 
-                <h2 className="font-semibold text-white">Customer</h2>
+                <User size={16} className="text-slate-600" />
               </div>
 
               <button
                 type="button"
                 onClick={() => {
-                  const customerId = getId(ticket.customer);
+                  const customerId = getId(ticketCustomer);
 
                   if (customerId) {
                     navigate(`/agent/customers/${customerId}`);
                   }
                 }}
-                className="group flex w-full cursor-pointer items-center gap-3 rounded-xl p-2 text-left transition hover:bg-slate-800/60"
+                className="flex w-full items-center gap-3 rounded-2xl border border-slate-800 bg-slate-950/40 p-3 text-left transition hover:border-blue-500/30"
               >
-                {ticketCustomer.avatar ? (
-                  <img
-                    src={getAvatarUrl(ticketCustomer.avatar)}
-                    alt={ticketCustomer.name || "Customer"}
-                    className="h-12 w-12 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-800">
-                    <User className="h-5 w-5 text-slate-400" />
-                  </div>
-                )}
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-blue-500/10 text-blue-400">
+                  {ticketCustomer.avatar ? (
+                    <img
+                      src={getAvatarUrl(ticketCustomer.avatar)}
+                      alt={ticketCustomer.name || "Customer"}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <User size={20} />
+                  )}
+                </div>
 
                 <div className="min-w-0">
-                  <p className="truncate font-semibold text-white transition group-hover:text-blue-400">
-                    {ticketCustomer.name || "Customer"}
+                  <p className="truncate text-sm font-semibold text-slate-200">
+                    {ticketCustomer.name ||
+                      ticketCustomer.username ||
+                      "Customer"}
                   </p>
 
-                  {ticketCustomer.email && (
-                    <p className="truncate text-sm text-slate-500">
-                      {ticketCustomer.email}
-                    </p>
-                  )}
-
-                  <p className="mt-1 flex items-center gap-1 text-xs text-blue-400 opacity-0 transition group-hover:opacity-100">
-                    View customer profile
-                    <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                  <p className="truncate text-xs text-slate-500">
+                    {ticketCustomer.email || "No email available"}
                   </p>
                 </div>
               </button>
+
+              {ticketCustomer.phone && (
+                <div className="mt-3 text-xs text-slate-500">
+                  <span className="text-slate-600">Phone:</span>{" "}
+                  {ticketCustomer.phone}
+                </div>
+              )}
             </section>
 
-            {/* Assignment */}
+            {/* ASSIGNMENT */}
 
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <UserCheck className="h-5 w-5 text-violet-400" />
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/40 p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <UserCheck size={17} className="text-blue-400" />
 
-                  <h2 className="font-semibold text-white">Assignment</h2>
-                </div>
-
-                {isAssigned && (
-                  <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-400">
-                    Assigned
-                  </span>
-                )}
+                <h3 className="text-sm font-semibold text-white">Assignment</h3>
               </div>
 
-              {/* Unassigned */}
+              {isUnassigned ? (
+                <>
+                  <div className="rounded-2xl border border-blue-500/10 bg-blue-500/[0.03] p-3">
+                    <p className="text-sm font-medium text-slate-300">
+                      Ticket is unassigned
+                    </p>
 
-              {isUnassigned && (
-                <div>
-                  <div className="mb-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
-                        <UserCheck className="h-4 w-4 text-amber-400" />
-                      </div>
-
-                      <div>
-                        <p className="text-sm font-medium text-amber-300">
-                          Ticket is unassigned
-                        </p>
-
-                        <p className="mt-1 text-xs leading-5 text-amber-400/70">
-                          Take ownership of this ticket to start working on the
-                          customer's request.
-                        </p>
-                      </div>
-                    </div>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Opening this ticket does not assign it. Claim it only when
+                      you are ready to work on it.
+                    </p>
                   </div>
-
-                  {assignError && (
-                    <div className="mb-3 rounded-xl border border-red-500/20 bg-red-500/5 p-3">
-                      <div className="flex items-start gap-2">
-                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
-
-                        <p className="text-xs leading-5 text-red-300">
-                          {assignError}
-                        </p>
-                      </div>
-                    </div>
-                  )}
 
                   <button
                     type="button"
                     onClick={handleAssignToMe}
                     disabled={assigning}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-600/10 transition-all duration-200 hover:bg-violet-500 hover:shadow-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {assigning ? (
                       <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Loader2 size={16} className="animate-spin" />
                         Assigning...
                       </>
                     ) : (
                       <>
-                        <UserCheck className="h-4 w-4" />
+                        <UserCheck size={16} />
                         Assign to Me
                       </>
                     )}
                   </button>
+                </>
+              ) : isAssignedToCurrentUser ? (
+                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={17} className="text-emerald-400" />
+
+                    <p className="text-sm font-medium text-emerald-300">
+                      Assigned to you
+                    </p>
+                  </div>
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    You are currently responsible for this ticket.
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-3">
+                  <p className="text-sm font-medium text-slate-300">
+                    {getSenderName(
+                      {
+                        sender: assignedAgent,
+                      },
+                      "Another agent",
+                    )}
+                  </p>
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    This ticket is assigned to another agent.
+                  </p>
                 </div>
               )}
 
-              {/* Assigned to current agent */}
-
-              {isAssignedToCurrentUser && (
-                <div>
-                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
-                    <div className="flex items-center gap-3">
-                      {assignedAgent?.avatar ? (
-                        <img
-                          src={getAvatarUrl(assignedAgent.avatar)}
-                          alt={assignedAgent.name || "Agent"}
-                          className="h-11 w-11 rounded-full object-cover ring-2 ring-emerald-500/20"
-                        />
-                      ) : (
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500/10">
-                          <UserCheck className="h-5 w-5 text-emerald-400" />
-                        </div>
-                      )}
-
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-white">
-                          {assignedAgent?.name || user?.name || "You"}
-                        </p>
-
-                        <p className="mt-0.5 text-xs text-emerald-400">
-                          This ticket is assigned to you
-                        </p>
-                      </div>
-
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/10">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {assignError && (
-                    <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/5 p-3">
-                      <p className="text-xs text-red-300">{assignError}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Assigned to another agent */}
-
-              {isAssignedToAnotherAgent && (
-                <div>
-                  <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
-                    <div className="flex items-center gap-3">
-                      {assignedAgent?.avatar ? (
-                        <img
-                          src={getAvatarUrl(assignedAgent.avatar)}
-                          alt={assignedAgent.name || "Agent"}
-                          className="h-11 w-11 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-800">
-                          <UserCheck className="h-5 w-5 text-slate-400" />
-                        </div>
-                      )}
-
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-white">
-                          {assignedAgent?.name || "Another agent"}
-                        </p>
-
-                        <p className="mt-0.5 text-xs text-slate-500">
-                          This ticket is assigned to another agent
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {assignError && (
-                    <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/5 p-3">
-                      <div className="flex items-start gap-2">
-                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
-
-                        <p className="text-xs leading-5 text-red-300">
-                          {assignError}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
+              {assignError && (
+                <p className="mt-2 text-xs text-red-400">{assignError}</p>
               )}
             </section>
 
-            {/* =====================================================
-                ESCALATION
-            ===================================================== */}
+            {/* ESCALATION */}
 
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <ShieldAlert className="h-5 w-5 text-orange-400" />
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/40 p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <ShieldAlert size={17} className="text-red-400" />
 
-                  <h2 className="font-semibold text-white">Escalation</h2>
-                </div>
-
-                {isEscalated && (
-                  <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-orange-400">
-                    Escalated
-                  </span>
-                )}
+                <h3 className="text-sm font-semibold text-white">Escalation</h3>
               </div>
 
-              {/* Not escalated */}
+              {isEscalated ? (
+                <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert size={16} className="text-red-400" />
 
-              {!isEscalated && (
-                <div>
-                  <div className="rounded-xl border border-orange-500/10 bg-orange-500/5 p-3">
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-orange-500/10">
-                        <ShieldAlert className="h-4 w-4 text-orange-400" />
-                      </div>
-
-                      <div>
-                        <p className="text-sm font-medium text-orange-300">
-                          Need senior assistance?
-                        </p>
-
-                        <p className="mt-1 text-xs leading-5 text-orange-400/70">
-                          Escalate difficult or sensitive tickets to senior
-                          support.
-                        </p>
-                      </div>
-                    </div>
+                    <p className="text-sm font-medium text-red-300">
+                      Escalated
+                    </p>
                   </div>
 
-                  {canEscalate ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEscalationError("");
-                        setEscalationReason("");
-                        setEscalationNote("");
-                        setShowEscalateModal(true);
-                      }}
-                      className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-orange-500/20 bg-orange-500/10 px-4 py-2.5 text-sm font-semibold text-orange-400 transition hover:border-orange-500/40 hover:bg-orange-500/15 hover:text-orange-300"
-                    >
-                      <ShieldAlert className="h-4 w-4" />
-                      Escalate Ticket
-                    </button>
-                  ) : (
-                    <p className="mt-4 rounded-xl border border-slate-800 bg-slate-950 p-3 text-xs leading-5 text-slate-500">
-                      This ticket cannot be escalated from your current
-                      assignment.
+                  {ticket.escalation.reason && (
+                    <p className="mt-2 text-xs leading-5 text-slate-400">
+                      <span className="text-slate-600">Reason:</span>{" "}
+                      {ticket.escalation.reason}
+                    </p>
+                  )}
+
+                  {ticket.escalation.note && (
+                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                      {ticket.escalation.note}
                     </p>
                   )}
                 </div>
-              )}
+              ) : canEscalate ? (
+                <>
+                  <p className="text-xs leading-5 text-slate-500">
+                    Escalate this ticket when it requires additional expertise
+                    or higher-level support.
+                  </p>
 
-              {/* Already escalated */}
-
-              {isEscalated && (
-                <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-500/10">
-                      <ShieldAlert className="h-5 w-5 text-orange-400" />
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-semibold text-orange-300">
-                          Ticket Escalated
-                        </h3>
-
-                        <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-400">
-                          Pending
-                        </span>
-                      </div>
-
-                      {ticket.escalation?.reason && (
-                        <div className="mt-3">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-orange-500/60">
-                            Reason
-                          </p>
-
-                          <p className="mt-1 text-sm leading-5 text-slate-300">
-                            {ticket.escalation.reason}
-                          </p>
-                        </div>
-                      )}
-
-                      {ticket.escalation?.note && (
-                        <div className="mt-3">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-orange-500/60">
-                            Escalation Note
-                          </p>
-
-                          <div className="mt-1 rounded-lg border border-orange-500/10 bg-slate-950/70 p-3">
-                            <p className="whitespace-pre-wrap break-words text-xs leading-5 text-slate-400">
-                              {ticket.escalation.note}
-                            </p>
-                          </div>
-                        </div>
-                      )}
-
-                      {ticket.escalation?.escalatedAt && (
-                        <p className="mt-3 text-[11px] text-slate-600">
-                          Escalated {formatDate(ticket.escalation.escalatedAt)}
-                        </p>
-                      )}
-
-                      {ticket.escalation?.escalatedTo && (
-                        <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950 p-3">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-600">
-                            Escalated To
-                          </p>
-
-                          <p className="mt-1 text-xs font-medium text-slate-300">
-                            {ticket.escalation.escalatedTo?.name ||
-                              ticket.escalation.escalatedTo?.email ||
-                              "Senior Support"}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </section>
-
-            {/* Original ticket */}
-
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-              <div className="mb-4 flex items-center gap-2">
-                <FileText className="h-5 w-5 text-blue-400" />
-
-                <h2 className="font-semibold text-white">Original Request</h2>
-              </div>
-
-              <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
-                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-300">
-                  {ticket.description || "No description provided."}
+                  <button
+                    type="button"
+                    onClick={() => setShowEscalateModal(true)}
+                    className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-2.5 text-sm font-medium text-red-300 transition hover:bg-red-500/10"
+                  >
+                    <ShieldAlert size={16} />
+                    Escalate Ticket
+                  </button>
+                </>
+              ) : (
+                <p className="text-xs leading-5 text-slate-600">
+                  This ticket cannot currently be escalated.
                 </p>
-              </div>
-
-              {Array.isArray(ticket.attachments) &&
-                ticket.attachments.length > 0 && (
-                  <div className="mt-4">
-                    <p className="mb-2 text-xs font-medium uppercase tracking-wider text-slate-600">
-                      Attachments
-                    </p>
-
-                    <div className="space-y-2">
-                      {ticket.attachments.map((file, index) =>
-                        renderAttachment(file, index),
-                      )}
-                    </div>
-                  </div>
-                )}
+              )}
             </section>
 
-            {/* Status history */}
+            {/* ORIGINAL REQUEST */}
 
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/40 p-5">
               <div className="mb-4 flex items-center gap-2">
-                <Clock3 className="h-5 w-5 text-amber-400" />
+                <FileText size={17} className="text-blue-400" />
 
-                <h2 className="font-semibold text-white">Status History</h2>
+                <h3 className="text-sm font-semibold text-white">
+                  Original Request
+                </h3>
               </div>
 
-              {Array.isArray(ticket.statusHistory) &&
-              ticket.statusHistory.length > 0 ? (
+              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-400">
+                {ticket.description || "No description provided."}
+              </p>
+
+              {ticket.attachments?.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-600">
+                    Attachments
+                  </p>
+
+                  {ticket.attachments.map((file, index) =>
+                    renderAttachment(file, index, true),
+                  )}
+                </div>
+              )}
+            </section>
+
+            {/* STATUS HISTORY */}
+
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/40 p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <Clock3 size={17} className="text-slate-400" />
+
+                <h3 className="text-sm font-semibold text-white">
+                  Status History
+                </h3>
+              </div>
+
+              {ticket.statusHistory?.length ? (
                 <div className="space-y-4">
                   {ticket.statusHistory
                     .slice()
                     .reverse()
-                    .map((history, index) => (
+                    .map((item, index) => (
                       <div
-                        key={history?._id || `history-${index}`}
-                        className="relative pl-6"
+                        key={item?._id || item?.id || `history-${index}`}
+                        className="relative pl-5"
                       >
                         {index !== ticket.statusHistory.length - 1 && (
-                          <div className="absolute left-[5px] top-3 h-full w-px bg-slate-800" />
+                          <span className="absolute left-[5px] top-3 h-full w-px bg-slate-800" />
                         )}
 
-                        <div className="absolute left-0 top-1.5 h-3 w-3 rounded-full border-2 border-slate-700 bg-slate-950" />
+                        <span className="absolute left-0 top-1.5 h-2.5 w-2.5 rounded-full bg-slate-700 ring-4 ring-slate-900" />
 
-                        <p className="text-sm font-medium text-slate-300">
-                          {formatStatus(history.status)}
+                        <p className="text-xs font-medium text-slate-300">
+                          {formatStatus(
+                            item.status || item.newStatus || item.toStatus,
+                          )}
                         </p>
-
-                        {history.note && (
-                          <p className="mt-1 text-xs leading-5 text-slate-500">
-                            {history.note}
-                          </p>
-                        )}
 
                         <p className="mt-1 text-[11px] text-slate-600">
-                          {formatDate(history.createdAt)}
+                          {formatDate(item.createdAt || item.timestamp)}
                         </p>
+
+                        {item.changedBy && (
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            by{" "}
+                            {getSenderName(
+                              {
+                                sender: item.changedBy,
+                              },
+                              "Support",
+                            )}
+                          </p>
+                        )}
                       </div>
                     ))}
                 </div>
               ) : (
-                <p className="text-sm text-slate-500">
+                <p className="text-xs text-slate-600">
                   No status history available.
                 </p>
               )}
             </section>
 
-            {/* Resolution */}
+            {/* RESOLUTION */}
 
-            {(isResolved || isClosed) && (
-              <section className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
-                <div className="flex items-start gap-3">
-                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
+            {(isResolved || isClosed) &&
+              (ticket.resolution || ticket.resolutionNote) && (
+                <section className="rounded-3xl border border-emerald-500/20 bg-emerald-500/5 p-5">
+                  <div className="mb-3 flex items-center gap-2">
+                    <CheckCircle2 size={17} className="text-emerald-400" />
 
-                  <div>
-                    <h2 className="font-semibold text-emerald-300">
-                      Ticket {isClosed ? "Closed" : "Resolved"}
-                    </h2>
-
-                    {ticket.resolvedAt && (
-                      <p className="mt-1 text-xs text-emerald-500/70">
-                        Resolved {formatDate(ticket.resolvedAt)}
-                      </p>
-                    )}
-
-                    {ticket.closedAt && (
-                      <p className="mt-1 text-xs text-slate-500">
-                        Closed {formatDate(ticket.closedAt)}
-                      </p>
-                    )}
+                    <h3 className="text-sm font-semibold text-emerald-300">
+                      Resolution
+                    </h3>
                   </div>
-                </div>
-              </section>
-            )}
+
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-slate-400">
+                    {ticket.resolution || ticket.resolutionNote}
+                  </p>
+                </section>
+              )}
           </aside>
         </div>
       </div>
 
-      {/* =========================================================
-          ESCALATION MODAL
-      ========================================================= */}
-
-      {showEscalateModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-          onClick={() => {
-            if (!escalating) {
-              setShowEscalateModal(false);
-            }
-          }}
-        >
-          <div
-            className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            {/* Modal Header */}
-
-            <div className="flex items-start justify-between border-b border-slate-800 p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-500/10">
-                  <ShieldAlert className="h-5 w-5 text-orange-400" />
-                </div>
-
-                <div>
-                  <h2 className="text-lg font-semibold text-white">
-                    Escalate Ticket
-                  </h2>
-
-                  <p className="mt-1 text-xs leading-5 text-slate-500">
-                    Send this ticket to senior support for additional
-                    assistance.
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (!escalating) {
-                    setShowEscalateModal(false);
-                  }
-                }}
-                disabled={escalating}
-                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-
-            <div className="space-y-5 p-5">
-              {/* Reason */}
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-300">
-                  Escalation Reason
-                </label>
-
-                <div className="relative">
-                  <select
-                    value={escalationReason}
-                    onChange={(event) => {
-                      setEscalationReason(event.target.value);
-                      setEscalationError("");
-                    }}
-                    disabled={escalating}
-                    className="w-full appearance-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 pr-10 text-sm text-slate-200 outline-none transition focus:border-orange-500/50 focus:ring-2 focus:ring-orange-500/10 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <option value="">Select a reason</option>
-
-                    <option value="Technical issue">Technical issue</option>
-
-                    <option value="Requires senior approval">
-                      Requires senior approval
-                    </option>
-
-                    <option value="Customer complaint">
-                      Customer complaint
-                    </option>
-
-                    <option value="Billing issue">Billing issue</option>
-
-                    <option value="Security concern">Security concern</option>
-
-                    <option value="Complex issue">Complex issue</option>
-
-                    <option value="Other">Other</option>
-                  </select>
-
-                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                </div>
-              </div>
-
-              {/* Note */}
-
-              <div>
-                <div className="mb-2 flex items-center justify-between">
-                  <label className="block text-sm font-medium text-slate-300">
-                    Additional Note
-                  </label>
-
-                  <span className="text-[11px] text-slate-600">
-                    {escalationNote.length}/5000
-                  </span>
-                </div>
-
-                <textarea
-                  value={escalationNote}
-                  onChange={(event) => {
-                    setEscalationNote(event.target.value);
-                    setEscalationError("");
-                  }}
-                  placeholder="Explain why this ticket needs senior assistance..."
-                  rows={5}
-                  maxLength={5000}
-                  disabled={escalating}
-                  className="w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-slate-600 focus:border-orange-500/50 focus:ring-2 focus:ring-orange-500/10 disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </div>
-
-              {/* Info */}
-
-              <div className="rounded-xl border border-orange-500/10 bg-orange-500/5 p-3">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-orange-400" />
-
-                  <p className="text-xs leading-5 text-orange-300/80">
-                    Escalating this ticket will mark it as escalated and notify
-                    the appropriate senior support team. The current ticket
-                    assignment will remain unchanged until the escalation is
-                    accepted.
-                  </p>
-                </div>
-              </div>
-
-              {/* Error */}
-
-              {escalationError && (
-                <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
-
-                    <p className="text-xs leading-5 text-red-300">
-                      {escalationError}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-
-            <div className="flex flex-col-reverse gap-3 border-t border-slate-800 p-5 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setShowEscalateModal(false)}
-                disabled={escalating}
-                className="rounded-xl border border-slate-700 bg-slate-950 px-5 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={handleEscalateTicket}
-                disabled={escalating || !escalationReason.trim()}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {escalating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Escalating...
-                  </>
-                ) : (
-                  <>
-                    <ShieldAlert className="h-4 w-4" />
-                    Escalate Ticket
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* =========================================================
-          IMAGE PREVIEW
-      ========================================================= */}
+      {/* ==================================================== */}
+      {/* IMAGE PREVIEW MODAL */}
+      {/* ==================================================== */}
 
       {previewImage && (
         <div
@@ -2751,25 +2490,156 @@ const AgentTicketDetails = () => {
           onClick={() => setPreviewImage(null)}
         >
           <div
-            className="relative max-h-[90vh] max-w-5xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 p-2"
+            className="relative max-h-[90vh] max-w-[95vw]"
             onClick={(event) => event.stopPropagation()}
           >
             <button
               type="button"
               onClick={() => setPreviewImage(null)}
-              className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/70 text-white hover:bg-black"
+              className="absolute -right-3 -top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-900 text-slate-300 shadow-xl transition hover:text-white"
             >
-              <X className="h-5 w-5" />
+              <X size={17} />
             </button>
 
             <img
-              src={previewImage.url}
-              alt={previewImage.name}
-              className="max-h-[85vh] max-w-full rounded-xl object-contain"
+              src={previewImage}
+              alt="Attachment preview"
+              className="max-h-[90vh] max-w-[95vw] rounded-2xl object-contain shadow-2xl"
             />
+          </div>
+        </div>
+      )}
 
-            <div className="px-2 pb-1 pt-2 text-center text-xs text-slate-400">
-              {previewImage.name}
+      {/* ==================================================== */}
+      {/* ESCALATION MODAL */}
+      {/* ==================================================== */}
+
+      {showEscalateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-3xl border border-slate-800 bg-[#080d1c] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 p-5">
+              <div>
+                <h3 className="text-lg font-semibold text-white">
+                  Escalate Ticket
+                </h3>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  Send this ticket for additional support.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (!escalating) {
+                    setShowEscalateModal(false);
+                    setEscalationError("");
+                  }
+                }}
+                className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-800 hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5">
+              {escalationError && (
+                <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-xs text-red-300">
+                  {escalationError}
+                </div>
+              )}
+
+              <div>
+                <label className="mb-2 block text-xs font-medium text-slate-400">
+                  Escalation Reason
+                </label>
+
+                <select
+                  value={escalationReason}
+                  onChange={(event) => {
+                    setEscalationReason(event.target.value);
+                    setEscalationError("");
+                  }}
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-3 text-sm text-slate-200 outline-none focus:border-red-500/40"
+                >
+                  <option value="">Select a reason</option>
+
+                  <option value="Requires technical expertise">
+                    Requires technical expertise
+                  </option>
+
+                  <option value="High customer impact">
+                    High customer impact
+                  </option>
+
+                  <option value="Unable to resolve">Unable to resolve</option>
+
+                  <option value="Service outage">Service outage</option>
+
+                  <option value="Management review required">
+                    Management review required
+                  </option>
+
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-medium text-slate-400">
+                  Additional Note
+                </label>
+
+                <textarea
+                  value={escalationNote}
+                  onChange={(event) => {
+                    setEscalationNote(event.target.value);
+                    setEscalationError("");
+                  }}
+                  rows={5}
+                  maxLength={5000}
+                  placeholder="Explain why this ticket needs escalation..."
+                  className="w-full resize-none rounded-xl border border-slate-800 bg-slate-950 px-3 py-3 text-sm leading-6 text-slate-200 outline-none placeholder:text-slate-600 focus:border-red-500/40"
+                />
+
+                <div className="mt-1 text-right text-[11px] text-slate-600">
+                  {escalationNote.length}/5,000
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-800 p-5 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!escalating) {
+                    setShowEscalateModal(false);
+                    setEscalationError("");
+                  }
+                }}
+                disabled={escalating}
+                className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-slate-700 hover:text-white disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleEscalate}
+                disabled={escalating}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {escalating ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    Escalating...
+                  </>
+                ) : (
+                  <>
+                    <ShieldAlert size={16} />
+                    Escalate Ticket
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

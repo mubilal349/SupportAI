@@ -48,3 +48,33 @@ export const authenticateToken = (req, res, next) => {
     });
   }
 };
+
+// ============================================================
+// ROLE MIDDLEWARE
+// ============================================================
+
+export const requireAgent = (req, res, next) => {
+  const role = String(req.user?.role || "").toLowerCase();
+
+  if (!["agent", "admin"].includes(role)) {
+    return res.status(403).json({
+      success: false,
+      message: "Agent or admin access required.",
+    });
+  }
+
+  next();
+};
+
+export const requireAdmin = (req, res, next) => {
+  const role = String(req.user?.role || "").toLowerCase();
+
+  if (role !== "admin") {
+    return res.status(403).json({
+      success: false,
+      message: "Admin access required.",
+    });
+  }
+
+  next();
+};
