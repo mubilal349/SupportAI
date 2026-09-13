@@ -26,6 +26,8 @@ import {
   ExternalLink,
   Sparkles,
   Copy,
+  MessageCircle,
+  Plus,
 } from "lucide-react";
 import { io } from "socket.io-client";
 import { useNavigate, useParams } from "react-router-dom";
@@ -164,6 +166,98 @@ const KNOWLEDGE_BASE_ARTICLES = [
       "A useful technical issue report should include the affected feature, steps to reproduce the problem, expected behavior, actual behavior, error messages, and relevant screenshots.",
     solution:
       "To help us investigate this technical issue, please provide the steps that led to the problem, what you expected to happen, what actually happened, and any error message you received. Screenshots are also helpful if available.",
+  },
+];
+
+// ============================================================
+// CANNED RESPONSES
+// ============================================================
+//
+// These are local for now.
+// Later they can be moved to MongoDB/admin management.
+//
+// ============================================================
+
+const CANNED_RESPONSES = [
+  {
+    id: "cr-001",
+    title: "Greeting",
+    category: "General",
+    shortcut: "greeting",
+    content:
+      "Hello! Thank you for contacting support. I'm happy to help you with your issue.",
+  },
+  {
+    id: "cr-002",
+    title: "Request More Information",
+    category: "General",
+    shortcut: "more-info",
+    content:
+      "Thank you for reaching out. To help us investigate this issue, could you please provide a few more details about what you are experiencing?",
+  },
+  {
+    id: "cr-003",
+    title: "Request Screenshot",
+    category: "Troubleshooting",
+    shortcut: "screenshot",
+    content:
+      "Could you please provide a screenshot of the issue you are experiencing? This will help us investigate the problem more accurately.",
+  },
+  {
+    id: "cr-004",
+    title: "Troubleshooting Steps",
+    category: "Troubleshooting",
+    shortcut: "troubleshoot",
+    content:
+      "Please try refreshing the page and clearing your browser cache and cookies. If the issue continues, please try using an incognito/private window or another browser and let us know if the problem persists.",
+  },
+  {
+    id: "cr-005",
+    title: "Investigating Issue",
+    category: "Support",
+    shortcut: "investigating",
+    content:
+      "Thank you for the information. I'm currently investigating this issue and will provide you with an update as soon as possible.",
+  },
+  {
+    id: "cr-006",
+    title: "Follow Up",
+    category: "Follow-up",
+    shortcut: "follow-up",
+    content:
+      "Hello! I'm following up on your support request to check whether you still need assistance. Please let us know if the issue has been resolved or if you need further help.",
+  },
+  {
+    id: "cr-007",
+    title: "Escalation",
+    category: "Escalation",
+    shortcut: "escalation",
+    content:
+      "I understand the importance of this issue. I'm escalating your ticket to the appropriate support team so it can receive further investigation and assistance.",
+  },
+  {
+    id: "cr-008",
+    title: "Issue Resolved",
+    category: "Resolution",
+    shortcut: "resolved",
+    content:
+      "I'm glad to let you know that the issue has been resolved. Please try again and let us know if everything is working correctly.",
+  },
+  {
+    id: "cr-009",
+    title: "Closing Ticket",
+    category: "Resolution",
+    shortcut: "closing",
+    content:
+      "Since the issue appears to be resolved, we'll proceed with closing this ticket. If you need any further assistance, please don't hesitate to contact us again.",
+  },
+  {
+    id: "cr-010",
+    title: "Thank You",
+    category: "General",
+    shortcut: "thank-you",
+    content:
+      "Thank you for your patience and cooperation while we worked on this issue. We appreciate you contacting SupportAI.",
   },
 ];
 
@@ -472,6 +566,13 @@ const AgentTicketDetails = () => {
   const [knowledgeBaseOpen, setKnowledgeBaseOpen] = useState(false);
   const [knowledgeSearch, setKnowledgeSearch] = useState("");
   const [expandedArticle, setExpandedArticle] = useState(null);
+
+  // ==========================================================
+  // CANNED RESPONSES STATE
+  // ==========================================================
+
+  const [cannedResponsesOpen, setCannedResponsesOpen] = useState(false);
+  const [cannedResponseSearch, setCannedResponseSearch] = useState("");
 
   // ==========================================================
   // LOAD TICKET
@@ -1171,6 +1272,66 @@ const AgentTicketDetails = () => {
   }, [knowledgeSearch]);
 
   // ==========================================================
+  // CANNED RESPONSES SEARCH
+  // ==========================================================
+
+  const cannedResponseResults = useMemo(() => {
+    const query = cannedResponseSearch.trim().toLowerCase();
+
+    if (!query) {
+      return CANNED_RESPONSES;
+    }
+
+    const words = query
+      .split(/\s+/)
+      .map((word) => word.trim())
+      .filter(Boolean);
+
+    return CANNED_RESPONSES.map((response) => {
+      const searchableText = [
+        response.title,
+        response.category,
+        response.shortcut,
+        response.content,
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      let score = 0;
+
+      words.forEach((word) => {
+        if (response.title.toLowerCase().includes(word)) {
+          score += 10;
+        }
+
+        if (response.category.toLowerCase().includes(word)) {
+          score += 6;
+        }
+
+        if (response.shortcut.toLowerCase().includes(word)) {
+          score += 5;
+        }
+
+        if (response.content.toLowerCase().includes(word)) {
+          score += 3;
+        }
+
+        if (searchableText.includes(word)) {
+          score += 1;
+        }
+      });
+
+      return {
+        response,
+        score,
+      };
+    })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.response);
+  }, [cannedResponseSearch]);
+
+  // ==========================================================
   // KNOWLEDGE BASE - INSERT SOLUTION
   // ==========================================================
 
@@ -1190,6 +1351,32 @@ const AgentTicketDetails = () => {
     });
 
     setSuccess(`"${article.title}" solution inserted into your reply.`);
+
+    setTimeout(() => {
+      setSuccess("");
+    }, 3000);
+  };
+
+  // ==========================================================
+  // CANNED RESPONSE - INSERT
+  // ==========================================================
+
+  const insertCannedResponse = (cannedResponse) => {
+    if (!cannedResponse?.content) return;
+
+    setComposerMode("reply");
+
+    setReply((previous) => {
+      const current = previous.trim();
+
+      if (!current) {
+        return cannedResponse.content;
+      }
+
+      return `${current}\n\n${cannedResponse.content}`;
+    });
+
+    setSuccess(`"${cannedResponse.title}" response inserted into your reply.`);
 
     setTimeout(() => {
       setSuccess("");
@@ -1875,7 +2062,10 @@ const AgentTicketDetails = () => {
 
                 <button
                   type="button"
-                  onClick={() => setKnowledgeBaseOpen((previous) => !previous)}
+                  onClick={() => {
+                    setKnowledgeBaseOpen((previous) => !previous);
+                    setCannedResponsesOpen(false);
+                  }}
                   className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition ${
                     knowledgeBaseOpen
                       ? "bg-purple-500/10 text-purple-300 ring-1 ring-purple-500/20"
@@ -1885,6 +2075,31 @@ const AgentTicketDetails = () => {
                   <BookOpen size={15} />
                   Knowledge Base
                   {knowledgeBaseOpen ? (
+                    <ChevronUp size={14} />
+                  ) : (
+                    <ChevronDown size={14} />
+                  )}
+                </button>
+
+                {/* CANNED RESPONSES BUTTON */}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCannedResponsesOpen((previous) => !previous);
+
+                    // Close Knowledge Base when opening Canned Responses.
+                    setKnowledgeBaseOpen(false);
+                  }}
+                  className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                    cannedResponsesOpen
+                      ? "bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20"
+                      : "text-slate-500 hover:bg-slate-800/60 hover:text-slate-300"
+                  }`}
+                >
+                  <MessageCircle size={15} />
+                  Canned Responses
+                  {cannedResponsesOpen ? (
                     <ChevronUp size={14} />
                   ) : (
                     <ChevronDown size={14} />
@@ -2215,6 +2430,148 @@ const AgentTicketDetails = () => {
                       </div>
                     </>
                   )}
+                </div>
+              )}
+
+              {/* ================================================= */}
+              {/* CANNED RESPONSES PANEL */}
+              {/* ================================================= */}
+
+              {cannedResponsesOpen && (
+                <div className="mb-5 overflow-hidden rounded-2xl border border-emerald-500/20 bg-[#080d1c]">
+                  {/* HEADER */}
+
+                  <div className="border-b border-slate-800 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
+                            <MessageCircle size={16} />
+                          </div>
+
+                          <div>
+                            <h3 className="text-sm font-semibold text-white">
+                              Canned Responses
+                            </h3>
+
+                            <p className="text-[11px] text-slate-500">
+                              Quickly insert common replies
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <span className="text-xs text-slate-500">
+                        {cannedResponseResults.length}{" "}
+                        {cannedResponseResults.length === 1
+                          ? "response"
+                          : "responses"}
+                      </span>
+                    </div>
+
+                    {/* SEARCH */}
+
+                    <div className="relative mt-4">
+                      <Search
+                        size={17}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+                      />
+
+                      <input
+                        type="text"
+                        value={cannedResponseSearch}
+                        onChange={(event) =>
+                          setCannedResponseSearch(event.target.value)
+                        }
+                        placeholder="Search responses, greeting, troubleshooting..."
+                        className="h-11 w-full rounded-xl border border-slate-800 bg-slate-950 pl-10 pr-10 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-emerald-500/40"
+                      />
+
+                      {cannedResponseSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setCannedResponseSearch("")}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 transition hover:text-slate-300"
+                        >
+                          <X size={16} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* RESPONSE LIST */}
+
+                  <div className="max-h-[420px] overflow-y-auto p-3">
+                    {cannedResponseResults.length === 0 ? (
+                      <div className="px-4 py-10 text-center">
+                        <Search
+                          size={30}
+                          className="mx-auto mb-3 text-slate-700"
+                        />
+
+                        <p className="text-sm font-medium text-slate-400">
+                          No canned responses found
+                        </p>
+
+                        <p className="mt-1 text-xs text-slate-600">
+                          Try searching with a different keyword.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {cannedResponseResults.map((cannedResponse) => (
+                          <div
+                            key={cannedResponse.id}
+                            className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 transition hover:border-slate-700"
+                          >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                              {/* ICON */}
+
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
+                                <MessageCircle size={16} />
+                              </div>
+
+                              {/* CONTENT */}
+
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h4 className="text-sm font-medium text-slate-200">
+                                    {cannedResponse.title}
+                                  </h4>
+
+                                  <span className="rounded-full border border-slate-800 bg-slate-900 px-2 py-0.5 text-[10px] text-slate-500">
+                                    {cannedResponse.category}
+                                  </span>
+
+                                  <span className="rounded-full border border-slate-800 bg-slate-900 px-2 py-0.5 font-mono text-[10px] text-slate-600">
+                                    /{cannedResponse.shortcut}
+                                  </span>
+                                </div>
+
+                                <p className="mt-2 text-xs leading-5 text-slate-500">
+                                  {cannedResponse.content}
+                                </p>
+                              </div>
+
+                              {/* INSERT */}
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  insertCannedResponse(cannedResponse)
+                                }
+                                disabled={!canReply}
+                                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                <Plus size={14} />
+                                Insert
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
