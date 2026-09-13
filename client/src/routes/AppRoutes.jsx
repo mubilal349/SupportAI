@@ -6,8 +6,35 @@ import Login from "../pages/auth/Login";
 import Register from "../pages/auth/Register";
 import NotFound from "../pages/NotFound";
 
-// Admin
+// ============================================================
+// ADMIN
+// ============================================================
+
+import AdminLayout from "../pages/admin/AdminLayout";
 import AdminDashboard from "../pages/admin/Dashboard";
+
+import AdminUsers from "../pages/admin/users/Users";
+import AdminUserDetails from "../pages/admin/users/UserDetails";
+import AdminEditUser from "../pages/admin/users/EditUser";
+
+import AdminTickets from "../pages/admin/tickets/Tickets";
+import AdminTicketDetails from "../pages/admin/tickets/TicketDetails";
+
+import AdminAgents from "../pages/admin/agents/Agents";
+import AdminAgentDetails from "../pages/admin/agents/AgentDetails";
+
+import AdminKnowledgeBase from "../pages/admin/knowledge-base/KnowledgeBase";
+import AdminArticleEditor from "../pages/admin/knowledge-base/ArticleEditor";
+
+import AdminCannedResponses from "../pages/admin/canned-responses/CannedResponses";
+
+import AdminSLAManagement from "../pages/admin/sla/SLAManagement";
+
+import AdminAnalytics from "../pages/admin/analytics/Analytics";
+
+import AdminAuditLogs from "../pages/admin/audit/AuditLogs";
+
+import AdminSettings from "../pages/admin/settings/Settings";
 
 // Customer
 import CustomerDashboard from "../pages/customer/Dashboard";
@@ -58,7 +85,48 @@ const AppRoutes = () => {
       ======================================== */}
 
       <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
-        <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/admin" element={<AdminLayout />}>
+          {/* Dashboard */}
+          <Route index element={<AdminDashboard />} />
+
+          {/* Users */}
+          <Route path="users" element={<AdminUsers />} />
+          <Route path="users/:userId" element={<AdminUserDetails />} />
+          <Route path="users/:userId/edit" element={<AdminEditUser />} />
+
+          {/* Tickets */}
+          <Route path="tickets" element={<AdminTickets />} />
+          <Route path="tickets/:ticketId" element={<AdminTicketDetails />} />
+
+          {/* Agents */}
+          <Route path="agents" element={<AdminAgents />} />
+          <Route path="agents/:agentId" element={<AdminAgentDetails />} />
+
+          {/* Knowledge Base */}
+          <Route path="knowledge-base" element={<AdminKnowledgeBase />} />
+
+          <Route path="knowledge-base/new" element={<AdminArticleEditor />} />
+
+          <Route
+            path="knowledge-base/:articleId"
+            element={<AdminArticleEditor />}
+          />
+
+          {/* Canned Responses */}
+          <Route path="canned-responses" element={<AdminCannedResponses />} />
+
+          {/* SLA */}
+          <Route path="sla" element={<AdminSLAManagement />} />
+
+          {/* Analytics */}
+          <Route path="analytics" element={<AdminAnalytics />} />
+
+          {/* Audit Logs */}
+          <Route path="audit-logs" element={<AdminAuditLogs />} />
+
+          {/* Settings */}
+          <Route path="settings" element={<AdminSettings />} />
+        </Route>
       </Route>
 
       {/* ========================================

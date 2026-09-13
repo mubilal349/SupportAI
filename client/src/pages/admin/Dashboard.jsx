@@ -1,13 +1,12 @@
+import React from "react";
 import {
   Activity,
   ArrowUpRight,
   Bot,
   CheckCircle2,
-  Clock3,
   Headphones,
   MessageSquare,
   MoreHorizontal,
-  Settings,
   ShieldCheck,
   Ticket,
   TrendingUp,
@@ -20,6 +19,10 @@ import { useAuth } from "../../context/AuthContext";
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
+
+  // ============================================================
+  // DEMO STATS
+  // ============================================================
 
   const stats = [
     {
@@ -51,6 +54,10 @@ const Dashboard = () => {
       icon: Users,
     },
   ];
+
+  // ============================================================
+  // RECENT CONVERSATIONS
+  // ============================================================
 
   const recentConversations = [
     {
@@ -95,6 +102,10 @@ const Dashboard = () => {
     },
   ];
 
+  // ============================================================
+  // AGENTS
+  // ============================================================
+
   const agents = [
     {
       name: "James Anderson",
@@ -126,6 +137,10 @@ const Dashboard = () => {
     },
   ];
 
+  // ============================================================
+  // ACTIVITY
+  // ============================================================
+
   const activity = [
     {
       icon: Bot,
@@ -153,6 +168,10 @@ const Dashboard = () => {
     },
   ];
 
+  // ============================================================
+  // STATUS STYLES
+  // ============================================================
+
   const getStatusStyles = (status) => {
     switch (status) {
       case "Open":
@@ -172,6 +191,10 @@ const Dashboard = () => {
     }
   };
 
+  // ============================================================
+  // PRIORITY STYLES
+  // ============================================================
+
   const getPriorityStyles = (priority) => {
     switch (priority) {
       case "High":
@@ -188,102 +211,48 @@ const Dashboard = () => {
     }
   };
 
+  // ============================================================
+  // DASHBOARD
+  // ============================================================
+
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-950/95">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between px-6 py-5 lg:px-8">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 shadow-lg shadow-blue-600/20">
-                <MessageSquare className="h-5 w-5" />
-              </div>
+    <div className="min-h-full bg-slate-950 text-white">
+      <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        {/* ====================================================
+            PAGE HEADING
+        ==================================================== */}
 
-              <div>
-                <h1 className="text-lg font-bold">SupportAI</h1>
-                <p className="text-xs text-slate-500">Admin Dashboard</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              className="relative rounded-xl border border-slate-800 bg-slate-900 p-2.5 text-slate-400 transition hover:border-slate-700 hover:text-white"
-              title="Notifications"
-            >
-              <Activity className="h-5 w-5" />
-
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-blue-500" />
-            </button>
-
-            <button
-              type="button"
-              className="rounded-xl border border-slate-800 bg-slate-900 p-2.5 text-slate-400 transition hover:border-slate-700 hover:text-white"
-              title="Settings"
-            >
-              <Settings className="h-5 w-5" />
-            </button>
-
-            <div className="hidden h-8 w-px bg-slate-800 sm:block" />
-
-            <div className="hidden text-right sm:block">
-              <p className="text-sm font-medium text-white">
-                {user?.name || "Admin"}
-              </p>
-
-              <p className="text-xs capitalize text-slate-500">
-                {user?.role || "Administrator"}
-              </p>
-            </div>
-
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold">
-              {user?.name
-                ? user.name
-                    .split(" ")
-                    .map((name) => name[0])
-                    .join("")
-                    .slice(0, 2)
-                    .toUpperCase()
-                : "AD"}
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Main */}
-      <main className="mx-auto max-w-[1600px] px-6 py-8 lg:px-8">
-        {/* Page Heading */}
         <div className="mb-8 flex flex-col justify-between gap-5 md:flex-row md:items-center">
           <div>
             <p className="mb-2 text-sm text-slate-500">
               Sunday, August 30, 2026
             </p>
 
-            <h2 className="text-3xl font-bold tracking-tight">
+            <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
               Good evening, {user?.name?.split(" ")[0] || "Admin"}
             </h2>
 
-            <p className="mt-2 text-slate-400">
+            <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
               Here's what's happening with your support team today.
             </p>
           </div>
 
           <button
             type="button"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold transition hover:bg-blue-700"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold transition hover:bg-blue-700 md:w-auto"
           >
             <Zap className="h-4 w-4" />
             View live support
           </button>
         </div>
 
-        {/* Stats */}
-        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        {/* ====================================================
+            STATS
+        ==================================================== */}
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {stats.map((stat) => {
             const Icon = stat.icon;
-
-            const isNegative = stat.change.startsWith("-");
 
             return (
               <div
@@ -298,6 +267,7 @@ const Dashboard = () => {
                   <button
                     type="button"
                     className="text-slate-600 transition hover:text-slate-300"
+                    aria-label={`More options for ${stat.title}`}
                   >
                     <MoreHorizontal className="h-5 w-5" />
                   </button>
@@ -305,16 +275,12 @@ const Dashboard = () => {
 
                 <p className="text-sm text-slate-500">{stat.title}</p>
 
-                <div className="mt-1 flex items-end justify-between gap-3">
+                <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
                   <p className="text-3xl font-bold tracking-tight">
                     {stat.value}
                   </p>
 
-                  <span
-                    className={`mb-1 inline-flex items-center gap-1 text-xs font-semibold ${
-                      isNegative ? "text-emerald-400" : "text-emerald-400"
-                    }`}
-                  >
+                  <span className="mb-1 inline-flex items-center gap-1 text-xs font-semibold text-emerald-400">
                     <TrendingUp className="h-3.5 w-3.5" />
                     {stat.change}
                   </span>
@@ -328,11 +294,15 @@ const Dashboard = () => {
           })}
         </div>
 
-        {/* Analytics */}
+        {/* ====================================================
+            ANALYTICS
+        ==================================================== */}
+
         <div className="mt-6 grid gap-6 xl:grid-cols-3">
           {/* Conversation Analytics */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 xl:col-span-2">
-            <div className="mb-6 flex items-center justify-between">
+
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 sm:p-6 xl:col-span-2">
+            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className="font-semibold">Conversation Overview</h3>
 
@@ -343,16 +313,19 @@ const Dashboard = () => {
 
               <select
                 defaultValue="7"
-                className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-400 outline-none focus:border-blue-500"
+                className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-400 outline-none focus:border-blue-500 sm:w-auto"
               >
                 <option value="7">Last 7 days</option>
+
                 <option value="30">Last 30 days</option>
+
                 <option value="90">Last 90 days</option>
               </select>
             </div>
 
             {/* Chart */}
-            <div className="flex h-64 items-end gap-3 border-b border-slate-800 px-2 pb-0">
+
+            <div className="flex h-56 items-end gap-2 border-b border-slate-800 px-1 sm:h-64 sm:gap-3 sm:px-2">
               {[42, 55, 48, 72, 64, 88, 76].map((height, index) => (
                 <div
                   key={index}
@@ -372,33 +345,43 @@ const Dashboard = () => {
                     />
                   </div>
 
-                  <span className="mt-3 text-center text-xs text-slate-600">
+                  <span className="mt-3 text-center text-[10px] text-slate-600 sm:text-xs">
                     {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][index]}
                   </span>
                 </div>
               ))}
             </div>
 
-            <div className="mt-6 grid grid-cols-3 gap-4">
+            {/* Analytics numbers */}
+
+            <div className="mt-6 grid grid-cols-3 gap-3 sm:gap-4">
               <div>
                 <p className="text-xs text-slate-500">Conversations</p>
-                <p className="mt-1 text-xl font-bold">1,284</p>
+
+                <p className="mt-1 text-lg font-bold sm:text-xl">1,284</p>
               </div>
 
               <div>
                 <p className="text-xs text-slate-500">AI Resolution</p>
-                <p className="mt-1 text-xl font-bold text-purple-400">65.6%</p>
+
+                <p className="mt-1 text-lg font-bold text-purple-400 sm:text-xl">
+                  65.6%
+                </p>
               </div>
 
               <div>
                 <p className="text-xs text-slate-500">Satisfaction</p>
-                <p className="mt-1 text-xl font-bold text-emerald-400">94.2%</p>
+
+                <p className="mt-1 text-lg font-bold text-emerald-400 sm:text-xl">
+                  94.2%
+                </p>
               </div>
             </div>
           </div>
 
           {/* AI Performance */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
+
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
             <div className="mb-6 flex items-start justify-between">
               <div>
                 <h3 className="font-semibold">AI Performance</h3>
@@ -408,48 +391,56 @@ const Dashboard = () => {
                 </p>
               </div>
 
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/10 text-purple-400">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-purple-500/10 text-purple-400">
                 <Bot className="h-5 w-5" />
               </div>
             </div>
 
             <div className="flex items-center justify-center py-4">
-              <div className="relative flex h-40 w-40 items-center justify-center rounded-full border-[14px] border-purple-500/20">
+              <div className="relative flex h-36 w-36 items-center justify-center rounded-full border-[14px] border-purple-500/20 sm:h-40 sm:w-40">
                 <div className="absolute inset-[-14px] rounded-full border-[14px] border-transparent border-t-purple-500 border-r-purple-500" />
 
                 <div className="text-center">
                   <p className="text-3xl font-bold">65.6%</p>
+
                   <p className="text-xs text-slate-500">AI resolved</p>
                 </div>
               </div>
             </div>
 
             <div className="mt-5 space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <span className="text-sm text-slate-400">Resolved by AI</span>
+
                 <span className="font-semibold">842</span>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <span className="text-sm text-slate-400">
                   Escalated to agents
                 </span>
+
                 <span className="font-semibold">442</span>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <span className="text-sm text-slate-400">Avg. response</span>
+
                 <span className="font-semibold">1.8s</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Conversations + Agents */}
+        {/* ====================================================
+            RECENT CONVERSATIONS + AGENTS
+        ==================================================== */}
+
         <div className="mt-6 grid gap-6 xl:grid-cols-3">
           {/* Recent Conversations */}
+
           <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 xl:col-span-2">
-            <div className="flex items-center justify-between border-b border-slate-800 px-6 py-5">
+            <div className="flex flex-col gap-3 border-b border-slate-800 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <div>
                 <h3 className="font-semibold">Recent Conversations</h3>
 
@@ -460,7 +451,7 @@ const Dashboard = () => {
 
               <button
                 type="button"
-                className="inline-flex items-center gap-1 text-sm font-medium text-blue-400 hover:text-blue-300"
+                className="inline-flex w-fit items-center gap-1 text-sm font-medium text-blue-400 transition hover:text-blue-300"
               >
                 View all
                 <ArrowUpRight className="h-4 w-4" />
@@ -538,8 +529,9 @@ const Dashboard = () => {
           </div>
 
           {/* Agent Performance */}
+
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60">
-            <div className="border-b border-slate-800 px-6 py-5">
+            <div className="border-b border-slate-800 px-5 py-5 sm:px-6">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="font-semibold">Agent Performance</h3>
@@ -555,7 +547,7 @@ const Dashboard = () => {
 
             <div className="divide-y divide-slate-800">
               {agents.map((agent) => (
-                <div key={agent.name} className="px-6 py-4">
+                <div key={agent.name} className="px-5 py-4 sm:px-6">
                   <div className="flex items-center gap-3">
                     <div className="relative">
                       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 text-xs font-semibold">
@@ -611,11 +603,15 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Bottom */}
+        {/* ====================================================
+            ACTIVITY + SYSTEM HEALTH
+        ==================================================== */}
+
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
           {/* Activity */}
+
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60">
-            <div className="border-b border-slate-800 px-6 py-5">
+            <div className="border-b border-slate-800 px-5 py-5 sm:px-6">
               <h3 className="font-semibold">Recent Activity</h3>
 
               <p className="mt-1 text-sm text-slate-500">
@@ -630,7 +626,7 @@ const Dashboard = () => {
                 return (
                   <div
                     key={index}
-                    className="flex items-center gap-4 px-6 py-4"
+                    className="flex items-center gap-4 px-5 py-4 sm:px-6"
                   >
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-800 text-slate-400">
                       <Icon className="h-5 w-5" />
@@ -654,8 +650,9 @@ const Dashboard = () => {
           </div>
 
           {/* System Health */}
+
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60">
-            <div className="border-b border-slate-800 px-6 py-5">
+            <div className="border-b border-slate-800 px-5 py-5 sm:px-6">
               <h3 className="font-semibold">System Health</h3>
 
               <p className="mt-1 text-sm text-slate-500">
@@ -663,7 +660,7 @@ const Dashboard = () => {
               </p>
             </div>
 
-            <div className="grid gap-4 p-6 sm:grid-cols-2">
+            <div className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6">
               {[
                 {
                   name: "API Server",
@@ -693,12 +690,14 @@ const Dashboard = () => {
                     key={service.name}
                     className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4"
                   >
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
                       <Icon className="h-5 w-5" />
                     </div>
 
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{service.name}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">
+                        {service.name}
+                      </p>
 
                       <div className="mt-1 flex items-center gap-1.5">
                         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
@@ -713,18 +712,6 @@ const Dashboard = () => {
               })}
             </div>
           </div>
-        </div>
-
-        {/* Logout */}
-        <div className="mt-8 flex justify-end">
-          <button
-            type="button"
-            onClick={logout}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-800 px-4 py-2.5 text-sm text-slate-400 transition hover:border-red-500/30 hover:bg-red-500/5 hover:text-red-400"
-          >
-            <X className="h-4 w-4" />
-            Sign out
-          </button>
         </div>
       </main>
     </div>
