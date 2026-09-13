@@ -12,6 +12,8 @@ import { generateAIResponse } from "../services/aiService.js";
 import {
   notifyAIReply,
   notifyTicketCreated,
+  notifyAgentsNewTicket,
+  notifyAgentNewReply,
 } from "../services/notificationService.js";
 
 import {
@@ -564,6 +566,28 @@ export const createTicket = async (req, res) => {
 
     /*
      * =====================================================
+     * AGENT POOL NOTIFICATION
+     * =====================================================
+     *
+     * Notify available agents/admins that a new ticket
+     * has entered the queue.
+     *
+     * IMPORTANT:
+     * This does NOT assign the ticket.
+     *
+     */
+
+    try {
+      await notifyAgentsNewTicket({
+        req,
+        ticket,
+      });
+    } catch (notificationError) {
+      console.error("AGENT NEW TICKET NOTIFICATION ERROR:", notificationError);
+    }
+
+    /*
+     * =====================================================
      * EMAIL NOTIFICATION
      * =====================================================
      */
@@ -1045,6 +1069,30 @@ export const addTicketReply = async (req, res) => {
     await ticket.save();
 
     console.log("CUSTOMER MESSAGE SAVED:", message.trim());
+
+    /*
+     * =====================================================
+     * AGENT NOTIFICATION
+     * =====================================================
+     *
+     * Notify the assigned agent that the customer replied.
+     *
+     * If the ticket is unassigned, no agent notification
+     * is created here. The ticket remains available in queue.
+     *
+     */
+
+    try {
+      await notifyAgentNewReply({
+        req,
+        ticket,
+      });
+    } catch (notificationError) {
+      console.error(
+        "AGENT CUSTOMER REPLY NOTIFICATION ERROR:",
+        notificationError,
+      );
+    }
 
     /*
      * =====================================================

@@ -1,4 +1,5 @@
 import Notification from "../models/Notification.js";
+import User from "../models/User.js";
 
 /*
  * =========================================================
@@ -257,5 +258,199 @@ export const notifyAttachmentAdded = async ({ req, ticket }) => {
     message: `A new attachment was added to your ticket ${ticket.ticketNumber}.`,
     ticket: ticket._id,
     ticketNumber: ticket.ticketNumber,
+  });
+};
+
+/*
+ * =========================================================
+ * AGENT - NEW CUSTOMER TICKET
+ * =========================================================
+ *
+ * Notify the agent pool that a new ticket is available.
+ *
+ * IMPORTANT:
+ * This does NOT assign the ticket to any agent.
+ *
+ * =========================================================
+ */
+
+export const notifyAgentsNewTicket = async ({ req, ticket }) => {
+  try {
+    if (!ticket) {
+      return [];
+    }
+
+    const io = req?.app?.get("io");
+
+    /*
+     * Find active agents/admins.
+     *
+     * We create individual notifications so that:
+     * - unread counts work correctly
+     * - notifications persist in MongoDB
+     * - each agent gets their own notification
+     */
+
+    const agents = await User.find({
+      role: {
+        $in: ["agent", "admin"],
+      },
+    }).select("_id role");
+
+    if (!Array.isArray(agents) || agents.length === 0) {
+      return [];
+    }
+
+    const notifications = [];
+
+    for (const agent of agents) {
+      const notification = await createNotification({
+        req,
+
+        recipient: agent._id,
+
+        type: "ticket_created",
+
+        title: "New Support Ticket",
+
+        message: `New ticket ${ticket.ticketNumber} is waiting in the support queue.`,
+
+        ticket: ticket._id,
+
+        ticketNumber: ticket.ticketNumber,
+
+        metadata: {
+          source: "customer",
+
+          target: "queue",
+
+          priority: ticket.priority,
+
+          category: ticket.category,
+        },
+      });
+
+      if (notification) {
+        notifications.push(notification);
+      }
+    }
+
+    return notifications;
+  } catch (error) {
+    console.error("NOTIFY AGENTS NEW TICKET ERROR:", error);
+
+    return [];
+  }
+};
+
+/*
+ * =========================================================
+ * AGENT - CUSTOMER REPLY
+ * =========================================================
+ *
+ * Notify the assigned agent when their customer replies.
+ *
+ * =========================================================
+ */
+
+export const notifyAgentNewReply = async ({ req, ticket }) => {
+  try {
+    if (!ticket?.assignedAgent) {
+      return null;
+    }
+
+    return createNotification({
+      req,
+
+      recipient: ticket.assignedAgent,
+
+      type: "new_reply",
+
+      title: "New Customer Reply",
+
+      message: `Customer replied to ticket ${ticket.ticketNumber}.`,
+
+      ticket: ticket._id,
+
+      ticketNumber: ticket.ticketNumber,
+
+      metadata: {
+        source: "customer",
+
+        target: "agent",
+      },
+    });
+  } catch (error) {
+    console.error("NOTIFY AGENT NEW REPLY ERROR:", error);
+
+    return null;
+  }
+};
+
+/*
+ * =========================================================
+ * AGENT - TICKET ASSIGNED
+ * =========================================================
+ */
+
+export const notifyAgentTicketAssigned = async ({ req, ticket }) => {
+  if (!ticket?.assignedAgent) {
+    return null;
+  }
+
+  return createNotification({
+    req,
+
+    recipient: ticket.assignedAgent,
+
+    type: "agent_assigned",
+
+    title: "Ticket Assigned",
+
+    message: `Ticket ${ticket.ticketNumber} has been assigned to you.`,
+
+    ticket: ticket._id,
+
+    ticketNumber: ticket.ticketNumber,
+
+    metadata: {
+      source: "assignment",
+
+      target: "agent",
+    },
+  });
+};
+
+/*
+ * =========================================================
+ * ESCALATION TARGET
+ * =========================================================
+ */
+
+export const notifyEscalationTarget = async ({
+  req,
+  ticket,
+  targetUser,
+  reason = "",
+  note = "",
+}) => {
+  if (!ticket || !targetUser?._id) {
+    return null;
+  }
+
+  return createNotification({
+    req,
+    recipient: targetUser._id,
+    type: "ticket_escalated",
+    title: "Ticket Escalated to You",
+    message: `Ticket ${ticket.ticketNumber} has been escalated to you.`,
+    ticket: ticket._id,
+    ticketNumber: ticket.ticketNumber,
+    metadata: {
+      source: "escalation",
+      target: "agent",
+      reason,
+      note,
+    },
   });
 };

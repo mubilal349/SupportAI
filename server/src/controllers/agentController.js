@@ -10,6 +10,14 @@ import {
   getAgentTicketRoom,
 } from "../socket/socket.js";
 
+import {
+  notifyAgentAssigned,
+  notifyAgentTicketAssigned,
+  notifyTicketEscalated,
+  notifyAgentsNewTicket,
+  notifyEscalationTarget,
+} from "../services/notificationService.js";
+
 /*
  * =========================================================
  * HELPERS
@@ -1083,6 +1091,36 @@ export const assignTicketToMe = async (req, res) => {
     await ticket.populate("customer", "name email avatar profileImage");
 
     await ticket.populate("assignedAgent", "name email avatar profileImage");
+
+    /*
+     * =======================================================
+     * REAL-TIME NOTIFICATIONS
+     * =======================================================
+     *
+     * Notify:
+     * 1. Customer that an agent was assigned
+     * 2. Assigned agent that the ticket was assigned to them
+     */
+
+    try {
+      const assignedAgentName =
+        ticket.assignedAgent?.name ||
+        ticket.assignedAgent?.email ||
+        "A support agent";
+
+      await notifyAgentAssigned({
+        req,
+        ticket,
+        agentName: assignedAgentName,
+      });
+
+      await notifyAgentTicketAssigned({
+        req,
+        ticket,
+      });
+    } catch (notificationError) {
+      console.error("TICKET ASSIGNMENT NOTIFICATION ERROR:", notificationError);
+    }
 
     return res.status(200).json({
       success: true,
@@ -2435,6 +2473,67 @@ export const escalateTicket = async (req, res) => {
         select: "name email avatar profileImage role",
       },
     ]);
+
+    /*
+     * =======================================================
+     * REAL-TIME NOTIFICATIONS
+     * =======================================================
+     *
+     * Notify the customer that the ticket was escalated.
+     */
+
+    try {
+      await notifyTicketEscalated({
+        req,
+        ticket,
+      });
+    } catch (notificationError) {
+      console.error(
+        "CUSTOMER ESCALATION NOTIFICATION ERROR:",
+        notificationError,
+      );
+    }
+
+    /*
+     * =======================================================
+     * ESCALATION TARGET NOTIFICATION
+     * =======================================================
+     *
+     * If the ticket was explicitly escalated to another
+     * agent/admin, notify that user directly.
+     */
+
+    try {
+      if (ticket.escalation?.escalatedTo) {
+        await createNotification({
+          req,
+          recipient: ticket.escalation.escalatedTo._id,
+          type: "ticket_escalated",
+          title: "Ticket Escalated to You",
+          message: `Ticket ${ticket.ticketNumber} has been escalated to you.`,
+          ticket: ticket._id,
+          ticketNumber: ticket.ticketNumber,
+          metadata: {
+            source: "escalation",
+            target: "agent",
+            reason: cleanReason,
+            note: cleanNote,
+          },
+        });
+      } else {
+        /*
+         * No explicit escalation target.
+         *
+         * Notify the agent/admin pool.
+         */
+        await notifyAgentsNewTicket({
+          req,
+          ticket,
+        });
+      }
+    } catch (notificationError) {
+      console.error("ESCALATION TARGET NOTIFICATION ERROR:", notificationError);
+    }
 
     const io = getSocketIO();
 
