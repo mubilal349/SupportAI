@@ -86,13 +86,13 @@ const AppRoutes = () => {
 
       <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
         <Route path="/admin" element={<AdminLayout />}>
-          {/* Dashboard */}
           <Route index element={<AdminDashboard />} />
 
           {/* Users */}
           <Route path="users" element={<AdminUsers />} />
-          <Route path="users/:userId" element={<AdminUserDetails />} />
+          <Route path="users/new" element={<AdminEditUser />} />
           <Route path="users/:userId/edit" element={<AdminEditUser />} />
+          <Route path="users/:userId" element={<AdminUserDetails />} />
 
           {/* Tickets */}
           <Route path="tickets" element={<AdminTickets />} />
@@ -104,27 +104,20 @@ const AppRoutes = () => {
 
           {/* Knowledge Base */}
           <Route path="knowledge-base" element={<AdminKnowledgeBase />} />
-
           <Route path="knowledge-base/new" element={<AdminArticleEditor />} />
-
           <Route
             path="knowledge-base/:articleId"
             element={<AdminArticleEditor />}
           />
 
-          {/* Canned Responses */}
           <Route path="canned-responses" element={<AdminCannedResponses />} />
 
-          {/* SLA */}
           <Route path="sla" element={<AdminSLAManagement />} />
 
-          {/* Analytics */}
           <Route path="analytics" element={<AdminAnalytics />} />
 
-          {/* Audit Logs */}
           <Route path="audit-logs" element={<AdminAuditLogs />} />
 
-          {/* Settings */}
           <Route path="settings" element={<AdminSettings />} />
         </Route>
       </Route>

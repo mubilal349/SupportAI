@@ -21,6 +21,20 @@ import {
   Zap,
 } from "lucide-react";
 
+const API_SERVER = (
+  import.meta.env.VITE_API_URL || "http://localhost:8000/api"
+).replace(/\/api$/, "");
+
+const getAvatarUrl = (avatar) => {
+  if (!avatar) return null;
+
+  if (avatar.startsWith("http://") || avatar.startsWith("https://")) {
+    return avatar;
+  }
+
+  return `${API_SERVER}${avatar.startsWith("/") ? avatar : `/${avatar}`}`;
+};
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -645,13 +659,18 @@ const Dashboard = () => {
                         <div className="flex items-center gap-3">
                           {ticket.customer?.avatar ? (
                             <img
-                              src={ticket.customer.avatar}
+                              src={getAvatarUrl(ticket.customer.avatar)}
                               alt={ticket.customer.name || "Customer"}
                               className="h-9 w-9 rounded-xl object-cover"
                             />
                           ) : (
-                            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800 text-[10px] font-semibold text-slate-400">
-                              {getAgentInitials(ticket.customer?.name)}
+                            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/10 text-xs font-bold text-blue-400">
+                              {ticket.customer?.name
+                                ?.split(" ")
+                                .map((part) => part[0])
+                                .join("")
+                                .slice(0, 2)
+                                .toUpperCase() || "CU"}
                             </div>
                           )}
 
