@@ -7,6 +7,7 @@ import {
   Mail,
   Phone,
   Save,
+  ShieldCheck,
   User,
   X,
 } from "lucide-react";
@@ -37,6 +38,7 @@ const EditAgent = () => {
     company: "",
     timezone: "Asia/Karachi",
     language: "English",
+    role: "agent",
     status: "active",
     availability: "offline",
   });
@@ -58,7 +60,6 @@ const EditAgent = () => {
 
         const response = await getAdminAgent(agentId);
 
-        // Supports common API response structures
         const agent =
           response?.agent ||
           response?.data?.agent ||
@@ -77,6 +78,10 @@ const EditAgent = () => {
           company: agent.company || "",
           timezone: agent.timezone || "Asia/Karachi",
           language: agent.language || "English",
+
+          // Load role from database
+          role: agent.role || "agent",
+
           status: agent.status || "active",
           availability: agent.availability || "offline",
         });
@@ -118,7 +123,7 @@ const EditAgent = () => {
   };
 
   // ============================================================
-  // SUBMIT FORM
+  // SUBMIT
   // ============================================================
 
   const handleSubmit = async (event) => {
@@ -129,9 +134,9 @@ const EditAgent = () => {
       setError("");
       setSuccess("");
 
-      // -----------------------------
+      // ----------------------------------------------------------
       // VALIDATION
-      // -----------------------------
+      // ----------------------------------------------------------
 
       if (!formData.name.trim()) {
         throw new Error("Agent name is required.");
@@ -141,13 +146,17 @@ const EditAgent = () => {
         throw new Error("Agent email is required.");
       }
 
+      if (!formData.role) {
+        throw new Error("Please select a role.");
+      }
+
       if (!isEditMode && formData.password.length < 6) {
         throw new Error("Password must be at least 6 characters.");
       }
 
-      // -----------------------------
+      // ----------------------------------------------------------
       // PAYLOAD
-      // -----------------------------
+      // ----------------------------------------------------------
 
       const payload = {
         name: formData.name.trim(),
@@ -156,18 +165,23 @@ const EditAgent = () => {
         company: formData.company.trim(),
         timezone: formData.timezone.trim(),
         language: formData.language,
+
+        // IMPORTANT:
+        // Send selected role to backend
+        role: formData.role,
+
         status: formData.status,
         availability: formData.availability,
       };
 
-      // Password is only required when creating
+      // Password is required only when creating
       if (!isEditMode) {
         payload.password = formData.password;
       }
 
-      // -----------------------------
-      // UPDATE AGENT
-      // -----------------------------
+      // ----------------------------------------------------------
+      // UPDATE
+      // ----------------------------------------------------------
 
       if (isEditMode) {
         await updateAdminAgent(agentId, payload);
@@ -181,9 +195,9 @@ const EditAgent = () => {
         return;
       }
 
-      // -----------------------------
-      // CREATE AGENT
-      // -----------------------------
+      // ----------------------------------------------------------
+      // CREATE
+      // ----------------------------------------------------------
 
       await createAdminAgent(payload);
 
@@ -204,7 +218,7 @@ const EditAgent = () => {
   };
 
   // ============================================================
-  // LOADING SCREEN
+  // LOADING
   // ============================================================
 
   if (loading) {
@@ -249,31 +263,29 @@ const EditAgent = () => {
 
           <p className="mt-2 text-sm text-slate-400">
             {isEditMode
-              ? "Update agent information, account status, and availability."
-              : "Create a new support agent account."}
+              ? "Update agent information, role, account status, and availability."
+              : "Create a new support agent account and assign a role."}
           </p>
         </div>
 
         {/* ======================================================
-            ERROR ALERT
+            ERROR
         ====================================================== */}
 
         {error && (
           <div className="mb-5 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             <X className="mt-0.5 shrink-0" size={18} />
-
             <span>{error}</span>
           </div>
         )}
 
         {/* ======================================================
-            SUCCESS ALERT
+            SUCCESS
         ====================================================== */}
 
         {success && (
           <div className="mb-5 flex items-start gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
             <Check className="mt-0.5 shrink-0" size={18} />
-
             <span>{success}</span>
           </div>
         )}
@@ -302,7 +314,7 @@ const EditAgent = () => {
             </div>
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-              {/* FULL NAME */}
+              {/* NAME */}
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-300">
@@ -352,7 +364,7 @@ const EditAgent = () => {
                 </div>
               </div>
 
-              {/* PASSWORD - CREATE ONLY */}
+              {/* PASSWORD */}
 
               {!isEditMode && (
                 <div>
@@ -465,6 +477,77 @@ const EditAgent = () => {
           </section>
 
           {/* ====================================================
+              ROLE & PERMISSIONS
+          ==================================================== */}
+
+          <section className="border-b border-slate-800 p-5 sm:p-6">
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-white">
+                Role &amp; Permissions
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Assign the appropriate role to this account.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              {/* ROLE SELECT */}
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-300">
+                  Account Role
+                </label>
+
+                <div className="relative">
+                  <ShieldCheck
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+                    size={17}
+                  />
+
+                  <select
+                    name="role"
+                    value={formData.role}
+                    onChange={handleChange}
+                    className="w-full appearance-none rounded-xl border border-slate-800 bg-slate-950 py-3 pl-10 pr-4 text-sm text-white outline-none transition focus:border-blue-500"
+                  >
+                    <option value="agent">Support Agent</option>
+                    <option value="admin">Administrator</option>
+                  </select>
+                </div>
+
+                <p className="mt-2 text-xs text-slate-600">
+                  This role controls the permissions available to the account.
+                </p>
+              </div>
+
+              {/* ROLE DESCRIPTION */}
+
+              <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
+                    <ShieldCheck size={18} />
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-semibold text-white">
+                      {formData.role === "admin"
+                        ? "Administrator"
+                        : "Support Agent"}
+                    </p>
+
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      {formData.role === "admin"
+                        ? "Has administrative access to manage users, agents, tickets, and system settings."
+                        : "Can manage, respond to, and handle assigned support tickets."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* ====================================================
               ACCOUNT SETTINGS
           ==================================================== */}
 
@@ -499,8 +582,8 @@ const EditAgent = () => {
                 </select>
 
                 <p className="mt-2 text-xs text-slate-600">
-                  Inactive and suspended agents are not available for normal
-                  ticket handling.
+                  Inactive and suspended accounts cannot normally handle support
+                  tickets.
                 </p>
               </div>
 
@@ -524,49 +607,9 @@ const EditAgent = () => {
                 </select>
 
                 <p className="mt-2 text-xs text-slate-600">
-                  Controls the agent&apos;s current availability to handle
-                  tickets.
+                  Controls the agent&apos;s current availability for support
+                  work.
                 </p>
-              </div>
-            </div>
-          </section>
-
-          {/* ====================================================
-              ROLE INFORMATION
-          ==================================================== */}
-
-          <section className="border-b border-slate-800 p-5 sm:p-6">
-            <div className="mb-6">
-              <h2 className="text-lg font-semibold text-white">
-                Role &amp; Permissions
-              </h2>
-
-              <p className="mt-1 text-sm text-slate-500">
-                Agent permissions are determined by the account role.
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
-                    <User size={18} />
-                  </div>
-
-                  <div>
-                    <p className="text-sm font-semibold text-white">
-                      Support Agent
-                    </p>
-
-                    <p className="mt-1 text-xs text-slate-500">
-                      Can manage and respond to support tickets.
-                    </p>
-                  </div>
-                </div>
-
-                <span className="w-fit rounded-lg border border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-xs font-semibold text-blue-400">
-                  agent
-                </span>
               </div>
             </div>
           </section>
