@@ -22,6 +22,7 @@ import AdminTicketDetails from "../pages/admin/tickets/TicketDetails";
 
 import AdminAgents from "../pages/admin/agents/Agents";
 import AdminAgentDetails from "../pages/admin/agents/AgentDetails";
+import AdminAgentEdit from "../pages/admin/agents/EditAgent";
 
 import AdminKnowledgeBase from "../pages/admin/knowledge-base/KnowledgeBase";
 import AdminArticleEditor from "../pages/admin/knowledge-base/ArticleEditor";
@@ -100,6 +101,7 @@ const AppRoutes = () => {
 
           {/* Agents */}
           <Route path="agents" element={<AdminAgents />} />
+          <Route path="agents/:agentId/edit" element={<AdminAgentEdit />} />
           <Route path="agents/:agentId" element={<AdminAgentDetails />} />
 
           {/* Knowledge Base */}

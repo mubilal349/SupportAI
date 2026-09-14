@@ -18,6 +18,7 @@ import analyticsRoutes from "./routes/analyticsRoutes.js";
 import knowledgeBaseRoutes from "./routes/knowledgeBaseRoutes.js";
 import adminDashboardRoutes from "./routes/adminDashboardRoutes.js";
 import adminUserRoutes from "./routes/adminUserRoutes.js";
+import adminAgentRoutes from "./routes/adminAgentRoutes.js";
 
 // ==========
 //  AGENT ROUTES
@@ -64,5 +65,6 @@ app.use("/api/agent", agentRoutes);
 //Admin APIS
 app.use("/api/admin/dashboard", adminDashboardRoutes);
 app.use("/api/admin/users", adminUserRoutes);
+app.use("/api/admin/agents", adminAgentRoutes);
 
 export default app;
