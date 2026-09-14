@@ -16,6 +16,7 @@ import aiTicketRoutes from "./routes/aiTicketRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import analyticsRoutes from "./routes/analyticsRoutes.js";
 import knowledgeBaseRoutes from "./routes/knowledgeBaseRoutes.js";
+import adminDashboardRoutes from "./routes/adminDashboardRoutes.js";
 
 // ==========
 //  AGENT ROUTES
@@ -58,5 +59,8 @@ app.use("/api/knowledge-base", knowledgeBaseRoutes);
 
 // Agent APIS
 app.use("/api/agent", agentRoutes);
+
+//Admin APIS
+app.use("/api/admin/dashboard", adminDashboardRoutes);
 
 export default app;
