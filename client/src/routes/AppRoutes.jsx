@@ -37,6 +37,8 @@ import AdminAuditLogs from "../pages/admin/audit/AuditLogs";
 
 import AdminSettings from "../pages/admin/settings/Settings";
 
+import AdminNotifications from "../pages/admin/AdminNotifications";
+
 // Customer
 import CustomerDashboard from "../pages/customer/Dashboard";
 import CustomerChat from "../pages/customer/Chat";
@@ -121,6 +123,8 @@ const AppRoutes = () => {
           <Route path="audit-logs" element={<AdminAuditLogs />} />
 
           <Route path="settings" element={<AdminSettings />} />
+
+          <Route path="notifications" element={<AdminNotifications />} />
         </Route>
       </Route>
 

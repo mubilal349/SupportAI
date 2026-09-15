@@ -394,31 +394,38 @@ export const notifyAgentNewReply = async ({ req, ticket }) => {
  */
 
 export const notifyAgentTicketAssigned = async ({ req, ticket }) => {
-  if (!ticket?.assignedAgent) {
+  try {
+    if (!ticket?.assignedAgent) {
+      return null;
+    }
+
+    return await createNotification({
+      req,
+
+      recipient: ticket.assignedAgent,
+
+      type: "agent_assigned",
+
+      title: "Ticket Assigned",
+
+      message: `Ticket ${ticket.ticketNumber} has been assigned to you.`,
+
+      ticket: ticket._id,
+
+      ticketNumber: ticket.ticketNumber,
+
+      metadata: {
+        source: "assignment",
+        target: "agent",
+        ticketId: String(ticket._id),
+        ticketNumber: ticket.ticketNumber,
+      },
+    });
+  } catch (error) {
+    console.error("Notify agent ticket assigned error:", error);
+
     return null;
   }
-
-  return createNotification({
-    req,
-
-    recipient: ticket.assignedAgent,
-
-    type: "agent_assigned",
-
-    title: "Ticket Assigned",
-
-    message: `Ticket ${ticket.ticketNumber} has been assigned to you.`,
-
-    ticket: ticket._id,
-
-    ticketNumber: ticket.ticketNumber,
-
-    metadata: {
-      source: "assignment",
-
-      target: "agent",
-    },
-  });
 };
 
 /*

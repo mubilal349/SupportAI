@@ -2,6 +2,8 @@ import mongoose from "mongoose";
 import Ticket from "../models/Ticket.js";
 import User from "../models/User.js";
 
+import { notifyAgentTicketAssigned } from "../services/notificationService.js";
+
 // ============================================================
 // GET ALL TICKETS - ADMIN
 // ============================================================
