@@ -82,6 +82,11 @@ const AdminSidebar = () => {
       path: "/admin/settings",
       icon: Settings,
     },
+    {
+      label: "Role & Permissions",
+      path: "/admin/role-permissions",
+      icon: ShieldCheck,
+    },
   ];
 
   // ============================================================

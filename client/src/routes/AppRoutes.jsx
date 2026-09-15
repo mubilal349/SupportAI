@@ -39,6 +39,8 @@ import AdminSettings from "../pages/admin/settings/Settings";
 
 import AdminNotifications from "../pages/admin/AdminNotifications";
 
+import AdminRolePermissions from "../pages/admin/AdminRolePermissions";
+
 // Customer
 import CustomerDashboard from "../pages/customer/Dashboard";
 import CustomerChat from "../pages/customer/Chat";
@@ -89,126 +91,554 @@ const AppRoutes = () => {
 
       <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
         <Route path="/admin" element={<AdminLayout />}>
-          <Route index element={<AdminDashboard />} />
-
-          {/* Users */}
-          <Route path="users" element={<AdminUsers />} />
-          <Route path="users/new" element={<AdminEditUser />} />
-          <Route path="users/:userId/edit" element={<AdminEditUser />} />
-          <Route path="users/:userId" element={<AdminUserDetails />} />
-
-          {/* Tickets */}
-          <Route path="tickets" element={<AdminTickets />} />
-          <Route path="tickets/:ticketId" element={<AdminTicketDetails />} />
-
-          {/* Agents */}
-          <Route path="agents" element={<AdminAgents />} />
-          <Route path="agents/:agentId/edit" element={<AdminAgentEdit />} />
-          <Route path="agents/:agentId" element={<AdminAgentDetails />} />
-
-          {/* Knowledge Base */}
-          <Route path="knowledge-base" element={<AdminKnowledgeBase />} />
-          <Route path="knowledge-base/new" element={<AdminArticleEditor />} />
           <Route
-            path="knowledge-base/:articleId"
-            element={<AdminArticleEditor />}
+            index
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="dashboard.view"
+              >
+                <AdminDashboard />
+              </ProtectedRoute>
+            }
           />
 
-          <Route path="canned-responses" element={<AdminCannedResponses />} />
+          {/* Users */}
+          <Route
+            path="users"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="users.manage"
+              >
+                <AdminUsers />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="users/new"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="users.manage"
+              >
+                <AdminEditUser />
+              </ProtectedRoute>
+            }
+          />
 
-          <Route path="sla" element={<AdminSLAManagement />} />
+          <Route
+            path="users/:userId/edit"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="users.manage"
+              >
+                <AdminEditUser />
+              </ProtectedRoute>
+            }
+          />
 
-          <Route path="analytics" element={<AdminAnalytics />} />
+          <Route
+            path="users/:userId"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="users.manage"
+              >
+                <AdminUserDetails />
+              </ProtectedRoute>
+            }
+          />
 
-          <Route path="audit-logs" element={<AdminAuditLogs />} />
+          {/* Tickets */}
 
-          <Route path="settings" element={<AdminSettings />} />
+          <Route
+            path="tickets"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="tickets.view"
+              >
+                <AdminTickets />
+              </ProtectedRoute>
+            }
+          />
 
-          <Route path="notifications" element={<AdminNotifications />} />
+          <Route
+            path="tickets/:ticketId"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="tickets.view"
+              >
+                <AdminTicketDetails />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Agents */}
+
+          <Route
+            path="agents"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="agents.manage"
+              >
+                <AdminAgents />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="agents/:agentId/edit"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="agents.manage"
+              >
+                <AdminAgentEdit />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="agents/:agentId"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="agents.manage"
+              >
+                <AdminAgentDetails />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Knowledge Base */}
+
+          <Route
+            path="knowledge-base"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="knowledge_base.manage"
+              >
+                <AdminKnowledgeBase />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="knowledge-base/new"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="knowledge_base.manage"
+              >
+                <AdminArticleEditor />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="knowledge-base/:articleId"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="knowledge_base.manage"
+              >
+                <AdminArticleEditor />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Canned Responses */}
+
+          <Route
+            path="canned-responses"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="canned_responses.view"
+              >
+                <AdminCannedResponses />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* SLA */}
+
+          <Route
+            path="sla"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="sla.manage"
+              >
+                <AdminSLAManagement />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Analytics */}
+
+          <Route
+            path="analytics"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="analytics.view"
+              >
+                <AdminAnalytics />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Audit Logs */}
+
+          <Route
+            path="audit-logs"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="audit_logs.view"
+              >
+                <AdminAuditLogs />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* System Settings */}
+
+          <Route
+            path="settings"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="settings.manage"
+              >
+                <AdminSettings />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Notifications */}
+
+          <Route
+            path="notifications"
+            element={
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <AdminNotifications />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route path="role-permissions" element={<AdminRolePermissions />} />
         </Route>
       </Route>
 
       {/* ========================================
-          AGENT ROUTES
-      ======================================== */}
+    AGENT ROUTES
+======================================== */}
 
       <Route element={<ProtectedRoute allowedRoles={["agent"]} />}>
         <Route path="/agent" element={<AgentLayout />}>
-          {/* /agent */}
-          <Route index element={<AgentDashboard />} />
+          {/* ========================================
+        DASHBOARD
+    ======================================== */}
 
-          {/* /agent/queue */}
-          <Route path="queue" element={<TicketQueue />} />
+          <Route
+            index
+            element={
+              <ProtectedRoute
+                allowedRoles={["agent"]}
+                requiredPermission="dashboard.view"
+              >
+                <AgentDashboard />
+              </ProtectedRoute>
+            }
+          />
 
-          {/* /agent/my-tickets */}
-          <Route path="my-tickets" element={<MyTickets />} />
+          {/* ========================================
+        TICKET QUEUE
+    ======================================== */}
 
-          {/* /agent/assigned-tickets */}
-          <Route path="assigned-tickets" element={<AssignedTickets />} />
+          <Route
+            path="queue"
+            element={
+              <ProtectedRoute
+                allowedRoles={["agent"]}
+                requiredPermission="tickets.view"
+              >
+                <TicketQueue />
+              </ProtectedRoute>
+            }
+          />
 
-          {/* /agent/tickets/:ticketId */}
-          <Route path="tickets/:ticketId" element={<AgentTicketDetails />} />
+          {/* ========================================
+        MY TICKETS
+    ======================================== */}
 
-          {/* escalted */}
-          <Route path="escalated" element={<EscalatedTickets />} />
+          <Route
+            path="my-tickets"
+            element={
+              <ProtectedRoute
+                allowedRoles={["agent"]}
+                requiredPermission="tickets.view"
+              >
+                <MyTickets />
+              </ProtectedRoute>
+            }
+          />
 
-          {/* analytics */}
-          <Route path="analytics" element={<AgentAnalytics />} />
+          {/* ========================================
+        ASSIGNED TICKETS
+    ======================================== */}
 
-          {/* /agent/profile */}
+          <Route
+            path="assigned-tickets"
+            element={
+              <ProtectedRoute
+                allowedRoles={["agent"]}
+                requiredPermission="tickets.view"
+              >
+                <AssignedTickets />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ========================================
+        TICKET DETAILS
+    ======================================== */}
+
+          <Route
+            path="tickets/:ticketId"
+            element={
+              <ProtectedRoute
+                allowedRoles={["agent"]}
+                requiredPermission="tickets.view"
+              >
+                <AgentTicketDetails />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ========================================
+        ESCALATED TICKETS
+    ======================================== */}
+
+          <Route
+            path="escalated"
+            element={
+              <ProtectedRoute
+                allowedRoles={["agent"]}
+                requiredPermission="tickets.view"
+              >
+                <EscalatedTickets />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ========================================
+        ANALYTICS
+    ======================================== */}
+
+          <Route
+            path="analytics"
+            element={
+              <ProtectedRoute
+                allowedRoles={["agent"]}
+                requiredPermission="analytics.limited"
+              >
+                <AgentAnalytics />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ========================================
+        PROFILE
+    ======================================== */}
+
           <Route path="profile" element={<AgentProfile />} />
 
-          {/* /customer/profile */}
+          {/* ========================================
+        CUSTOMER PROFILE
+    ======================================== */}
+
           <Route
             path="/agent/customers/:customerId"
-            element={<AgentCustomerProfile />}
+            element={
+              <ProtectedRoute
+                allowedRoles={["agent"]}
+                requiredPermission="tickets.view"
+              >
+                <AgentCustomerProfile />
+              </ProtectedRoute>
+            }
           />
         </Route>
       </Route>
 
       {/* ========================================
-          CUSTOMER / SUPPORT ROUTES
-      ======================================== */}
+    CUSTOMER / SUPPORT ROUTES
+======================================== */}
 
       <Route element={<ProtectedRoute allowedRoles={["customer"]} />}>
         <Route path="/support" element={<SupportLayout />}>
-          {/* /support */}
-          <Route index element={<CustomerDashboard />} />
+          {/* ========================================
+        DASHBOARD
+    ======================================== */}
 
-          {/* /support/chat */}
+          <Route
+            index
+            element={
+              <ProtectedRoute
+                allowedRoles={["customer"]}
+                requiredPermission="dashboard.view"
+              >
+                <CustomerDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ========================================
+        CHAT
+    ======================================== */}
+
           <Route path="chat" element={<CustomerChat />} />
 
-          {/* /support/conversations */}
+          {/* ========================================
+        CONVERSATIONS
+    ======================================== */}
+
           <Route path="conversations" element={<Conversations />} />
 
-          {/* /support/tickets */}
-          <Route path="tickets" element={<Tickets />} />
+          {/* ========================================
+        TICKETS
+    ======================================== */}
 
-          {/* /tickets/create */}
-          <Route path="tickets/create" element={<CreateTicket />} />
+          <Route
+            path="tickets"
+            element={
+              <ProtectedRoute
+                allowedRoles={["customer"]}
+                requiredPermission="tickets.view"
+              >
+                <Tickets />
+              </ProtectedRoute>
+            }
+          />
 
-          <Route path="tickets/create-form" element={<CreateTicketForm />} />
+          {/* ========================================
+        CREATE TICKET
+    ======================================== */}
 
-          {/* /support/tickets/create-ai */}
-          <Route path="tickets/create-ai" element={<AITicketCreation />} />
+          <Route
+            path="tickets/create"
+            element={
+              <ProtectedRoute
+                allowedRoles={["customer"]}
+                requiredPermission="tickets.create"
+              >
+                <CreateTicket />
+              </ProtectedRoute>
+            }
+          />
 
-          {/* /support/tickets/:id */}
-          <Route path="tickets/:id" element={<TicketDetails />} />
+          <Route
+            path="tickets/create-form"
+            element={
+              <ProtectedRoute
+                allowedRoles={["customer"]}
+                requiredPermission="tickets.create"
+              >
+                <CreateTicketForm />
+              </ProtectedRoute>
+            }
+          />
 
-          {/* /support/profile */}
+          {/* ========================================
+        AI TICKET CREATION
+    ======================================== */}
+
+          <Route
+            path="tickets/create-ai"
+            element={
+              <ProtectedRoute
+                allowedRoles={["customer"]}
+                requiredPermission="tickets.create"
+              >
+                <AITicketCreation />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ========================================
+        TICKET DETAILS
+    ======================================== */}
+
+          <Route
+            path="tickets/:id"
+            element={
+              <ProtectedRoute
+                allowedRoles={["customer"]}
+                requiredPermission="tickets.view"
+              >
+                <TicketDetails />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ========================================
+        PROFILE
+    ======================================== */}
+
           <Route path="profile" element={<CustomerProfile />} />
 
-          {/* /support/help */}
+          {/* ========================================
+        HELP
+    ======================================== */}
+
           <Route path="help" element={<Help />} />
 
-          {/* /support/analytics */}
-          <Route path="analytics" element={<CustomerAnalytics />} />
+          {/* ========================================
+        ANALYTICS
+    ======================================== */}
 
-          {/* /support/notifications */}
+          <Route
+            path="analytics"
+            element={
+              <ProtectedRoute
+                allowedRoles={["customer"]}
+                requiredPermission="analytics.own"
+              >
+                <CustomerAnalytics />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ========================================
+        NOTIFICATIONS
+    ======================================== */}
+
           <Route path="notifications" element={<Notifications />} />
 
-          {/* /support/knowledge-base */}
-          <Route path="knowledge-base" element={<KnowledgeBase />} />
+          {/* ========================================
+        KNOWLEDGE BASE
+    ======================================== */}
+
+          <Route
+            path="knowledge-base"
+            element={
+              <ProtectedRoute
+                allowedRoles={["customer"]}
+                requiredPermission="knowledge_base.view"
+              >
+                <KnowledgeBase />
+              </ProtectedRoute>
+            }
+          />
         </Route>
       </Route>
 

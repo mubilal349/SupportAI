@@ -21,6 +21,8 @@ import adminUserRoutes from "./routes/adminUserRoutes.js";
 import adminAgentRoutes from "./routes/adminAgentRoutes.js";
 import adminTicketRoutes from "./routes/adminTicketRoutes.js";
 
+import rolePermissionRoutes from "./routes/rolePermissionRoutes.js";
+
 // ==========
 //  AGENT ROUTES
 // ==========
@@ -57,6 +59,9 @@ app.use("/api/tickets", ticketRoutes);
 app.use("/api/customer", customerRoutes);
 app.use("/api/ai-tickets", aiTicketRoutes);
 app.use("/api/notifications", notificationRoutes);
+
+app.use("/api/role-permissions", rolePermissionRoutes);
+
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/knowledge-base", knowledgeBaseRoutes);
 
