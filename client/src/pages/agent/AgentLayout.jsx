@@ -26,7 +26,17 @@ const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const NOTIFICATIONS_URL = `${API_URL}/notifications`;
 
 const AgentLayout = () => {
+  // =========================================================
+  // SIDEBAR
+  // =========================================================
+
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // =========================================================
+  // SEARCH
+  // =========================================================
 
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -121,8 +131,6 @@ const AgentLayout = () => {
 
       setNotifications(Array.isArray(notificationList) ? notificationList : []);
 
-      // If your backend returns unreadCount
-      // from the main notification endpoint.
       if (typeof data.unreadCount === "number") {
         setUnreadCount(data.unreadCount);
       }
@@ -320,11 +328,6 @@ const AgentLayout = () => {
 
     socket.on("notification:deleted", handleNotificationDeleted);
 
-    // IMPORTANT:
-    // Do not disconnect the socket here.
-    // SupportAI uses the same socket for tickets,
-    // typing, rooms and notifications.
-
     return () => {
       socket.off("notification:new", handleNewNotification);
 
@@ -465,20 +468,13 @@ const AgentLayout = () => {
 
     setNotificationOpen(false);
 
-    // New ticket = queue
-    //
-    // This is intentional because your
-    // business rule says opening a ticket
-    // must NOT automatically assign it.
     if (notification.type === "ticket_created") {
       navigate("/agent/queue");
       return;
     }
 
-    // Ticket-specific notification
     if (notification.ticket) {
       navigate(`/agent/tickets/${notification.ticket}`);
-
       return;
     }
 
@@ -566,11 +562,8 @@ const AgentLayout = () => {
     const difference = now.getTime() - notificationDate.getTime();
 
     const seconds = Math.floor(difference / 1000);
-
     const minutes = Math.floor(seconds / 60);
-
     const hours = Math.floor(minutes / 60);
-
     const days = Math.floor(hours / 24);
 
     if (seconds < 60) {
@@ -614,13 +607,16 @@ const AgentLayout = () => {
     };
   }, [notificationOpen]);
 
+  // =========================================================
+  // RENDER
+  // =========================================================
+
   return (
     <div
       className="
-        flex
-        min-h-screen
+        h-screen
         w-full
-        overflow-x-hidden
+        overflow-hidden
         bg-[#050b18]
         text-slate-100
       "
@@ -632,6 +628,8 @@ const AgentLayout = () => {
       <AgentSidebar
         mobileOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((previous) => !previous)}
       />
 
       {/* =====================================================
@@ -639,13 +637,20 @@ const AgentLayout = () => {
       ===================================================== */}
 
       <div
-        className="
+        className={`
           flex
+          h-screen
           min-w-0
-          flex-1
           flex-col
-          overflow-x-hidden
-        "
+          overflow-hidden
+          transition-[margin]
+          duration-300
+          ease-in-out
+
+          lg:ml-[356px]
+
+          ${sidebarCollapsed ? "lg:ml-[88px]" : "lg:ml-[356px]"}
+        `}
       >
         {/* ===================================================
             TOP HEADER
@@ -791,9 +796,7 @@ const AgentLayout = () => {
                 sm:gap-3
               "
             >
-              {/* =============================================
-                  SEARCH
-              ============================================== */}
+              {/* SEARCH */}
 
               {searchOpen ? (
                 <form
@@ -891,13 +894,9 @@ const AgentLayout = () => {
                 </button>
               )}
 
-              {/* =============================================
-                  NOTIFICATIONS
-              ============================================== */}
+              {/* NOTIFICATIONS */}
 
               <div className="relative" data-agent-notifications>
-                {/* BELL */}
-
                 <button
                   type="button"
                   aria-label="Notifications"
@@ -922,8 +921,6 @@ const AgentLayout = () => {
                   "
                 >
                   <Bell size={20} />
-
-                  {/* REAL MONGODB UNREAD COUNT */}
 
                   {unreadCount > 0 && (
                     <span
@@ -951,9 +948,7 @@ const AgentLayout = () => {
                   )}
                 </button>
 
-                {/* ===========================================
-                    NOTIFICATION DROPDOWN
-                ============================================ */}
+                {/* NOTIFICATION DROPDOWN */}
 
                 {notificationOpen && (
                   <div
@@ -974,7 +969,7 @@ const AgentLayout = () => {
                       shadow-black/50
                     "
                   >
-                    {/* DROPDOWN HEADER */}
+                    {/* HEADER */}
 
                     <div
                       className="
@@ -1031,7 +1026,7 @@ const AgentLayout = () => {
                       )}
                     </div>
 
-                    {/* NOTIFICATION LIST */}
+                    {/* LIST */}
 
                     <div
                       className="
@@ -1088,18 +1083,18 @@ const AgentLayout = () => {
                             <div
                               key={notification._id}
                               className={`
-                                    group
-                                    relative
-                                    border-b
-                                    border-slate-800/70
-                                    transition
-                                    hover:bg-white/[0.025]
-                                    ${
-                                      !notification.isRead
-                                        ? "bg-blue-500/[0.035]"
-                                        : ""
-                                    }
-                                  `}
+                                  group
+                                  relative
+                                  border-b
+                                  border-slate-800/70
+                                  transition
+                                  hover:bg-white/[0.025]
+                                  ${
+                                    !notification.isRead
+                                      ? "bg-blue-500/[0.035]"
+                                      : ""
+                                  }
+                                `}
                             >
                               <button
                                 type="button"
@@ -1107,48 +1102,44 @@ const AgentLayout = () => {
                                   handleNotificationClick(notification)
                                 }
                                 className="
-                                      flex
-                                      w-full
-                                      gap-3
-                                      px-4
-                                      py-3.5
-                                      text-left
-                                    "
+                                    flex
+                                    w-full
+                                    gap-3
+                                    px-4
+                                    py-3.5
+                                    text-left
+                                  "
                               >
-                                {/* ICON */}
-
                                 <div
                                   className={`
-                                        mt-0.5
-                                        flex
-                                        h-9
-                                        w-9
-                                        shrink-0
-                                        items-center
-                                        justify-center
-                                        rounded-xl
-                                        ${getNotificationIconStyle(
-                                          notification.type,
-                                        )}
-                                      `}
+                                      mt-0.5
+                                      flex
+                                      h-9
+                                      w-9
+                                      shrink-0
+                                      items-center
+                                      justify-center
+                                      rounded-xl
+                                      ${getNotificationIconStyle(
+                                        notification.type,
+                                      )}
+                                    `}
                                 >
                                   <Icon size={17} />
                                 </div>
-
-                                {/* CONTENT */}
 
                                 <div className="min-w-0 flex-1 pr-4">
                                   <div className="flex items-start gap-2">
                                     <p
                                       className={`
-                                            line-clamp-1
-                                            text-sm
-                                            ${
-                                              notification.isRead
-                                                ? "font-medium text-slate-300"
-                                                : "font-semibold text-white"
-                                            }
-                                          `}
+                                          line-clamp-1
+                                          text-sm
+                                          ${
+                                            notification.isRead
+                                              ? "font-medium text-slate-300"
+                                              : "font-semibold text-white"
+                                          }
+                                        `}
                                     >
                                       {notification.title}
                                     </p>
@@ -1156,37 +1147,37 @@ const AgentLayout = () => {
                                     {!notification.isRead && (
                                       <span
                                         className="
-                                              mt-1.5
-                                              h-1.5
-                                              w-1.5
-                                              shrink-0
-                                              rounded-full
-                                              bg-blue-500
-                                            "
+                                            mt-1.5
+                                            h-1.5
+                                            w-1.5
+                                            shrink-0
+                                            rounded-full
+                                            bg-blue-500
+                                          "
                                       />
                                     )}
                                   </div>
 
                                   <p
                                     className="
-                                          mt-1
-                                          line-clamp-2
-                                          text-xs
-                                          leading-5
-                                          text-slate-500
-                                        "
+                                        mt-1
+                                        line-clamp-2
+                                        text-xs
+                                        leading-5
+                                        text-slate-500
+                                      "
                                   >
                                     {notification.message}
                                   </p>
 
                                   <div
                                     className="
-                                          mt-1.5
-                                          flex
-                                          flex-wrap
-                                          items-center
-                                          gap-2
-                                        "
+                                        mt-1.5
+                                        flex
+                                        flex-wrap
+                                        items-center
+                                        gap-2
+                                      "
                                   >
                                     {notification.ticketNumber && (
                                       <span className="text-[10px] font-medium text-slate-600">
@@ -1203,8 +1194,6 @@ const AgentLayout = () => {
                                 </div>
                               </button>
 
-                              {/* DELETE */}
-
                               <button
                                 type="button"
                                 onClick={() =>
@@ -1212,18 +1201,18 @@ const AgentLayout = () => {
                                 }
                                 aria-label="Delete notification"
                                 className="
-                                      absolute
-                                      right-2
-                                      top-2
-                                      rounded-lg
-                                      p-1.5
-                                      text-slate-600
-                                      opacity-0
-                                      transition
-                                      hover:bg-red-500/10
-                                      hover:text-red-400
-                                      group-hover:opacity-100
-                                    "
+                                    absolute
+                                    right-2
+                                    top-2
+                                    rounded-lg
+                                    p-1.5
+                                    text-slate-600
+                                    opacity-0
+                                    transition
+                                    hover:bg-red-500/10
+                                    hover:text-red-400
+                                    group-hover:opacity-100
+                                  "
                               >
                                 <Trash2 size={13} />
                               </button>
@@ -1248,7 +1237,6 @@ const AgentLayout = () => {
                           type="button"
                           onClick={() => {
                             setNotificationOpen(false);
-
                             navigate("/agent/notifications");
                           }}
                           className="
@@ -1271,9 +1259,7 @@ const AgentLayout = () => {
                 )}
               </div>
 
-              {/* =============================================
-                  ACTION
-              ============================================== */}
+              {/* ACTION */}
 
               <Link
                 to="/agent/queue"
@@ -1309,9 +1295,11 @@ const AgentLayout = () => {
 
         <main
           className="
+            min-h-0
             min-w-0
             flex-1
             overflow-x-hidden
+            overflow-y-auto
           "
         >
           <Outlet />

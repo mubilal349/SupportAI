@@ -7,13 +7,10 @@ import {
   ChevronRight,
   ClipboardList,
   BarChart3,
-  Circle,
   LayoutDashboard,
-  Loader2,
   Settings,
   ShieldAlert,
   Ticket,
-  UserRound,
   X,
 } from "lucide-react";
 
@@ -141,6 +138,7 @@ export default function AgentSidebar({
   );
 
   const [availabilityOpen, setAvailabilityOpen] = useState(false);
+
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
 
   const availabilityRef = useRef(null);
@@ -287,6 +285,12 @@ export default function AgentSidebar({
 
       {/* ===================================================
           SIDEBAR
+          
+          ONLY POSITIONING CHANGED:
+          fixed at all screen sizes.
+          
+          The sidebar will remain in one place while
+          the page content scrolls.
       =================================================== */}
 
       <aside
@@ -311,9 +315,7 @@ export default function AgentSidebar({
 
           ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
 
-          lg:sticky
-          lg:top-0
-          lg:z-30
+          lg:z-40
           lg:h-screen
           lg:max-w-none
           lg:translate-x-0
@@ -363,6 +365,7 @@ export default function AgentSidebar({
             `}
           >
             {/* LOGO */}
+
             <div
               className="
                 flex
@@ -383,6 +386,7 @@ export default function AgentSidebar({
             </div>
 
             {/* BRAND TEXT */}
+
             {!collapsed && (
               <div className="min-w-0">
                 <h1
@@ -440,6 +444,7 @@ export default function AgentSidebar({
               `}
             >
               {/* STATUS DOT */}
+
               <span
                 className={`
                   h-2.5
@@ -456,6 +461,7 @@ export default function AgentSidebar({
               />
 
               {/* STATUS TEXT */}
+
               {!collapsed && (
                 <span
                   className={`
@@ -470,6 +476,7 @@ export default function AgentSidebar({
               )}
 
               {/* CHEVRON */}
+
               {!collapsed && (
                 <ChevronDown
                   size={14}
@@ -803,10 +810,12 @@ export default function AgentSidebar({
             className={`
               flex
               items-center
+
               ${collapsed ? "justify-center" : "gap-3"}
             `}
           >
             {/* AVATAR */}
+
             <div
               className="
                 flex
@@ -841,6 +850,7 @@ export default function AgentSidebar({
             </div>
 
             {/* PROFILE DETAILS */}
+
             {!collapsed && (
               <>
                 <div className="min-w-0 flex-1">
