@@ -15,6 +15,8 @@ import {
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useState } from "react";
 
+import BackToTop from "../../components/admin/BackToTop";
+
 import { useAuth } from "../../context/AuthContext";
 
 const SupportLayout = () => {
@@ -506,6 +508,8 @@ const SupportLayout = () => {
 
         <Outlet />
       </main>
+
+      <BackToTop />
     </div>
   );
 };

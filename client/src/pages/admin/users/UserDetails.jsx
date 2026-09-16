@@ -1,6 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-
 import {
   ArrowLeft,
   Mail,
@@ -21,17 +20,34 @@ import {
   RefreshCw,
   AlertTriangle,
   X,
+  CheckCircle2,
+  CircleDot,
+  Clock,
+  UserRound,
+  Star,
+  Activity,
+  PlusCircle,
+  ArrowRight,
+  RotateCcw,
+  ExternalLink,
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 import {
   getAdminUser,
   getAdminUserTicketStats,
+  getAdminCustomerTickets,
+  getAdminCustomerActivity,
   updateAdminUserStatus,
 } from "../../../services/adminUserService";
 
-const API_SERVER = (
-  import.meta.env.VITE_API_URL || "http://localhost:8000/api"
-).replace(/\/api$/, "");
+const API_SERVER = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+
+// ============================================================
+// HELPERS
+// ============================================================
 
 const getAvatarUrl = (avatar) => {
   if (!avatar) return null;
@@ -40,35 +56,147 @@ const getAvatarUrl = (avatar) => {
     return avatar;
   }
 
-  return `${API_SERVER}${avatar.startsWith("/") ? avatar : `/${avatar}`}`;
+  const baseUrl = API_SERVER.replace("/api", "");
+
+  return `${baseUrl}${avatar.startsWith("/") ? "" : "/"}${avatar}`;
+};
+
+const formatDate = (date) => {
+  if (!date) return "—";
+
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "—";
+  }
+
+  return parsed.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+};
+
+const formatDateTime = (date) => {
+  if (!date) return "—";
+
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "—";
+  }
+
+  return parsed.toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
+
+const getRelativeTime = (date) => {
+  if (!date) return "";
+
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  const diff = Date.now() - parsed.getTime();
+
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7) return `${days}d ago`;
+
+  return formatDate(date);
 };
 
 // ============================================================
-// ROLE STYLES
+// STYLE HELPERS
 // ============================================================
 
 const roleStyles = {
-  customer: "border-slate-500/10 bg-slate-500/10 text-slate-400",
-
-  agent: "border-blue-500/10 bg-blue-500/10 text-blue-400",
-
-  admin: "border-purple-500/10 bg-purple-500/10 text-purple-400",
+  customer: {
+    badge: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+    label: "Customer",
+  },
+  agent: {
+    badge: "bg-violet-500/10 text-violet-400 border-violet-500/20",
+    label: "Agent",
+  },
+  admin: {
+    badge: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    label: "Administrator",
+  },
 };
-
-// ============================================================
-// STATUS STYLES
-// ============================================================
 
 const statusStyles = {
-  active: "border-emerald-500/10 bg-emerald-500/10 text-emerald-400",
+  active: {
+    badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    dot: "bg-emerald-400",
+    label: "Active",
+  },
+  inactive: {
+    badge: "bg-slate-500/10 text-slate-400 border-slate-500/20",
+    dot: "bg-slate-400",
+    label: "Inactive",
+  },
+  suspended: {
+    badge: "bg-red-500/10 text-red-400 border-red-500/20",
+    dot: "bg-red-400",
+    label: "Suspended",
+  },
+};
 
-  inactive: "border-slate-500/10 bg-slate-500/10 text-slate-400",
+const ticketStatusStyles = {
+  open: {
+    badge: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+    label: "Open",
+    icon: CircleDot,
+  },
+  pending: {
+    badge: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    label: "Pending",
+    icon: Clock,
+  },
+  "in-progress": {
+    badge: "bg-violet-500/10 text-violet-400 border-violet-500/20",
+    label: "In Progress",
+    icon: Activity,
+  },
+  waiting: {
+    badge: "bg-orange-500/10 text-orange-400 border-orange-500/20",
+    label: "Waiting",
+    icon: Clock3,
+  },
+  resolved: {
+    badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    label: "Resolved",
+    icon: CheckCircle2,
+  },
+  closed: {
+    badge: "bg-slate-500/10 text-slate-400 border-slate-500/20",
+    label: "Closed",
+    icon: CheckCircle2,
+  },
+};
 
-  suspended: "border-red-500/10 bg-red-500/10 text-red-400",
+const priorityStyles = {
+  low: "bg-slate-500/10 text-slate-400 border-slate-500/20",
+  medium: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+  high: "bg-orange-500/10 text-orange-400 border-orange-500/20",
+  urgent: "bg-red-500/10 text-red-400 border-red-500/20",
 };
 
 // ============================================================
-// USER DETAILS
+// COMPONENT
 // ============================================================
 
 const UserDetails = () => {
@@ -76,7 +204,7 @@ const UserDetails = () => {
   const { userId } = useParams();
 
   // ==========================================================
-  // STATE
+  // USER STATE
   // ==========================================================
 
   const [user, setUser] = useState(null);
@@ -92,34 +220,59 @@ const UserDetails = () => {
   });
 
   const [loading, setLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  // ==========================================================
+  // CUSTOMER MANAGEMENT STATE
+  // ==========================================================
+
+  const [customerTickets, setCustomerTickets] = useState([]);
+  const [customerActivity, setCustomerActivity] = useState([]);
+
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [activityLoading, setActivityLoading] = useState(false);
+
+  const [ticketPage, setTicketPage] = useState(1);
+  const [ticketPagination, setTicketPagination] = useState({
+    page: 1,
+    limit: 10,
+    total: 0,
+    pages: 1,
+  });
+
+  // ==========================================================
+  // ACTION STATE
+  // ==========================================================
 
   const [actionLoading, setActionLoading] = useState(false);
 
-  const [error, setError] = useState("");
-
-  const [statusModal, setStatusModal] = useState(false);
+  const [statusModal, setStatusModal] = useState({
+    open: false,
+    status: "",
+  });
 
   // ==========================================================
   // FETCH USER
   // ==========================================================
 
   const fetchUser = useCallback(async () => {
+    if (!userId) return;
+
     try {
       setLoading(true);
       setError("");
 
       const response = await getAdminUser(userId);
 
-      if (!response?.success) {
-        throw new Error(response?.message || "Failed to load user.");
-      }
-
-      setUser(response.user || null);
+      setUser(response?.user || response?.data || response);
     } catch (err) {
-      console.error("ADMIN USER DETAILS ERROR:", err);
+      console.error("Failed to fetch user:", err);
 
       setError(
-        err?.response?.data?.message || err?.message || "Failed to load user.",
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to load user details.",
       );
     } finally {
       setLoading(false);
@@ -127,24 +280,107 @@ const UserDetails = () => {
   }, [userId]);
 
   // ==========================================================
-  // FETCH TICKET STATISTICS
+  // FETCH TICKET STATS
   // ==========================================================
 
   const fetchTicketStats = useCallback(async () => {
+    if (!userId) return;
+
     try {
+      setStatsLoading(true);
+
       const response = await getAdminUserTicketStats(userId);
 
-      if (response?.success && response?.stats) {
-        setTicketStats(response.stats);
-      }
+      setTicketStats(
+        response?.stats ||
+          response?.ticketStats ||
+          response?.data ||
+          response || {
+            totalTickets: 0,
+            openTickets: 0,
+            inProgressTickets: 0,
+            waitingTickets: 0,
+            resolvedTickets: 0,
+            closedTickets: 0,
+            escalatedTickets: 0,
+          },
+      );
     } catch (err) {
-      console.error("ADMIN USER TICKET STATS ERROR:", err);
-
-      // Do not block the entire
-      // user profile if ticket stats
-      // fail.
+      console.error("Failed to fetch ticket stats:", err);
+    } finally {
+      setStatsLoading(false);
     }
   }, [userId]);
+
+  // ==========================================================
+  // FETCH CUSTOMER TICKETS
+  // ==========================================================
+
+  const fetchCustomerTickets = useCallback(async () => {
+    if (!userId || user?.role !== "customer") return;
+
+    try {
+      setTicketsLoading(true);
+
+      const response = await getAdminCustomerTickets(userId, {
+        page: ticketPage,
+        limit: 10,
+      });
+
+      setCustomerTickets(
+        response?.tickets || response?.data || response?.results || [],
+      );
+
+      if (response?.pagination) {
+        setTicketPagination({
+          page: Number(response.pagination.page) || ticketPage,
+          limit: Number(response.pagination.limit) || 10,
+          total: Number(response.pagination.total) || 0,
+          pages:
+            Number(response.pagination.pages) ||
+            Number(response.pagination.totalPages) ||
+            1,
+        });
+      } else {
+        setTicketPagination((prev) => ({
+          ...prev,
+          page: ticketPage,
+          total: response?.total || prev.total,
+          pages: response?.pages || prev.pages,
+        }));
+      }
+    } catch (err) {
+      console.error("Failed to fetch customer tickets:", err);
+
+      setCustomerTickets([]);
+    } finally {
+      setTicketsLoading(false);
+    }
+  }, [userId, user?.role, ticketPage]);
+
+  // ==========================================================
+  // FETCH CUSTOMER ACTIVITY
+  // ==========================================================
+
+  const fetchCustomerActivity = useCallback(async () => {
+    if (!userId || user?.role !== "customer") return;
+
+    try {
+      setActivityLoading(true);
+
+      const response = await getAdminCustomerActivity(userId, {
+        limit: 30,
+      });
+
+      setCustomerActivity(response?.activities || response?.data || []);
+    } catch (err) {
+      console.error("Failed to fetch customer activity:", err);
+
+      setCustomerActivity([]);
+    } finally {
+      setActivityLoading(false);
+    }
+  }, [userId, user?.role]);
 
   // ==========================================================
   // INITIAL LOAD
@@ -156,25 +392,39 @@ const UserDetails = () => {
   }, [fetchUser, fetchTicketStats]);
 
   // ==========================================================
-  // STATUS CHANGE
+  // CUSTOMER DATA LOAD
   // ==========================================================
 
-  const handleStatusChange = async (newStatus) => {
+  useEffect(() => {
+    if (user?.role !== "customer") return;
+
+    fetchCustomerTickets();
+    fetchCustomerActivity();
+  }, [user?.role, fetchCustomerTickets, fetchCustomerActivity]);
+
+  // ==========================================================
+  // STATUS UPDATE
+  // ==========================================================
+
+  const handleStatusChange = async () => {
+    if (!statusModal.status || !userId) return;
+
     try {
       setActionLoading(true);
-      setError("");
 
-      const response = await updateAdminUserStatus(userId, newStatus);
+      await updateAdminUserStatus(userId, statusModal.status);
 
-      if (!response?.success) {
-        throw new Error(response?.message || "Failed to update user status.");
-      }
+      setUser((prev) => ({
+        ...prev,
+        status: statusModal.status,
+      }));
 
-      setStatusModal(false);
-
-      await fetchUser();
+      setStatusModal({
+        open: false,
+        status: "",
+      });
     } catch (err) {
-      console.error("ADMIN USER STATUS ERROR:", err);
+      console.error("Failed to update status:", err);
 
       setError(
         err?.response?.data?.message ||
@@ -187,55 +437,130 @@ const UserDetails = () => {
   };
 
   // ==========================================================
-  // HELPERS
+  // REFRESH
   // ==========================================================
 
-  const getInitials = (name) => {
-    if (!name) {
-      return "U";
-    }
-
-    return name
-      .split(" ")
-      .map((word) => word[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase();
+  const handleRefresh = async () => {
+    await Promise.all([
+      fetchUser(),
+      fetchTicketStats(),
+      user?.role === "customer" ? fetchCustomerTickets() : Promise.resolve(),
+      user?.role === "customer" ? fetchCustomerActivity() : Promise.resolve(),
+    ]);
   };
 
-  const formatDate = (date) => {
-    if (!date) {
-      return "—";
-    }
+  // ==========================================================
+  // RESOLUTION RATE
+  // ==========================================================
 
-    return new Date(date).toLocaleDateString("en-US", {
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    });
+  const resolutionRate = useMemo(() => {
+    const total = Number(ticketStats.totalTickets) || 0;
+
+    const resolved = Number(ticketStats.resolvedTickets) || 0;
+
+    if (!total) return 0;
+
+    return Math.round((resolved / total) * 100);
+  }, [ticketStats]);
+
+  // ==========================================================
+  // CUSTOMER RATING
+  // ==========================================================
+
+  const getTicketRating = (ticket) => {
+    return ticket?.satisfaction?.rating ?? ticket?.customerRating ?? null;
   };
 
-  const formatDateTime = (date) => {
-    if (!date) {
-      return "Never";
-    }
+  // ==========================================================
+  // TICKET STATUS
+  // ==========================================================
 
-    return new Date(date).toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
+  const getTicketStatus = (status) => {
+    return (
+      ticketStatusStyles[status] || {
+        badge: "bg-slate-500/10 text-slate-400 border-slate-500/20",
+        label: status || "Unknown",
+        icon: CircleDot,
+      }
+    );
   };
 
-  const resolutionRate =
-    ticketStats.totalTickets > 0
-      ? (
-          (ticketStats.resolvedTickets / ticketStats.totalTickets) *
-          100
-        ).toFixed(1)
-      : "0.0";
+  // ==========================================================
+  // ACTIVITY ICON
+  // ==========================================================
+
+  const getActivityIcon = (activity) => {
+    const type = activity?.type || activity?.action || activity?.event || "";
+
+    const normalized = String(type).toLowerCase();
+
+    if (
+      normalized.includes("created") ||
+      normalized.includes("ticket_created")
+    ) {
+      return PlusCircle;
+    }
+
+    if (normalized.includes("status") || normalized.includes("changed")) {
+      return ArrowRight;
+    }
+
+    if (normalized.includes("rating") || normalized.includes("feedback")) {
+      return Star;
+    }
+
+    if (normalized.includes("reply") || normalized.includes("message")) {
+      return MessageSquare;
+    }
+
+    if (normalized.includes("resolved")) {
+      return CheckCircle2;
+    }
+
+    if (normalized.includes("reopened")) {
+      return RotateCcw;
+    }
+
+    return Activity;
+  };
+
+  // ==========================================================
+  // ACTIVITY TITLE
+  // ==========================================================
+
+  const getActivityTitle = (activity) => {
+    if (activity?.title) return activity.title;
+
+    const type = activity?.type || activity?.action || activity?.event || "";
+
+    const normalized = String(type).toLowerCase();
+
+    if (normalized.includes("ticket_created")) {
+      return "Created a ticket";
+    }
+
+    if (normalized.includes("status_changed")) {
+      return "Ticket status changed";
+    }
+
+    if (normalized.includes("rating")) {
+      return "Submitted a ticket rating";
+    }
+
+    if (normalized.includes("reply")) {
+      return "Replied to a ticket";
+    }
+
+    if (normalized.includes("resolved")) {
+      return "Ticket resolved";
+    }
+
+    if (normalized.includes("reopened")) {
+      return "Ticket reopened";
+    }
+
+    return activity?.description || "Customer activity";
+  };
 
   // ==========================================================
   // LOADING
@@ -243,323 +568,611 @@ const UserDetails = () => {
 
   if (loading) {
     return (
-      <div className="min-h-full px-4 py-6 sm:px-6 lg:px-8">
-        <div className="animate-pulse">
-          <div className="mb-5 h-5 w-32 rounded bg-slate-800" />
-
-          <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
-            <div className="space-y-6">
-              <div className="h-40 rounded-2xl border border-slate-800 bg-[#0a1222]" />
-
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div className="h-32 rounded-2xl border border-slate-800 bg-[#0a1222]" />
-                <div className="h-32 rounded-2xl border border-slate-800 bg-[#0a1222]" />
-                <div className="h-32 rounded-2xl border border-slate-800 bg-[#0a1222]" />
-              </div>
-            </div>
-
-            <div className="h-[420px] rounded-2xl border border-slate-800 bg-[#0a1222]" />
-          </div>
+      <div className="min-h-screen bg-[#050b18] text-white flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+          <p className="text-sm text-slate-400">Loading user details...</p>
         </div>
       </div>
     );
   }
 
   // ==========================================================
-  // ERROR / USER NOT FOUND
+  // USER NOT FOUND
   // ==========================================================
 
-  if (error && !user) {
+  if (!user) {
     return (
-      <div className="min-h-full px-4 py-6 sm:px-6 lg:px-8">
+      <div className="min-h-screen bg-[#050b18] text-white p-6">
         <button
-          type="button"
           onClick={() => navigate("/admin/users")}
-          className="mb-5 inline-flex items-center gap-2 text-sm text-slate-500 transition hover:text-white"
+          className="inline-flex items-center gap-2 text-slate-400 hover:text-white transition"
         >
-          <ArrowLeft size={16} />
+          <ArrowLeft className="w-4 h-4" />
           Back to Users
         </button>
 
-        <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-slate-800 bg-[#0a1222]">
-          <div className="max-w-md px-6 text-center">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/10 text-red-400">
-              <AlertTriangle size={24} />
-            </div>
-
-            <h2 className="mt-5 text-base font-semibold text-white">
-              Unable to load user
-            </h2>
-
-            <p className="mt-2 text-xs leading-5 text-slate-600">{error}</p>
-
-            <button
-              type="button"
-              onClick={() => {
-                fetchUser();
-                fetchTicketStats();
-              }}
-              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-blue-500"
-            >
-              <RefreshCw size={14} />
-              Try Again
-            </button>
-          </div>
+        <div className="mt-10 rounded-xl border border-red-500/20 bg-red-500/5 p-6 text-center">
+          <AlertTriangle className="w-8 h-8 mx-auto mb-3 text-red-400" />
+          <h2 className="text-lg font-semibold">User not found</h2>
+          <p className="mt-2 text-sm text-slate-400">
+            The requested user could not be found.
+          </p>
         </div>
       </div>
     );
   }
 
-  if (!user) {
-    return null;
-  }
+  const role = roleStyles[user.role] || roleStyles.customer;
 
-  // ==========================================================
-  // MAIN UI
-  // ==========================================================
+  const status = statusStyles[user.status] || statusStyles.inactive;
+
+  // ============================================================
+  // RENDER
+  // ============================================================
 
   return (
-    <div className="min-h-full px-4 py-6 sm:px-6 lg:px-8">
-      {/* ======================================================
-          BACK
-      ====================================================== */}
+    <div className="min-h-screen bg-[#050b18] text-white p-4 md:p-6">
+      <div className="max-w-[1600px] mx-auto space-y-6">
+        {/* ======================================================
+            TOP BAR
+        ====================================================== */}
 
-      <button
-        type="button"
-        onClick={() => navigate("/admin/users")}
-        className="mb-5 inline-flex items-center gap-2 text-sm text-slate-500 transition hover:text-white"
-      >
-        <ArrowLeft size={16} />
-        Back to Users
-      </button>
-
-      {/* ======================================================
-          ERROR
-      ====================================================== */}
-
-      {error && (
-        <div className="mb-5 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
-
-          <p className="flex-1 text-xs text-red-400">{error}</p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <button
+            onClick={() => navigate("/admin/users")}
+            className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-white transition w-fit"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Users
+          </button>
 
           <button
-            type="button"
-            onClick={() => setError("")}
-            className="text-slate-600 transition hover:text-white"
+            onClick={handleRefresh}
+            disabled={
+              loading || statsLoading || ticketsLoading || activityLoading
+            }
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-slate-700 bg-[#0a1222] text-sm text-slate-300 hover:text-white hover:border-slate-600 transition disabled:opacity-50"
           >
-            <X size={15} />
+            <RefreshCw
+              className={`w-4 h-4 ${
+                loading || statsLoading || ticketsLoading || activityLoading
+                  ? "animate-spin"
+                  : ""
+              }`}
+            />
+            Refresh
           </button>
         </div>
-      )}
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
-        {/* ====================================================
-            MAIN COLUMN
-        ==================================================== */}
+        {/* ======================================================
+            ERROR
+        ====================================================== */}
 
-        <div className="space-y-6">
-          {/* ==================================================
-              USER HEADER
-          ================================================== */}
+        {error && (
+          <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3">
+            <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5" />
 
-          <section className="rounded-2xl border border-slate-800 bg-[#0a1222] p-5 sm:p-6">
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-w-0 items-center gap-4">
-                {user.avatar ? (
-                  <img
-                    src={getAvatarUrl(user.avatar)}
-                    alt={user.name || "User"}
-                    className="h-16 w-16 shrink-0 rounded-2xl object-cover"
-                  />
-                ) : (
-                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-blue-500/10 text-lg font-bold text-blue-400">
-                    {getInitials(user.name)}
-                  </div>
-                )}
+            <div className="flex-1">
+              <p className="text-sm text-red-300">{error}</p>
+            </div>
 
-                <div className="min-w-0">
-                  <h1 className="truncate text-xl font-bold text-white">
-                    {user.name}
+            <button
+              onClick={() => setError("")}
+              className="text-slate-500 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* ======================================================
+            USER HEADER
+        ====================================================== */}
+
+        <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-5 md:p-6">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+            <div className="flex items-center gap-4 min-w-0">
+              {user.avatar ? (
+                <img
+                  src={getAvatarUrl(user.avatar)}
+                  alt={user.name || "User"}
+                  className="w-20 h-20 rounded-2xl object-cover border border-slate-700"
+                />
+              ) : (
+                <div className="w-20 h-20 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center text-2xl font-bold text-slate-300">
+                  {user.name?.charAt(0)?.toUpperCase() || "U"}
+                </div>
+              )}
+
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-2xl font-bold truncate">
+                    {user.name || "Unnamed User"}
                   </h1>
 
-                  <p className="mt-1 truncate text-sm text-slate-500">
-                    {user.email}
-                  </p>
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium border ${role.badge}`}
+                  >
+                    {role.label}
+                  </span>
 
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${status.badge}`}
+                  >
                     <span
-                      className={`rounded-lg border px-2.5 py-1 text-xs font-medium capitalize ${
-                        roleStyles[user.role] || roleStyles.customer
-                      }`}
-                    >
-                      {user.role}
-                    </span>
+                      className={`w-1.5 h-1.5 rounded-full ${status.dot}`}
+                    />
+                    {status.label}
+                  </span>
+                </div>
 
-                    <span
-                      className={`rounded-lg border px-2.5 py-1 text-xs font-medium capitalize ${
-                        statusStyles[user.status] || statusStyles.inactive
-                      }`}
-                    >
-                      {user.status}
+                <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-slate-400">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Mail className="w-4 h-4" />
+                    {user.email || "No email"}
+                  </span>
+
+                  {user.phone && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Phone className="w-4 h-4" />
+                      {user.phone}
                     </span>
-                  </div>
+                  )}
                 </div>
               </div>
+            </div>
 
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={() => navigate(`/admin/users/${user._id}/edit`)}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-800 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-900 hover:text-white"
-                >
-                  <Edit size={16} />
-                  Edit User
-                </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => navigate(`/admin/users/${user._id}/edit`)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium transition"
+              >
+                <Edit className="w-4 h-4" />
+                Edit User
+              </button>
 
-                <button
-                  type="button"
-                  onClick={() => setStatusModal(true)}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-800 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-slate-900 hover:text-white"
-                >
-                  {user.status === "active" ? (
-                    <UserX size={16} />
-                  ) : (
-                    <UserCheck size={16} />
-                  )}
-                  Status
-                </button>
+              <button
+                onClick={() =>
+                  setStatusModal({
+                    open: true,
+                    status: user.status,
+                  })
+                }
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-slate-700 bg-slate-800/60 hover:bg-slate-700 text-sm font-medium transition"
+              >
+                {user.status === "active" ? (
+                  <UserX className="w-4 h-4" />
+                ) : (
+                  <UserCheck className="w-4 h-4" />
+                )}
+                Change Status
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ======================================================
+            CUSTOMER PROFILE SUMMARY
+        ====================================================== */}
+
+        {user.role === "customer" && (
+          <div className="rounded-2xl border border-blue-500/10 bg-gradient-to-r from-blue-500/5 to-violet-500/5 p-5">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                <UserRound className="w-5 h-5 text-blue-400" />
+              </div>
+
+              <div>
+                <h2 className="font-semibold">Customer Profile</h2>
+
+                <p className="text-xs text-slate-500">
+                  Customer information, support history and activity
+                </p>
               </div>
             </div>
-          </section>
 
-          {/* ==================================================
-              TICKET STATS
-          ================================================== */}
-
-          <section className="grid gap-4 sm:grid-cols-3">
-            <MetricCard
-              icon={Ticket}
-              iconClass="text-blue-400"
-              label="Total Tickets"
-              value={ticketStats.totalTickets}
-            />
-
-            <MetricCard
-              icon={MessageSquare}
-              iconClass="text-purple-400"
-              label="Resolved"
-              value={ticketStats.resolvedTickets}
-            />
-
-            <MetricCard
-              icon={UserCheck}
-              iconClass="text-emerald-400"
-              label="Resolution Rate"
-              value={`${resolutionRate}%`}
-            />
-          </section>
-
-          {/* ==================================================
-              TICKET BREAKDOWN
-          ================================================== */}
-
-          <section className="rounded-2xl border border-slate-800 bg-[#0a1222] p-5 sm:p-6">
-            <div className="flex items-center justify-between">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div>
-                <h2 className="text-sm font-semibold text-white">
-                  Ticket Overview
-                </h2>
-
-                <p className="mt-1 text-xs text-slate-600">
-                  Current ticket activity for this user.
+                <p className="text-xs text-slate-500">Customer Since</p>
+                <p className="mt-1 text-sm text-slate-200">
+                  {formatDate(user.createdAt)}
                 </p>
               </div>
 
-              <Ticket size={18} className="text-slate-600" />
-            </div>
-
-            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <TicketStat
-                label="Open"
-                value={ticketStats.openTickets}
-                className="text-blue-400"
-              />
-
-              <TicketStat
-                label="In Progress"
-                value={ticketStats.inProgressTickets}
-                className="text-amber-400"
-              />
-
-              <TicketStat
-                label="Waiting"
-                value={ticketStats.waitingTickets}
-                className="text-purple-400"
-              />
-
-              <TicketStat
-                label="Closed"
-                value={ticketStats.closedTickets}
-                className="text-slate-400"
-              />
-            </div>
-
-            {ticketStats.escalatedTickets > 0 && (
-              <div className="mt-4 rounded-xl border border-red-500/10 bg-red-500/5 px-4 py-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-red-400">
-                      Escalated Tickets
-                    </p>
-
-                    <p className="mt-1 text-[11px] text-slate-600">
-                      Tickets requiring elevated attention.
-                    </p>
-                  </div>
-
-                  <span className="text-lg font-bold text-red-400">
-                    {ticketStats.escalatedTickets}
-                  </span>
-                </div>
+              <div>
+                <p className="text-xs text-slate-500">Last Active</p>
+                <p className="mt-1 text-sm text-slate-200">
+                  {formatRelativeOrDate(user.lastSeen)}
+                </p>
               </div>
+
+              <div>
+                <p className="text-xs text-slate-500">Company</p>
+                <p className="mt-1 text-sm text-slate-200">
+                  {user.company || "Individual"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs text-slate-500">Preferred Channel</p>
+                <p className="mt-1 text-sm text-slate-200 capitalize">
+                  {user.preferences?.preferredChannel ||
+                    user.preferredChannel ||
+                    "Chat"}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ======================================================
+            METRICS
+        ====================================================== */}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <MetricCard
+            title="Total Tickets"
+            value={ticketStats.totalTickets}
+            icon={Ticket}
+            iconClass="text-blue-400"
+            loading={statsLoading}
+          />
+
+          <MetricCard
+            title="Resolved Tickets"
+            value={ticketStats.resolvedTickets}
+            icon={CheckCircle2}
+            iconClass="text-emerald-400"
+            loading={statsLoading}
+          />
+
+          <MetricCard
+            title="Resolution Rate"
+            value={`${resolutionRate}%`}
+            icon={Activity}
+            iconClass="text-violet-400"
+            loading={statsLoading}
+          />
+        </div>
+
+        {/* ======================================================
+            TICKET OVERVIEW
+        ====================================================== */}
+
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold">Ticket Overview</h2>
+              <p className="text-sm text-slate-500 mt-1">
+                Current support workload
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <OverviewCard
+              label="Open"
+              value={ticketStats.openTickets}
+              className="text-blue-400"
+            />
+
+            <OverviewCard
+              label="In Progress"
+              value={ticketStats.inProgressTickets}
+              className="text-violet-400"
+            />
+
+            <OverviewCard
+              label="Waiting"
+              value={ticketStats.waitingTickets}
+              className="text-orange-400"
+            />
+
+            <OverviewCard
+              label="Resolved"
+              value={ticketStats.resolvedTickets}
+              className="text-emerald-400"
+            />
+
+            <OverviewCard
+              label="Closed"
+              value={ticketStats.closedTickets}
+              className="text-slate-300"
+            />
+
+            <OverviewCard
+              label="Escalated"
+              value={ticketStats.escalatedTickets}
+              className="text-red-400"
+            />
+          </div>
+        </div>
+
+        {/* ======================================================
+            CUSTOMER TICKET HISTORY
+        ====================================================== */}
+
+        {user.role === "customer" && (
+          <div className="rounded-2xl border border-slate-800 bg-[#0a1222] overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Ticket className="w-5 h-5 text-blue-400" />
+                  <h2 className="text-lg font-semibold">Ticket History</h2>
+                </div>
+
+                <p className="text-sm text-slate-500 mt-1">
+                  Complete history of tickets created by this customer
+                </p>
+              </div>
+
+              <span className="text-xs text-slate-500">
+                {ticketPagination.total} total tickets
+              </span>
+            </div>
+
+            {ticketsLoading ? (
+              <div className="py-14 flex flex-col items-center justify-center">
+                <Loader2 className="w-7 h-7 text-blue-400 animate-spin" />
+                <p className="text-sm text-slate-500 mt-3">
+                  Loading ticket history...
+                </p>
+              </div>
+            ) : customerTickets.length === 0 ? (
+              <div className="py-14 text-center">
+                <Ticket className="w-10 h-10 mx-auto text-slate-700" />
+
+                <h3 className="mt-3 text-sm font-medium text-slate-300">
+                  No tickets found
+                </h3>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  This customer has not created any support tickets yet.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[950px]">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-left">
+                        <th className="px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                          Ticket
+                        </th>
+
+                        <th className="px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                          Subject
+                        </th>
+
+                        <th className="px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                          Status
+                        </th>
+
+                        <th className="px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                          Priority
+                        </th>
+
+                        <th className="px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                          Assigned Agent
+                        </th>
+
+                        <th className="px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                          Rating
+                        </th>
+
+                        <th className="px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                          Created
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-slate-800/80">
+                      {customerTickets.map((ticket) => {
+                        const ticketStatus = getTicketStatus(ticket.status);
+
+                        const StatusIcon = ticketStatus.icon;
+
+                        const rating = getTicketRating(ticket);
+
+                        return (
+                          <tr
+                            key={ticket._id}
+                            onClick={() =>
+                              navigate(`/admin/tickets/${ticket._id}`)
+                            }
+                            className="hover:bg-slate-800/30 cursor-pointer transition group"
+                          >
+                            <td className="px-5 py-4">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs text-blue-400">
+                                  {ticket.ticketNumber ||
+                                    ticket._id?.slice(-8) ||
+                                    "—"}
+                                </span>
+
+                                <ExternalLink className="w-3 h-3 text-slate-700 group-hover:text-blue-400 transition" />
+                              </div>
+                            </td>
+
+                            <td className="px-5 py-4 max-w-[260px]">
+                              <p className="text-sm font-medium text-slate-200 truncate">
+                                {ticket.subject || "Untitled Ticket"}
+                              </p>
+
+                              {ticket.category && (
+                                <p className="text-xs text-slate-500 mt-1">
+                                  {ticket.category}
+                                </p>
+                              )}
+                            </td>
+
+                            <td className="px-5 py-4">
+                              <span
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium ${ticketStatus.badge}`}
+                              >
+                                <StatusIcon className="w-3 h-3" />
+                                {ticketStatus.label}
+                              </span>
+                            </td>
+
+                            <td className="px-5 py-4">
+                              <span
+                                className={`inline-flex px-2.5 py-1 rounded-full border text-xs font-medium capitalize ${
+                                  priorityStyles[ticket.priority] ||
+                                  priorityStyles.medium
+                                }`}
+                              >
+                                {ticket.priority || "medium"}
+                              </span>
+                            </td>
+
+                            <td className="px-5 py-4">
+                              {ticket.assignedAgent ? (
+                                <div className="flex items-center gap-2">
+                                  {ticket.assignedAgent.avatar ? (
+                                    <img
+                                      src={getAvatarUrl(
+                                        ticket.assignedAgent.avatar,
+                                      )}
+                                      alt={ticket.assignedAgent.name || "Agent"}
+                                      className="w-7 h-7 rounded-full object-cover"
+                                    />
+                                  ) : (
+                                    <div className="w-7 h-7 rounded-full bg-violet-500/10 flex items-center justify-center text-xs text-violet-400">
+                                      {ticket.assignedAgent.name
+                                        ?.charAt(0)
+                                        ?.toUpperCase() || "A"}
+                                    </div>
+                                  )}
+
+                                  <div className="min-w-0">
+                                    <p className="text-xs text-slate-300 truncate max-w-[130px]">
+                                      {ticket.assignedAgent.name || "Agent"}
+                                    </p>
+
+                                    <p className="text-[11px] text-slate-600 truncate max-w-[130px]">
+                                      {ticket.assignedAgent.email || ""}
+                                    </p>
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-slate-600">
+                                  Unassigned
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="px-5 py-4">
+                              {rating ? (
+                                <div className="flex items-center gap-1">
+                                  <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+                                  <span className="text-sm text-slate-300">
+                                    {rating}/5
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-slate-600">
+                                  Not rated
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="px-5 py-4">
+                              <div>
+                                <p className="text-xs text-slate-300">
+                                  {formatDate(ticket.createdAt)}
+                                </p>
+
+                                <p className="text-[11px] text-slate-600 mt-1">
+                                  {getRelativeTime(ticket.createdAt)}
+                                </p>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* PAGINATION */}
+
+                {ticketPagination.pages > 1 && (
+                  <div className="px-5 py-4 border-t border-slate-800 flex items-center justify-between">
+                    <p className="text-xs text-slate-500">
+                      Page {ticketPagination.page} of {ticketPagination.pages}
+                    </p>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() =>
+                          setTicketPage((prev) => Math.max(1, prev - 1))
+                        }
+                        disabled={ticketPage <= 1}
+                        className="p-2 rounded-lg border border-slate-700 bg-slate-800/50 text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+
+                      <button
+                        onClick={() =>
+                          setTicketPage((prev) =>
+                            Math.min(ticketPagination.pages, prev + 1),
+                          )
+                        }
+                        disabled={ticketPage >= ticketPagination.pages}
+                        className="p-2 rounded-lg border border-slate-700 bg-slate-800/50 text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
-          </section>
+          </div>
+        )}
 
-          {/* ==================================================
+        {/* ======================================================
+            MAIN CONTENT
+        ====================================================== */}
+
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          {/* ====================================================
               PROFILE INFORMATION
-          ================================================== */}
+          ==================================================== */}
 
-          <section className="rounded-2xl border border-slate-800 bg-[#0a1222] p-5 sm:p-6">
-            <h2 className="text-sm font-semibold text-white">
-              Profile Information
-            </h2>
+          <div className="xl:col-span-2 rounded-2xl border border-slate-800 bg-[#0a1222] p-5">
+            <div className="flex items-center gap-2 mb-5">
+              <UserRound className="w-5 h-5 text-blue-400" />
 
-            <div className="mt-5 grid gap-5 sm:grid-cols-2">
-              <InfoItem icon={Mail} label="Email" value={user.email} />
+              <div>
+                <h2 className="font-semibold">Profile Information</h2>
 
-              <InfoItem
-                icon={Phone}
-                label="Phone"
-                value={user.phone || "Not provided"}
-              />
+                <p className="text-xs text-slate-500 mt-1">
+                  Personal and contact information
+                </p>
+              </div>
+            </div>
 
-              <InfoItem
-                icon={Building2}
-                label="Company"
-                value={user.company || "Not provided"}
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <InfoItem icon={Mail} label="Email Address" value={user.email} />
+
+              <InfoItem icon={Phone} label="Phone Number" value={user.phone} />
+
+              <InfoItem icon={Building2} label="Company" value={user.company} />
 
               <InfoItem
                 icon={Globe2}
                 label="Timezone"
-                value={user.timezone || "Not configured"}
+                value={user.timezone || user.preferences?.timezone}
               />
 
               <InfoItem
                 icon={Languages}
                 label="Language"
-                value={user.language || "English"}
+                value={user.language || user.preferences?.language}
               />
 
               <InfoItem
@@ -568,36 +1181,30 @@ const UserDetails = () => {
                 value={formatDateTime(user.lastSeen)}
               />
             </div>
-          </section>
-        </div>
+          </div>
 
-        {/* ====================================================
-            SIDEBAR
-        ==================================================== */}
-
-        <aside className="space-y-6">
-          {/* ==================================================
+          {/* ====================================================
               ACCOUNT INFORMATION
-          ================================================== */}
+          ==================================================== */}
 
-          <section className="rounded-2xl border border-slate-800 bg-[#0a1222] p-5">
-            <h2 className="text-sm font-semibold text-white">
-              Account Information
-            </h2>
+          <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-5">
+            <div className="flex items-center gap-2 mb-5">
+              <ShieldCheck className="w-5 h-5 text-violet-400" />
 
-            <div className="mt-5 space-y-5">
+              <div>
+                <h2 className="font-semibold">Account Information</h2>
+
+                <p className="text-xs text-slate-500 mt-1">Account metadata</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <InfoItem icon={ShieldCheck} label="Role" value={role.label} />
+
               <InfoItem
-                icon={ShieldCheck}
-                label="Role"
-                value={user.role}
-                capitalize
-              />
-
-              <InfoItem
-                icon={UserCheck}
+                icon={CircleDot}
                 label="Account Status"
-                value={user.status}
-                capitalize
+                value={status.label}
               />
 
               <InfoItem
@@ -612,107 +1219,405 @@ const UserDetails = () => {
                 value={formatDateTime(user.updatedAt)}
               />
 
-              <div className="border-t border-slate-800 pt-5">
-                <p className="text-[11px] text-slate-600">User ID</p>
+              <div>
+                <p className="text-xs text-slate-500 mb-1">User ID</p>
 
-                <p className="mt-1 break-all font-mono text-[10px] text-slate-500">
+                <p className="font-mono text-xs text-slate-400 break-all">
                   {user._id}
                 </p>
               </div>
             </div>
-          </section>
+          </div>
+        </div>
 
-          {/* ==================================================
-              PREFERENCES
-          ================================================== */}
+        {/* ======================================================
+            CUSTOMER ACTIVITY TIMELINE
+        ====================================================== */}
 
-          <section className="rounded-2xl border border-slate-800 bg-[#0a1222] p-5">
-            <h2 className="text-sm font-semibold text-white">Preferences</h2>
+        {user.role === "customer" && (
+          <div className="rounded-2xl border border-slate-800 bg-[#0a1222]">
+            <div className="px-5 py-4 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Activity className="w-5 h-5 text-violet-400" />
 
-            <div className="mt-5 space-y-4">
-              <PreferenceRow
-                icon={Globe2}
-                label="Timezone"
-                value={user.timezone || "Asia/Karachi"}
-              />
+                <div>
+                  <h2 className="text-lg font-semibold">Customer Activity</h2>
 
-              <PreferenceRow
-                icon={Languages}
-                label="Language"
-                value={user.language || "English"}
-              />
+                  <p className="text-sm text-slate-500 mt-1">
+                    Recent customer interactions and ticket activity
+                  </p>
+                </div>
+              </div>
+            </div>
 
-              <PreferenceRow
-                icon={MessageSquare}
-                label="Preferred Channel"
-                value={user.preferredChannel || "chat"}
-              />
+            {activityLoading ? (
+              <div className="py-14 flex flex-col items-center justify-center">
+                <Loader2 className="w-7 h-7 text-violet-400 animate-spin" />
 
-              <PreferenceRow
-                icon={Bot}
-                label="AI Support"
-                value={user.aiSupport?.enabled ? "Enabled" : "Disabled"}
-              />
+                <p className="text-sm text-slate-500 mt-3">
+                  Loading activity...
+                </p>
+              </div>
+            ) : customerActivity.length === 0 ? (
+              <div className="py-14 text-center">
+                <Activity className="w-10 h-10 mx-auto text-slate-700" />
 
-              <PreferenceRow
-                icon={Bell}
-                label="Email Notifications"
+                <h3 className="mt-3 text-sm font-medium text-slate-300">
+                  No activity yet
+                </h3>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  Customer activity will appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="p-5">
+                <div className="relative">
+                  <div className="absolute left-5 top-3 bottom-3 w-px bg-slate-800" />
+
+                  <div className="space-y-7">
+                    {customerActivity.map((activity, index) => {
+                      const ActivityIcon = getActivityIcon(activity);
+
+                      const activityDate =
+                        activity.createdAt ||
+                        activity.timestamp ||
+                        activity.date;
+
+                      return (
+                        <div
+                          key={activity._id || `${activityDate}-${index}`}
+                          className="relative flex gap-4"
+                        >
+                          <div className="relative z-10 w-10 h-10 shrink-0 rounded-full bg-[#0a1222] border border-slate-700 flex items-center justify-center">
+                            <ActivityIcon className="w-4 h-4 text-violet-400" />
+                          </div>
+
+                          <div className="min-w-0 flex-1 pt-1">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                              <h3 className="text-sm font-medium text-slate-200">
+                                {getActivityTitle(activity)}
+                              </h3>
+
+                              <span className="text-xs text-slate-600">
+                                {getRelativeTime(activityDate)}
+                              </span>
+                            </div>
+
+                            {activity.description && (
+                              <p className="text-sm text-slate-500 mt-1">
+                                {activity.description}
+                              </p>
+                            )}
+
+                            {activity.ticketNumber && (
+                              <button
+                                onClick={() =>
+                                  activity.ticketId &&
+                                  navigate(
+                                    `/admin/tickets/${activity.ticketId}`,
+                                  )
+                                }
+                                className="inline-flex items-center gap-1.5 mt-2 text-xs text-blue-400 hover:text-blue-300 transition"
+                              >
+                                <Ticket className="w-3.5 h-3.5" />
+                                {activity.ticketNumber}
+                              </button>
+                            )}
+
+                            {activity.oldStatus && activity.newStatus && (
+                              <div className="flex items-center gap-2 mt-2">
+                                <span className="text-xs text-slate-500 capitalize">
+                                  {activity.oldStatus}
+                                </span>
+
+                                <ArrowRight className="w-3 h-3 text-slate-700" />
+
+                                <span className="text-xs text-slate-300 capitalize">
+                                  {activity.newStatus}
+                                </span>
+                              </div>
+                            )}
+
+                            {activity.rating && (
+                              <div className="flex items-center gap-1 mt-2">
+                                {Array.from({
+                                  length: 5,
+                                }).map((_, starIndex) => (
+                                  <Star
+                                    key={starIndex}
+                                    className={`w-3.5 h-3.5 ${
+                                      starIndex < activity.rating
+                                        ? "text-amber-400 fill-amber-400"
+                                        : "text-slate-700"
+                                    }`}
+                                  />
+                                ))}
+
+                                <span className="ml-1 text-xs text-slate-500">
+                                  {activity.rating}/5
+                                </span>
+                              </div>
+                            )}
+
+                            {activity.feedback && (
+                              <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900/30 p-3">
+                                <p className="text-xs text-slate-500">
+                                  Customer feedback
+                                </p>
+
+                                <p className="text-sm text-slate-400 mt-1">
+                                  “{activity.feedback}”
+                                </p>
+                              </div>
+                            )}
+
+                            <p className="text-[11px] text-slate-700 mt-2">
+                              {formatDateTime(activityDate)}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ======================================================
+            PREFERENCES
+        ====================================================== */}
+
+        <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-5">
+          <div className="flex items-center gap-2 mb-5">
+            <Bell className="w-5 h-5 text-blue-400" />
+
+            <div>
+              <h2 className="font-semibold">Preferences</h2>
+
+              <p className="text-xs text-slate-500 mt-1">
+                Communication and support preferences
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <PreferenceItem
+              icon={Globe2}
+              label="Timezone"
+              value={
+                user.timezone || user.preferences?.timezone || "Asia/Karachi"
+              }
+            />
+
+            <PreferenceItem
+              icon={Languages}
+              label="Language"
+              value={user.language || user.preferences?.language || "English"}
+            />
+
+            <PreferenceItem
+              icon={MessageSquare}
+              label="Preferred Channel"
+              value={
+                user.preferredChannel ||
+                user.preferences?.preferredChannel ||
+                "Chat"
+              }
+            />
+
+            <PreferenceItem
+              icon={Bot}
+              label="AI Support"
+              value={
+                user.aiSupportEnabled === false ||
+                user.preferences?.aiSupportEnabled === false
+                  ? "Disabled"
+                  : "Enabled"
+              }
+            />
+
+            <PreferenceItem
+              icon={Bell}
+              label="Email Notifications"
+              value={
+                user.emailNotifications === false ||
+                user.preferences?.emailNotifications === false
+                  ? "Disabled"
+                  : "Enabled"
+              }
+            />
+          </div>
+        </div>
+
+        {/* ======================================================
+            AGENT AVAILABILITY
+        ====================================================== */}
+
+        {user.role === "agent" && (
+          <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-5">
+            <div className="flex items-center gap-2 mb-5">
+              <UserCheck className="w-5 h-5 text-violet-400" />
+
+              <div>
+                <h2 className="font-semibold">Agent Availability</h2>
+
+                <p className="text-xs text-slate-500 mt-1">
+                  Current agent availability information
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <InfoItem
+                icon={CircleDot}
+                label="Availability"
                 value={
-                  user.notificationPreferences?.email ? "Enabled" : "Disabled"
+                  user.availability || user.agentAvailability || "Not specified"
                 }
               />
+
+              <InfoItem
+                icon={Clock3}
+                label="Last Seen"
+                value={formatDateTime(user.lastSeen)}
+              />
+
+              <InfoItem
+                icon={Ticket}
+                label="Assigned Tickets"
+                value={ticketStats.totalTickets}
+              />
             </div>
-          </section>
-
-          {/* ==================================================
-              AVAILABILITY
-          ================================================== */}
-
-          {user.role === "agent" && (
-            <section className="rounded-2xl border border-slate-800 bg-[#0a1222] p-5">
-              <h2 className="text-sm font-semibold text-white">
-                Agent Availability
-              </h2>
-
-              <div className="mt-4 flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <span
-                    className={`h-2.5 w-2.5 rounded-full ${
-                      user.availability === "online"
-                        ? "bg-emerald-400"
-                        : user.availability === "busy"
-                          ? "bg-amber-400"
-                          : user.availability === "away"
-                            ? "bg-blue-400"
-                            : "bg-slate-600"
-                    }`}
-                  />
-
-                  <span className="text-sm capitalize text-slate-300">
-                    {user.availability || "offline"}
-                  </span>
-                </div>
-
-                <span className="text-[10px] uppercase tracking-wider text-slate-600">
-                  Current
-                </span>
-              </div>
-            </section>
-          )}
-        </aside>
+          </div>
+        )}
       </div>
 
-      {/* ======================================================
+      {/* ========================================================
           STATUS MODAL
-      ====================================================== */}
+      ======================================================== */}
 
-      {statusModal && (
-        <StatusModal
-          user={user}
-          loading={actionLoading}
-          onClose={() => setStatusModal(false)}
-          onChange={handleStatusChange}
-        />
+      {statusModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() =>
+              !actionLoading &&
+              setStatusModal({
+                open: false,
+                status: "",
+              })
+            }
+          />
+
+          <div className="relative w-full max-w-md rounded-2xl border border-slate-800 bg-[#0a1222] shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+              <div>
+                <h2 className="font-semibold">Change User Status</h2>
+
+                <p className="text-xs text-slate-500 mt-1">
+                  Update the account status for this user.
+                </p>
+              </div>
+
+              <button
+                onClick={() =>
+                  !actionLoading &&
+                  setStatusModal({
+                    open: false,
+                    status: "",
+                  })
+                }
+                className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3">
+              {[
+                {
+                  value: "active",
+                  label: "Active",
+                  description: "User can access the platform normally.",
+                },
+                {
+                  value: "inactive",
+                  label: "Inactive",
+                  description: "User account is temporarily inactive.",
+                },
+                {
+                  value: "suspended",
+                  label: "Suspended",
+                  description: "Restrict the user's account access.",
+                },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() =>
+                    setStatusModal((prev) => ({
+                      ...prev,
+                      status: option.value,
+                    }))
+                  }
+                  className={`w-full text-left rounded-xl border p-4 transition ${
+                    statusModal.status === option.value
+                      ? "border-blue-500/50 bg-blue-500/5"
+                      : "border-slate-800 bg-slate-900/30 hover:border-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`w-2.5 h-2.5 rounded-full ${
+                        option.value === "active"
+                          ? "bg-emerald-400"
+                          : option.value === "inactive"
+                            ? "bg-slate-400"
+                            : "bg-red-400"
+                      }`}
+                    />
+
+                    <div>
+                      <p className="text-sm font-medium text-slate-200">
+                        {option.label}
+                      </p>
+
+                      <p className="text-xs text-slate-500 mt-1">
+                        {option.description}
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex justify-end gap-2 px-5 py-4 border-t border-slate-800">
+              <button
+                onClick={() =>
+                  setStatusModal({
+                    open: false,
+                    status: "",
+                  })
+                }
+                disabled={actionLoading}
+                className="px-4 py-2 rounded-lg border border-slate-700 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={handleStatusChange}
+                disabled={actionLoading || !statusModal.status}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition"
+              >
+                {actionLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                Update Status
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -722,28 +1627,40 @@ const UserDetails = () => {
 // METRIC CARD
 // ============================================================
 
-const MetricCard = ({ icon: Icon, iconClass, label, value }) => {
+const MetricCard = ({ title, value, icon: Icon, iconClass, loading }) => {
   return (
     <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-5">
-      <Icon size={18} className={iconClass} />
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs text-slate-500 uppercase tracking-wider">
+            {title}
+          </p>
 
-      <p className="mt-4 text-xs text-slate-500">{label}</p>
+          {loading ? (
+            <div className="w-12 h-8 mt-2 rounded bg-slate-800 animate-pulse" />
+          ) : (
+            <p className="text-2xl font-bold mt-2 text-white">{value}</p>
+          )}
+        </div>
 
-      <p className="mt-1 text-2xl font-bold text-white">{value}</p>
+        <div className="w-11 h-11 rounded-xl bg-slate-800/60 flex items-center justify-center">
+          <Icon className={`w-5 h-5 ${iconClass}`} />
+        </div>
+      </div>
     </div>
   );
 };
 
 // ============================================================
-// TICKET STAT
+// OVERVIEW CARD
 // ============================================================
 
-const TicketStat = ({ label, value, className }) => {
+const OverviewCard = ({ label, value, className }) => {
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-      <p className="text-[11px] text-slate-600">{label}</p>
+    <div className="rounded-xl border border-slate-800 bg-[#0a1222] p-4">
+      <p className="text-xs text-slate-500">{label}</p>
 
-      <p className={`mt-2 text-xl font-bold ${className}`}>{value}</p>
+      <p className={`text-xl font-bold mt-2 ${className}`}>{value ?? 0}</p>
     </div>
   );
 };
@@ -752,20 +1669,18 @@ const TicketStat = ({ label, value, className }) => {
 // INFO ITEM
 // ============================================================
 
-const InfoItem = ({ icon: Icon, label, value, capitalize = false }) => {
+const InfoItem = ({ icon: Icon, label, value }) => {
   return (
-    <div className="flex gap-3">
-      <Icon size={17} className="mt-0.5 shrink-0 text-slate-600" />
+    <div className="flex items-start gap-3">
+      <div className="w-9 h-9 shrink-0 rounded-lg bg-slate-800/60 flex items-center justify-center">
+        <Icon className="w-4 h-4 text-slate-400" />
+      </div>
 
       <div className="min-w-0">
-        <p className="text-[11px] text-slate-600">{label}</p>
+        <p className="text-xs text-slate-500">{label}</p>
 
-        <p
-          className={`mt-1 break-words text-sm text-slate-300 ${
-            capitalize ? "capitalize" : ""
-          }`}
-        >
-          {value || "—"}
+        <p className="text-sm text-slate-300 mt-1 break-words">
+          {value || "Not provided"}
         </p>
       </div>
     </div>
@@ -773,159 +1688,50 @@ const InfoItem = ({ icon: Icon, label, value, capitalize = false }) => {
 };
 
 // ============================================================
-// PREFERENCE ROW
+// PREFERENCE ITEM
 // ============================================================
 
-const PreferenceRow = ({ icon: Icon, label, value }) => {
+const PreferenceItem = ({ icon: Icon, label, value }) => {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-slate-800/70 pb-3 last:border-0 last:pb-0">
-      <div className="flex min-w-0 items-center gap-3">
-        <Icon size={15} className="shrink-0 text-slate-600" />
+    <div className="rounded-xl border border-slate-800 bg-slate-900/30 p-4">
+      <div className="flex items-center gap-2">
+        <Icon className="w-4 h-4 text-slate-500" />
 
-        <span className="truncate text-xs text-slate-500">{label}</span>
+        <p className="text-xs text-slate-500">{label}</p>
       </div>
 
-      <span className="shrink-0 text-xs capitalize text-slate-300">
-        {value}
-      </span>
+      <p className="text-sm text-slate-300 mt-2 capitalize">
+        {value || "Not specified"}
+      </p>
     </div>
   );
 };
 
 // ============================================================
-// STATUS MODAL
+// RELATIVE DATE HELPER
 // ============================================================
 
-const StatusModal = ({ user, loading, onClose, onChange }) => {
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-[#0a1222] shadow-2xl">
-        <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
-          <div>
-            <h2 className="text-sm font-semibold text-white">
-              Change User Status
-            </h2>
+const formatRelativeOrDate = (date) => {
+  if (!date) return "Never";
 
-            <p className="mt-1 text-xs text-slate-600">
-              Update the account status for {user.name}.
-            </p>
-          </div>
+  const parsed = new Date(date);
 
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={loading}
-            className="rounded-lg p-2 text-slate-600 transition hover:bg-slate-800 hover:text-white disabled:opacity-50"
-          >
-            <X size={17} />
-          </button>
-        </div>
+  if (Number.isNaN(parsed.getTime())) {
+    return "—";
+  }
 
-        <div className="p-5">
-          <div className="mb-5 flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/30 p-4">
-            {user.avatar ? (
-              <img
-                src={getAvatarUrl(user.avatar)}
-                alt={user.name}
-                className="h-10 w-10 rounded-xl object-cover"
-              />
-            ) : (
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-xs font-bold text-blue-400">
-                {user.name
-                  ?.split(" ")
-                  .map((part) => part[0])
-                  .join("")
-                  .slice(0, 2)
-                  .toUpperCase()}
-              </div>
-            )}
+  const diff = Date.now() - parsed.getTime();
 
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-white">
-                {user.name}
-              </p>
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
 
-              <p className="truncate text-xs text-slate-600">{user.email}</p>
-            </div>
-          </div>
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  if (hours < 24) return `${hours} hours ago`;
+  if (days < 7) return `${days} days ago`;
 
-          <p className="mb-3 text-xs font-medium text-slate-500">
-            Select account status
-          </p>
-
-          <div className="space-y-2">
-            <StatusOption
-              label="Active"
-              description="User can access the platform normally."
-              active={user.status === "active"}
-              disabled={loading || user.status === "active"}
-              onClick={() => onChange("active")}
-              className="border-emerald-500/20 bg-emerald-500/5 text-emerald-400"
-            />
-
-            <StatusOption
-              label="Inactive"
-              description="Temporarily disable normal account access."
-              active={user.status === "inactive"}
-              disabled={loading || user.status === "inactive"}
-              onClick={() => onChange("inactive")}
-              className="border-slate-700 bg-slate-900/50 text-slate-400"
-            />
-
-            <StatusOption
-              label="Suspended"
-              description="Restrict the account due to administrative action."
-              active={user.status === "suspended"}
-              disabled={loading || user.status === "suspended"}
-              onClick={() => onChange("suspended")}
-              className="border-red-500/20 bg-red-500/5 text-red-400"
-            />
-          </div>
-        </div>
-
-        {loading && (
-          <div className="flex items-center justify-center gap-2 border-t border-slate-800 px-5 py-3 text-xs text-slate-500">
-            <RefreshCw size={13} className="animate-spin" />
-            Updating status...
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// ============================================================
-// STATUS OPTION
-// ============================================================
-
-const StatusOption = ({
-  label,
-  description,
-  active,
-  disabled,
-  onClick,
-  className,
-}) => {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`w-full rounded-xl border p-3 text-left transition ${
-        active
-          ? className
-          : "border-slate-800 bg-slate-950/20 text-slate-500 hover:border-slate-700 hover:bg-slate-900"
-      } disabled:cursor-not-allowed disabled:opacity-60`}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-xs font-semibold">{label}</span>
-
-        {active && <UserCheck size={14} />}
-      </div>
-
-      <p className="mt-1 text-[10px] leading-4 text-slate-600">{description}</p>
-    </button>
-  );
+  return formatDate(date);
 };
 
 export default UserDetails;

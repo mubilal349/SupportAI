@@ -1,5 +1,6 @@
 import React from "react";
 import { Outlet } from "react-router-dom";
+import BackToTop from "../../components/admin/BackToTop";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import AdminHeader from "../../components/admin/AdminHeader";
 
@@ -14,6 +15,8 @@ const AdminLayout = () => {
         <main className="min-h-[calc(100vh-72px)]">
           <Outlet />
         </main>
+
+        <BackToTop />
       </div>
     </div>
   );

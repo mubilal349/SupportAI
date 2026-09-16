@@ -148,3 +148,40 @@ export const deleteAdminUser = async (userId) => {
 
   return response.data;
 };
+
+// ============================================================
+// GET CUSTOMER TICKET HISTORY
+// ============================================================
+
+export const getAdminCustomerTickets = async (userId, params = {}) => {
+  if (!userId) {
+    throw new Error("User ID is required.");
+  }
+
+  const response = await axios.get(`${API_URL}/admin/users/${userId}/tickets`, {
+    ...getAuthConfig(),
+    params,
+  });
+
+  return response.data;
+};
+
+// ============================================================
+// GET CUSTOMER ACTIVITY
+// ============================================================
+
+export const getAdminCustomerActivity = async (userId, params = {}) => {
+  if (!userId) {
+    throw new Error("User ID is required.");
+  }
+
+  const response = await axios.get(
+    `${API_URL}/admin/users/${userId}/activity`,
+    {
+      ...getAuthConfig(),
+      params,
+    },
+  );
+
+  return response.data;
+};

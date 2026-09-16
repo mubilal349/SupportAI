@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import User from "../models/User.js";
+import Ticket from "../models/Ticket.js";
 
 // ============================================================
 // GET USERS
@@ -105,6 +106,239 @@ export const getAdminUserById = async (userId) => {
   }
 
   return user;
+};
+
+// ============================================================
+// GET CUSTOMER TICKET HISTORY
+// ============================================================
+
+export const getAdminCustomerTickets = async ({
+  userId,
+  page = 1,
+  limit = 10,
+}) => {
+  const currentPage = Math.max(Number(page) || 1, 1);
+  const currentLimit = Math.min(Math.max(Number(limit) || 10, 1), 50);
+
+  const skip = (currentPage - 1) * currentLimit;
+
+  // Make sure the user exists and is a customer.
+  const user = await User.findById(userId).select("_id role").lean();
+
+  if (!user) {
+    const error = new Error("User not found.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (user.role !== "customer") {
+    return {
+      tickets: [],
+      pagination: {
+        currentPage,
+        limit: currentLimit,
+        totalTickets: 0,
+        totalPages: 0,
+        hasNextPage: false,
+        hasPreviousPage: false,
+      },
+    };
+  }
+
+  const filter = {
+    customer: userId,
+  };
+
+  const [tickets, totalTickets] = await Promise.all([
+    Ticket.find(filter)
+      .select(
+        [
+          "_id",
+          "ticketNumber",
+          "subject",
+          "description",
+          "status",
+          "priority",
+          "category",
+          "assignedAgent",
+          "createdAt",
+          "updatedAt",
+          "statusHistory",
+          "satisfaction",
+          "customerRating",
+          "customerFeedback",
+          "ratedAt",
+          "conversation",
+        ].join(" "),
+      )
+      .populate("assignedAgent", "name email avatar")
+      .sort({
+        createdAt: -1,
+      })
+      .skip(skip)
+      .limit(currentLimit)
+      .lean(),
+
+    Ticket.countDocuments(filter),
+  ]);
+
+  return {
+    tickets,
+
+    pagination: {
+      currentPage,
+      limit: currentLimit,
+      totalTickets,
+      totalPages: Math.ceil(totalTickets / currentLimit),
+      hasNextPage: currentPage < Math.ceil(totalTickets / currentLimit),
+      hasPreviousPage: currentPage > 1,
+    },
+  };
+};
+
+// ============================================================
+// GET CUSTOMER ACTIVITY
+// ============================================================
+
+export const getAdminCustomerActivity = async ({ userId, limit = 30 }) => {
+  const user = await User.findById(userId).select("_id role").lean();
+
+  if (!user) {
+    const error = new Error("User not found.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (user.role !== "customer") {
+    return [];
+  }
+
+  const tickets = await Ticket.find({
+    customer: userId,
+  })
+    .select(
+      [
+        "_id",
+        "ticketNumber",
+        "subject",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "statusHistory",
+        "conversation",
+        "satisfaction",
+        "customerRating",
+        "ratedAt",
+      ].join(" "),
+    )
+    .sort({
+      createdAt: -1,
+    })
+    .limit(100)
+    .lean();
+
+  const activities = [];
+
+  tickets.forEach((ticket) => {
+    // --------------------------------------------------------
+    // Ticket created
+    // --------------------------------------------------------
+
+    if (ticket.createdAt) {
+      activities.push({
+        id: `${ticket._id}-created`,
+        type: "ticket_created",
+        title: "Ticket created",
+        description: ticket.subject || "Support ticket created",
+        ticketId: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        createdAt: ticket.createdAt,
+      });
+    }
+
+    // --------------------------------------------------------
+    // Status history
+    // --------------------------------------------------------
+
+    if (Array.isArray(ticket.statusHistory)) {
+      ticket.statusHistory.forEach((history, index) => {
+        activities.push({
+          id: `${ticket._id}-status-${index}`,
+          type: "status_changed",
+          title: "Ticket status changed",
+          description: history.status
+            ? `Status changed to ${history.status}`
+            : "Ticket status updated",
+          ticketId: ticket._id,
+          ticketNumber: ticket.ticketNumber,
+          createdAt:
+            history.createdAt ||
+            history.changedAt ||
+            history.timestamp ||
+            ticket.updatedAt,
+        });
+      });
+    }
+
+    // --------------------------------------------------------
+    // Conversation activity
+    // --------------------------------------------------------
+
+    if (Array.isArray(ticket.conversation)) {
+      ticket.conversation.forEach((message, index) => {
+        const senderRole =
+          message.sender?.role || message.senderRole || message.role || "";
+
+        const isCustomer =
+          senderRole === "customer" ||
+          String(message.senderId || message.userId || "") === String(userId);
+
+        activities.push({
+          id: `${ticket._id}-message-${index}`,
+          type: isCustomer ? "customer_reply" : "agent_reply",
+          title: isCustomer ? "Customer replied" : "Agent replied",
+          description:
+            message.message ||
+            message.content ||
+            message.text ||
+            "New conversation message",
+          ticketId: ticket._id,
+          ticketNumber: ticket.ticketNumber,
+          createdAt: message.createdAt || message.timestamp || ticket.updatedAt,
+        });
+      });
+    }
+
+    // --------------------------------------------------------
+    // Customer rating
+    // --------------------------------------------------------
+
+    const rating = ticket.satisfaction?.rating ?? ticket.customerRating;
+
+    if (rating !== undefined && rating !== null) {
+      activities.push({
+        id: `${ticket._id}-rating`,
+        type: "rating_submitted",
+        title: "Customer rating submitted",
+        description: `Rated ${rating}/5`,
+        ticketId: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        createdAt:
+          ticket.satisfaction?.submittedAt ||
+          ticket.ratedAt ||
+          ticket.updatedAt,
+        rating,
+      });
+    }
+  });
+
+  return activities
+    .filter((activity) => activity.createdAt)
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )
+    .slice(0, Number(limit) || 30);
 };
 
 // ============================================================

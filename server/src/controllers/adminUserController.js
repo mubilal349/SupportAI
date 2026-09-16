@@ -10,6 +10,8 @@ import {
   updateAdminUserStatus,
   deleteAdminUser,
   getAdminUserStats,
+  getAdminCustomerTickets,
+  getAdminCustomerActivity,
 } from "../services/adminUserService.js";
 
 // ============================================================
@@ -433,6 +435,79 @@ export const getAdminUserTicketStats = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to load user ticket statistics.",
+    });
+  }
+};
+
+// ============================================================
+// GET CUSTOMER TICKET HISTORY
+// ============================================================
+
+export const getAdminCustomerTicketsController = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user ID.",
+      });
+    }
+
+    const { page = 1, limit = 10 } = req.query;
+
+    const result = await getAdminCustomerTickets({
+      userId,
+      page,
+      limit,
+    });
+
+    return res.status(200).json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    console.error("ADMIN CUSTOMER TICKETS ERROR:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to load customer tickets.",
+    });
+  }
+};
+
+// ============================================================
+// GET CUSTOMER ACTIVITY
+// ============================================================
+
+export const getAdminCustomerActivityController = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user ID.",
+      });
+    }
+
+    const { limit = 30 } = req.query;
+
+    const activities = await getAdminCustomerActivity({
+      userId,
+      limit,
+    });
+
+    return res.status(200).json({
+      success: true,
+      activities,
+    });
+  } catch (error) {
+    console.error("ADMIN CUSTOMER ACTIVITY ERROR:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to load customer activity.",
     });
   }
 };

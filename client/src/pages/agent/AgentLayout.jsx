@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Outlet, Link, useNavigate } from "react-router-dom";
 
 import {
@@ -18,6 +18,8 @@ import {
   Plus,
 } from "lucide-react";
 
+import BackToTop from "../../components/admin/BackToTop.jsx";
+
 import AgentSidebar from "./AgentSidebar";
 import socket from "../../socket/socket.js";
 
@@ -26,6 +28,7 @@ const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const NOTIFICATIONS_URL = `${API_URL}/notifications`;
 
 const AgentLayout = () => {
+  const mainContentRef = useRef(null);
   // =========================================================
   // SIDEBAR
   // =========================================================
@@ -1294,16 +1297,19 @@ const AgentLayout = () => {
         =================================================== */}
 
         <main
+          ref={mainContentRef}
           className="
-            min-h-0
-            min-w-0
-            flex-1
-            overflow-x-hidden
-            overflow-y-auto
-          "
+    min-h-0
+    min-w-0
+    flex-1
+    overflow-x-hidden
+    overflow-y-auto
+  "
         >
           <Outlet />
         </main>
+
+        <BackToTop scrollContainer={mainContentRef} />
       </div>
     </div>
   );

@@ -14,6 +14,8 @@ import {
   deleteUser,
   getUserStats,
   getAdminUserTicketStats,
+  getAdminCustomerTicketsController,
+  getAdminCustomerActivityController,
 } from "../controllers/adminUserController.js";
 
 const router = express.Router();
@@ -45,6 +47,18 @@ router.post("/", createAdminUser);
 // ============================================================
 
 router.get("/:userId/ticket-stats", getAdminUserTicketStats);
+
+// ============================================================
+// CUSTOMER TICKET HISTORY
+// ============================================================
+
+router.get("/:userId/tickets", getAdminCustomerTicketsController);
+
+// ============================================================
+// CUSTOMER ACTIVITY
+// ============================================================
+
+router.get("/:userId/activity", getAdminCustomerActivityController);
 
 // ============================================================
 // USER DETAILS
