@@ -1,5 +1,9 @@
 import axios from "axios";
 
+// ==========================================
+// API BASE URL
+// ==========================================
+
 const API_BASE_URL =
   import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
@@ -42,7 +46,7 @@ api.interceptors.request.use(
 );
 
 // ==========================================
-// GET ESCALATIONS
+// GET ALL ESCALATIONS
 // ==========================================
 
 export const getEscalations = async (params = {}) => {
@@ -56,6 +60,10 @@ export const getEscalations = async (params = {}) => {
 // ==========================================
 
 export const getEscalation = async (ticketId) => {
+  if (!ticketId) {
+    throw new Error("Ticket ID is required");
+  }
+
   return api.get(`/admin/escalations/${ticketId}`);
 };
 
@@ -64,6 +72,14 @@ export const getEscalation = async (ticketId) => {
 // ==========================================
 
 export const updateEscalationStatus = async (ticketId, status) => {
+  if (!ticketId) {
+    throw new Error("Ticket ID is required");
+  }
+
+  if (!status) {
+    throw new Error("Status is required");
+  }
+
   return api.patch(`/admin/escalations/${ticketId}/status`, {
     status,
   });
@@ -74,9 +90,29 @@ export const updateEscalationStatus = async (ticketId, status) => {
 // ==========================================
 
 export const assignEscalation = async (ticketId, agentId = null) => {
+  if (!ticketId) {
+    throw new Error("Ticket ID is required");
+  }
+
   return api.patch(`/admin/escalations/${ticketId}/assign`, {
     agentId,
   });
+};
+
+// ==========================================
+// REASSIGN TO HUMAN SUPPORT
+// ==========================================
+
+export const reassignToHumanSupport = async (ticketId) => {
+  if (!ticketId) {
+    throw new Error("Ticket ID is required");
+  }
+
+  const response = await api.patch(
+    `/admin/escalations/${ticketId}/reassign-human`,
+  );
+
+  return response.data;
 };
 
 // ==========================================
@@ -84,6 +120,14 @@ export const assignEscalation = async (ticketId, agentId = null) => {
 // ==========================================
 
 export const updateEscalationPriority = async (ticketId, priority) => {
+  if (!ticketId) {
+    throw new Error("Ticket ID is required");
+  }
+
+  if (!priority) {
+    throw new Error("Priority is required");
+  }
+
   return api.patch(`/admin/escalations/${ticketId}/priority`, {
     priority,
   });
@@ -94,8 +138,16 @@ export const updateEscalationPriority = async (ticketId, priority) => {
 // ==========================================
 
 export const addEscalationNote = async (ticketId, note) => {
+  if (!ticketId) {
+    throw new Error("Ticket ID is required");
+  }
+
+  if (!note?.trim()) {
+    throw new Error("Note is required");
+  }
+
   return api.post(`/admin/escalations/${ticketId}/note`, {
-    note,
+    note: note.trim(),
   });
 };
 
@@ -104,6 +156,10 @@ export const addEscalationNote = async (ticketId, note) => {
 // ==========================================
 
 export const resolveEscalation = async (ticketId) => {
+  if (!ticketId) {
+    throw new Error("Ticket ID is required");
+  }
+
   return api.patch(`/admin/escalations/${ticketId}/resolve`);
 };
 
@@ -116,6 +172,7 @@ export default {
   getEscalation,
   updateEscalationStatus,
   assignEscalation,
+  reassignToHumanSupport,
   updateEscalationPriority,
   addEscalationNote,
   resolveEscalation,

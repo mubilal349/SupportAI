@@ -428,3 +428,107 @@ export const resolveEscalation = async (req, res) => {
     });
   }
 };
+
+// ==========================================================
+// REASSIGN ESCALATED TICKET TO HUMAN SUPPORT
+// ==========================================================
+
+export const reassignToHumanSupport = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+
+    const ticket = await Ticket.findById(ticketId);
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket not found",
+      });
+    }
+
+    // Only escalated tickets can be reassigned
+    if (!ticket.escalation?.isEscalated) {
+      return res.status(400).json({
+        success: false,
+        message: "This ticket is not escalated",
+      });
+    }
+
+    // Do not move resolved/closed tickets back into support
+    if (["resolved", "closed"].includes(ticket.status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Resolved or closed tickets cannot be reassigned",
+      });
+    }
+
+    /*
+     * IMPORTANT:
+     * Keep the ticket UNASSIGNED.
+     *
+     * This puts it into the existing Agent Queue where
+     * an agent can explicitly click "Assign to Me".
+     */
+    ticket.assignedAgent = null;
+
+    // Make the ticket actionable for human support.
+    ticket.status = "open";
+
+    // Preserve escalation information.
+    ticket.escalation.isEscalated = true;
+
+    // Add/update escalation state only if these fields exist
+    if ("handledByHumanSupport" in ticket.escalation) {
+      ticket.escalation.handledByHumanSupport = true;
+    }
+
+    if ("reassignedAt" in ticket.escalation) {
+      ticket.escalation.reassignedAt = new Date();
+    }
+
+    if ("reassignedBy" in ticket.escalation) {
+      ticket.escalation.reassignedBy = req.user.id;
+    }
+
+    await ticket.save();
+
+    /*
+     * ------------------------------------------------------
+     * NOTIFY AVAILABLE HUMAN SUPPORT
+     * ------------------------------------------------------
+     *
+     * We intentionally do not assign a specific agent here.
+     * The existing Agent Queue will receive the ticket.
+     *
+     * If your project already has a notification helper,
+     * keep using it here rather than creating a second
+     * notification system.
+     */
+
+    const io = req.app.get("io");
+
+    if (io) {
+      io.emit("ticket:human-support", {
+        ticketId: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        status: ticket.status,
+        isEscalated: true,
+        message: "An escalated ticket is waiting for human support",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Ticket reassigned to human support",
+      ticket,
+    });
+  } catch (error) {
+    console.error("REASSIGN TO HUMAN SUPPORT ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to reassign ticket to human support",
+      error: error.message,
+    });
+  }
+};

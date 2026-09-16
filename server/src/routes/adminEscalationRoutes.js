@@ -8,6 +8,7 @@ import {
   updateEscalationPriority,
   addEscalationNote,
   resolveEscalation,
+  reassignToHumanSupport,
 } from "../controllers/AdminEscalationController.js";
 
 import {
@@ -44,5 +45,7 @@ router.post("/:ticketId/note", addEscalationNote);
 
 // PATCH /api/admin/escalations/:ticketId/resolve
 router.patch("/:ticketId/resolve", resolveEscalation);
+
+router.patch("/:ticketId/reassign-human", reassignToHumanSupport);
 
 export default router;

@@ -17,6 +17,7 @@ import {
   updateEscalationStatus,
   assignEscalation,
   resolveEscalation,
+  reassignToHumanSupport,
 } from "../../../services/adminEscalationService";
 
 const AdminEscalations = () => {
@@ -153,6 +154,7 @@ const AdminEscalations = () => {
   const handleStatusChange = async (ticketId, status) => {
     try {
       setActionLoading(true);
+      setError("");
 
       await updateEscalationStatus(ticketId, status);
 
@@ -179,6 +181,7 @@ const AdminEscalations = () => {
   const handleAssignToMe = async (ticketId) => {
     try {
       setActionLoading(true);
+      setError("");
 
       await assignEscalation(ticketId);
 
@@ -193,12 +196,52 @@ const AdminEscalations = () => {
   };
 
   // ==========================================
+  // REASSIGN TO HUMAN SUPPORT
+  // ==========================================
+
+  const handleReassignToHumanSupport = async (ticketId) => {
+    try {
+      setActionLoading(true);
+      setError("");
+
+      await reassignToHumanSupport(ticketId);
+
+      // Refresh the escalation list so the table
+      // shows the latest backend state.
+      await loadEscalations();
+
+      // Update the currently opened ticket immediately.
+      if (selectedEscalation) {
+        setSelectedEscalation((prev) =>
+          prev
+            ? {
+                ...prev,
+                assignedAgent: null,
+                status: "open",
+              }
+            : prev,
+        );
+      }
+    } catch (err) {
+      console.error("Failed to reassign ticket to Human Support:", err);
+
+      setError(
+        err?.response?.data?.message ||
+          "Failed to reassign ticket to Human Support.",
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // ==========================================
   // RESOLVE
   // ==========================================
 
   const handleResolve = async (ticketId) => {
     try {
       setActionLoading(true);
+      setError("");
 
       await resolveEscalation(ticketId);
 
@@ -692,6 +735,7 @@ const AdminEscalations = () => {
                 </p>
 
                 <div className="flex flex-wrap gap-3">
+                  {/* ASSIGN TO ME */}
                   {!getAgent(selectedEscalation) && (
                     <button
                       disabled={actionLoading}
@@ -706,6 +750,33 @@ const AdminEscalations = () => {
                     </button>
                   )}
 
+                  {/* REASSIGN TO HUMAN SUPPORT */}
+                  {!["resolved", "closed"].includes(
+                    String(selectedEscalation.status || "").toLowerCase(),
+                  ) && (
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={() =>
+                        handleReassignToHumanSupport(
+                          selectedEscalation._id || selectedEscalation.ticketId,
+                        )
+                      }
+                      className="inline-flex items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/10 px-4 py-2.5 text-sm font-medium text-orange-300 transition hover:border-orange-500/50 hover:bg-orange-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {actionLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <UserRound className="h-4 w-4" />
+                      )}
+
+                      {actionLoading
+                        ? "Reassigning..."
+                        : "Reassign to Human Support"}
+                    </button>
+                  )}
+
+                  {/* STATUS */}
                   <select
                     disabled={actionLoading}
                     value={selectedEscalation.status || "open"}
@@ -725,6 +796,7 @@ const AdminEscalations = () => {
                     <option value="closed">Closed</option>
                   </select>
 
+                  {/* RESOLVE */}
                   {!["resolved", "closed"].includes(
                     String(selectedEscalation.status || "").toLowerCase(),
                   ) && (
@@ -742,6 +814,26 @@ const AdminEscalations = () => {
                     </button>
                   )}
                 </div>
+
+                {/* HUMAN SUPPORT QUEUE INFO */}
+                {!getAgent(selectedEscalation) &&
+                  String(selectedEscalation.status || "").toLowerCase() ===
+                    "open" && (
+                    <div className="mt-4 rounded-lg border border-orange-500/20 bg-orange-500/5 px-4 py-3 text-sm text-orange-300">
+                      <div className="flex items-start gap-2">
+                        <UserRound className="mt-0.5 h-4 w-4 shrink-0" />
+
+                        <div>
+                          <p className="font-medium">Human Support Queue</p>
+
+                          <p className="mt-1 text-xs text-orange-300/70">
+                            This ticket is currently unassigned and available
+                            for an agent to claim.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
               </div>
             </div>
           </div>
