@@ -27,6 +27,11 @@ const categories = [
 
 const priorities = [
   {
+    value: "urgent",
+    label: "Urgent",
+    description: "Urgent issue or Urgent request",
+  },
+  {
     value: "low",
     label: "Low",
     description: "Minor issue or general request",
