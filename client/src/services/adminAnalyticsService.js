@@ -1,0 +1,62 @@
+import axios from "axios";
+
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+
+// ==========================================
+// GET AUTH TOKEN
+// ==========================================
+
+const getToken = () => {
+  return (
+    localStorage.getItem("supportai_token") || localStorage.getItem("token")
+  );
+};
+
+// ==========================================
+// AXIOS INSTANCE
+// ==========================================
+
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+// ==========================================
+// AUTH INTERCEPTOR
+// ==========================================
+
+api.interceptors.request.use(
+  (config) => {
+    const token = getToken();
+
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    return config;
+  },
+  (error) => Promise.reject(error),
+);
+
+// ==========================================
+// GET SYSTEM ANALYTICS
+// ==========================================
+
+export const getSystemAnalytics = async (period = "30d") => {
+  return api.get("/admin/analytics", {
+    params: {
+      period,
+    },
+  });
+};
+
+// ==========================================
+// DEFAULT EXPORT
+// ==========================================
+
+export default {
+  getSystemAnalytics,
+};
