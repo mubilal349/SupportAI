@@ -14,136 +14,250 @@ import {
 import {
   getRolePermissions,
   updateRolePermissions,
+  getUsersForPermissions,
+  getUserPermissions,
+  updateUserPermissions,
+  resetUserPermissions,
 } from "../../services/rolePermissionService";
 
-// ==========================================
-// ROLE CONFIGURATION
-// ==========================================
+// ============================================================
+// API SERVER
+// ============================================================
+
+const API_SERVER = (
+  import.meta.env.VITE_API_URL || "http://localhost:8000/api"
+).replace(/\/api\/?$/, "");
+
+// ============================================================
+// AVATAR URL
+// ============================================================
+
+const getAvatarUrl = (avatar) => {
+  if (!avatar) {
+    return "";
+  }
+
+  const value = String(avatar).trim();
+
+  if (!value) {
+    return "";
+  }
+
+  // Already an absolute URL
+  if (
+    value.startsWith("http://") ||
+    value.startsWith("https://") ||
+    value.startsWith("blob:") ||
+    value.startsWith("data:")
+  ) {
+    return value;
+  }
+
+  // Normalize relative path
+  const normalizedAvatar = value.startsWith("/") ? value : `/${value}`;
+
+  return `${API_SERVER}${normalizedAvatar}`;
+};
 
 const ROLE_CONFIG = {
   admin: {
-    label: "Admin",
-    description: "Full system access and administration controls.",
+    label: "Administrator",
+    description: "Full system access and management permissions.",
     icon: ShieldCheck,
   },
-
   agent: {
     label: "Agent",
-    description: "Customer support access with limited management permissions.",
+    description: "Handles support tickets and customer conversations.",
     icon: Shield,
   },
-
   customer: {
     label: "Customer",
-    description: "Customer-facing access with ownership-based permissions.",
+    description: "Can manage their own support requests and account.",
     icon: Users,
   },
 };
 
-// ==========================================
-// PERMISSION GROUPS
-// ==========================================
-
 const PERMISSION_GROUPS = [
   {
-    name: "General",
-    keys: ["dashboard.view"],
+    title: "General",
+    permissions: ["dashboard.view"],
   },
-
   {
-    name: "Tickets",
-    keys: ["tickets.view", "tickets.create", "tickets.reply", "tickets.assign"],
+    title: "Tickets",
+    permissions: [
+      "tickets.view",
+      "tickets.create",
+      "tickets.reply",
+      "tickets.assign",
+    ],
   },
-
   {
-    name: "Users & Agents",
-    keys: ["users.manage", "agents.manage"],
+    title: "Users & Agents",
+    permissions: ["users.manage", "agents.manage"],
   },
-
   {
-    name: "Knowledge Base",
-    keys: ["knowledge_base.view", "knowledge_base.manage"],
+    title: "Knowledge Base",
+    permissions: ["knowledge_base.view", "knowledge_base.manage"],
   },
-
   {
-    name: "Canned Responses",
-    keys: ["canned_responses.view", "canned_responses.use"],
+    title: "Canned Responses",
+    permissions: ["canned_responses.view", "canned_responses.use"],
   },
-
   {
-    name: "SLA",
-    keys: ["sla.view", "sla.manage"],
+    title: "SLA",
+    permissions: ["sla.view", "sla.manage"],
   },
-
   {
-    name: "Analytics",
-    keys: ["analytics.view", "analytics.limited", "analytics.own"],
+    title: "Analytics",
+    permissions: ["analytics.view", "analytics.limited", "analytics.own"],
   },
-
   {
-    name: "Administration",
-    keys: ["audit_logs.view", "settings.view", "settings.manage"],
+    title: "Administration",
+    permissions: ["audit_logs.view", "settings.view", "settings.manage"],
   },
 ];
 
-// ==========================================
-// ACCESS LABELS
-// ==========================================
+const getPermissionLabel = (permission) => {
+  const labels = {
+    "dashboard.view": "Dashboard",
+
+    "tickets.view": "View Tickets",
+    "tickets.create": "Create Tickets",
+    "tickets.reply": "Reply to Tickets",
+    "tickets.assign": "Assign Tickets",
+
+    "users.manage": "Manage Users",
+    "agents.manage": "Manage Agents",
+
+    "knowledge_base.view": "View Knowledge Base",
+    "knowledge_base.manage": "Manage Knowledge Base",
+
+    "canned_responses.view": "View Canned Responses",
+    "canned_responses.use": "Use Canned Responses",
+
+    "sla.view": "View SLA",
+    "sla.manage": "Manage SLA",
+
+    "analytics.view": "Full Analytics",
+    "analytics.limited": "Limited Analytics",
+    "analytics.own": "Own Analytics",
+
+    "audit_logs.view": "Audit Logs",
+
+    "settings.view": "View System Settings",
+    "settings.manage": "Manage System Settings",
+  };
+
+  return labels[permission] || permission;
+};
+
+const getPermissionDescription = (permission) => {
+  const descriptions = {
+    "dashboard.view": "Access the dashboard.",
+
+    "tickets.view": "View support tickets.",
+    "tickets.create": "Create new support tickets.",
+    "tickets.reply": "Reply to ticket conversations.",
+    "tickets.assign": "Assign tickets to support agents.",
+
+    "users.manage": "Create, update and manage users.",
+    "agents.manage": "Create, update and manage agents.",
+
+    "knowledge_base.view": "View knowledge base articles.",
+    "knowledge_base.manage":
+      "Create, update and delete knowledge base articles.",
+
+    "canned_responses.view": "View available canned responses.",
+    "canned_responses.use": "Use canned responses while replying to customers.",
+
+    "sla.view": "View SLA information.",
+    "sla.manage": "Create and manage SLA policies.",
+
+    "analytics.view": "Access full analytics.",
+    "analytics.limited": "Access limited agent analytics.",
+    "analytics.own": "Access analytics for the customer's own activity.",
+
+    "audit_logs.view": "View system audit logs.",
+
+    "settings.view": "View system settings.",
+    "settings.manage": "Manage system settings.",
+  };
+
+  return descriptions[permission] || "";
+};
 
 const getAccessLabel = (role, permission, enabled) => {
-  if (!enabled) {
-    return "No Access";
+  if (!enabled) return "No Access";
+
+  if (
+    role === "customer" &&
+    ["tickets.view", "tickets.reply"].includes(permission)
+  ) {
+    return "Own Only";
   }
 
-  if (permission === "tickets.view") {
-    if (role === "customer") return "Own Only";
-    if (role === "agent") return "Assigned";
-    return "Full";
+  if (role === "agent" && permission === "tickets.view") {
+    return "Assigned";
   }
 
-  if (permission === "tickets.reply") {
-    if (role === "customer") return "Own Only";
-    return "Allowed";
-  }
-
-  if (permission === "knowledge_base.view" && role !== "admin") {
+  if (permission === "knowledge_base.view") {
     return "View";
   }
 
   if (permission === "knowledge_base.manage") {
-    return role === "admin" ? "Manage" : "No Access";
+    return "Manage";
   }
 
-  if (permission === "canned_responses.use" && role === "agent") {
+  if (permission === "canned_responses.use") {
     return "Use";
   }
 
-  if (permission === "canned_responses.view" && role === "admin") {
-    return "Manage";
+  if (permission === "canned_responses.view") {
+    return role === "admin" ? "Manage" : "View";
   }
 
-  if (permission === "sla.view" && role === "agent") {
+  if (permission === "sla.view") {
     return "View";
   }
 
-  if (permission === "sla.manage" && role === "admin") {
+  if (permission === "sla.manage") {
     return "Manage";
   }
 
-  if (permission === "analytics.limited" && role === "agent") {
+  if (permission === "analytics.limited") {
     return "Limited";
   }
 
-  if (permission === "analytics.own" && role === "customer") {
+  if (permission === "analytics.own") {
     return "Own";
+  }
+
+  if (permission === "analytics.view") {
+    return "Full";
+  }
+
+  if (
+    [
+      "tickets.assign",
+      "users.manage",
+      "agents.manage",
+      "audit_logs.view",
+      "settings.manage",
+    ].includes(permission)
+  ) {
+    return "Manage";
   }
 
   return "Allowed";
 };
 
-// ==========================================
-// MAIN COMPONENT
-// ==========================================
+const normalizeUsers = (data) => {
+  if (Array.isArray(data?.users)) {
+    return data.users;
+  }
+
+  return [];
+};
 
 const AdminRolePermissions = () => {
   const [roles, setRoles] = useState({
@@ -157,39 +271,75 @@ const AdminRolePermissions = () => {
   const [activeRole, setActiveRole] = useState("admin");
 
   const [loading, setLoading] = useState(true);
-
   const [saving, setSaving] = useState(false);
-
   const [refreshing, setRefreshing] = useState(false);
 
   const [message, setMessage] = useState("");
-
   const [error, setError] = useState("");
 
-  // ========================================
-  // CREATE DEFINITION MAP
-  // ========================================
+  // Individual permission state
+  const [individualRole, setIndividualRole] = useState("agent");
+  const [individualUsers, setIndividualUsers] = useState([]);
+  const [selectedUserId, setSelectedUserId] = useState("");
 
-  const definitionMap = useMemo(() => {
-    return definitions.reduce((acc, definition) => {
-      acc[definition.key] = definition;
-      return acc;
-    }, {});
+  const [individualPermissions, setIndividualPermissions] = useState([]);
+
+  const [roleDefaultPermissions, setRoleDefaultPermissions] = useState([]);
+
+  const [individualLoading, setIndividualLoading] = useState(false);
+
+  const [individualSaving, setIndividualSaving] = useState(false);
+
+  const [individualResetting, setIndividualResetting] = useState(false);
+
+  const [individualMessage, setIndividualMessage] = useState("");
+
+  const [individualError, setIndividualError] = useState("");
+
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+
+  const activePermissions = roles[activeRole] || [];
+
+  const selectedUser = useMemo(() => {
+    return individualUsers.find(
+      (user) => String(user._id || user.id) === String(selectedUserId),
+    );
+  }, [individualUsers, selectedUserId]);
+
+  const permissionDefinitions = useMemo(() => {
+    if (definitions.length > 0) {
+      return definitions;
+    }
+
+    return PERMISSION_GROUPS.flatMap((group) =>
+      group.permissions.map((key) => ({
+        key,
+        label: getPermissionLabel(key),
+        description: getPermissionDescription(key),
+      })),
+    );
   }, [definitions]);
 
-  // ========================================
-  // FETCH PERMISSIONS
-  // ========================================
-
-  const fetchPermissions = async (showRefreshLoader = false) => {
-    try {
-      setError("");
-
-      if (showRefreshLoader) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
+  const getDefinition = (permission) => {
+    return (
+      permissionDefinitions.find((item) => item.key === permission) || {
+        key: permission,
+        label: getPermissionLabel(permission),
+        description: getPermissionDescription(permission),
       }
+    );
+  };
+
+  const fetchPermissions = async ({ showLoader = true } = {}) => {
+    try {
+      if (showLoader) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
+
+      setError("");
+      setMessage("");
 
       const data = await getRolePermissions();
 
@@ -199,15 +349,21 @@ const AdminRolePermissions = () => {
         customer: [],
       };
 
-      data?.permissions?.forEach((item) => {
-        if (roleData[item.role]) {
-          roleData[item.role] = item.permissions || [];
-        }
-      });
+      if (Array.isArray(data?.permissions)) {
+        data.permissions.forEach((item) => {
+          if (roleData[item.role]) {
+            roleData[item.role] = Array.isArray(item.permissions)
+              ? item.permissions
+              : [];
+          }
+        });
+      }
 
       setRoles(roleData);
 
-      setDefinitions(data?.definitions || []);
+      if (Array.isArray(data?.definitions)) {
+        setDefinitions(data.definitions);
+      }
     } catch (err) {
       console.error("FETCH ROLE PERMISSIONS ERROR:", err);
 
@@ -218,55 +374,139 @@ const AdminRolePermissions = () => {
     }
   };
 
-  // ========================================
-  // INITIAL LOAD
-  // ========================================
+  const fetchIndividualUsers = async (role = individualRole) => {
+    try {
+      setIndividualLoading(true);
+      setIndividualError("");
+      setIndividualMessage("");
+
+      const data = await getUsersForPermissions(role);
+
+      const users = normalizeUsers(data);
+
+      setIndividualUsers(users);
+
+      const responseRolePermissions = Array.isArray(data?.rolePermissions)
+        ? data.rolePermissions
+        : roles[role] || [];
+
+      setRoleDefaultPermissions(responseRolePermissions);
+
+      if (users.length === 0) {
+        setSelectedUserId("");
+        setIndividualPermissions([]);
+        return;
+      }
+
+      const currentSelectedExists = users.some(
+        (user) => String(user._id || user.id) === String(selectedUserId),
+      );
+
+      if (!currentSelectedExists) {
+        setSelectedUserId(String(users[0]._id || users[0].id));
+      }
+    } catch (err) {
+      console.error("FETCH INDIVIDUAL USERS ERROR:", err);
+
+      setIndividualError(err?.message || `Failed to load ${role}s.`);
+
+      setIndividualUsers([]);
+      setSelectedUserId("");
+      setIndividualPermissions([]);
+    } finally {
+      setIndividualLoading(false);
+    }
+  };
+
+  const fetchSelectedUserPermissions = async (userId) => {
+    if (!userId) {
+      setIndividualPermissions([]);
+      return;
+    }
+
+    try {
+      setIndividualLoading(true);
+      setIndividualError("");
+      setIndividualMessage("");
+
+      const data = await getUserPermissions(userId);
+
+      const effectivePermissions = Array.isArray(data?.effectivePermissions)
+        ? data.effectivePermissions
+        : Array.isArray(data?.permissions)
+          ? data.permissions
+          : [];
+
+      const rolePermissions = Array.isArray(data?.rolePermissions)
+        ? data.rolePermissions
+        : roles[individualRole] || [];
+
+      setIndividualPermissions(effectivePermissions);
+
+      setRoleDefaultPermissions(rolePermissions);
+    } catch (err) {
+      console.error("FETCH USER PERMISSIONS ERROR:", err);
+
+      setIndividualError(err?.message || "Failed to load user permissions.");
+
+      setIndividualPermissions([]);
+    } finally {
+      setIndividualLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchPermissions();
   }, []);
 
-  // ========================================
-  // TOGGLE PERMISSION
-  // ========================================
+  useEffect(() => {
+    fetchIndividualUsers(individualRole);
+  }, [individualRole]);
 
-  const togglePermission = (role, permission) => {
-    setMessage("");
-    setError("");
+  useEffect(() => {
+    if (selectedUserId) {
+      fetchSelectedUserPermissions(selectedUserId);
+    }
+  }, [selectedUserId]);
+
+  const togglePermission = (permission) => {
+    if (
+      activeRole === "admin" &&
+      permission === "dashboard.view" &&
+      activePermissions.includes(permission)
+    ) {
+      return;
+    }
 
     setRoles((previous) => {
-      const currentPermissions = previous[role] || [];
+      const current = previous[activeRole] || [];
 
-      const hasPermission = currentPermissions.includes(permission);
-
-      // --------------------------------------
-      // Prevent removing admin dashboard access
-      // --------------------------------------
-
-      if (
-        role === "admin" &&
-        permission === "dashboard.view" &&
-        hasPermission
-      ) {
-        setError("Admin must retain dashboard access.");
-
-        return previous;
-      }
-
-      const updatedPermissions = hasPermission
-        ? currentPermissions.filter((item) => item !== permission)
-        : [...currentPermissions, permission];
+      const updated = current.includes(permission)
+        ? current.filter((item) => item !== permission)
+        : [...current, permission];
 
       return {
         ...previous,
-        [role]: updatedPermissions,
+        [activeRole]: updated,
       };
     });
+
+    setMessage("");
+    setError("");
   };
 
-  // ========================================
-  // SAVE ACTIVE ROLE
-  // ========================================
+  const toggleIndividualPermission = (permission) => {
+    setIndividualPermissions((previous) => {
+      if (previous.includes(permission)) {
+        return previous.filter((item) => item !== permission);
+      }
+
+      return [...previous, permission];
+    });
+
+    setIndividualMessage("");
+    setIndividualError("");
+  };
 
   const saveRolePermissions = async () => {
     try {
@@ -276,534 +516,780 @@ const AdminRolePermissions = () => {
 
       const updatedPermissions = roles[activeRole] || [];
 
-      const data = await updateRolePermissions(activeRole, updatedPermissions);
+      if (
+        activeRole === "admin" &&
+        !updatedPermissions.includes("dashboard.view")
+      ) {
+        setError("Admin must retain dashboard access.");
+        return;
+      }
 
-      setRoles((previous) => ({
-        ...previous,
-        [activeRole]: data?.permissions || updatedPermissions,
-      }));
+      await updateRolePermissions(activeRole, updatedPermissions);
 
       setMessage(
         `${ROLE_CONFIG[activeRole].label} permissions updated successfully.`,
       );
+
+      await fetchPermissions({
+        showLoader: false,
+      });
+
+      if (["agent", "customer"].includes(individualRole)) {
+        await fetchIndividualUsers(individualRole);
+      }
     } catch (err) {
       console.error("SAVE ROLE PERMISSIONS ERROR:", err);
 
-      setError(err?.message || "Failed to update permissions.");
+      setError(err?.message || "Failed to save role permissions.");
     } finally {
       setSaving(false);
     }
   };
 
-  // ========================================
-  // RESET ACTIVE ROLE TO DEFAULT
-  // ========================================
+  const saveIndividualPermissions = async () => {
+    if (!selectedUserId) {
+      setIndividualError(`Select an ${individualRole} first.`);
+      return;
+    }
 
-  const resetActiveRole = async () => {
     try {
-      setError("");
-      setMessage("");
+      setIndividualSaving(true);
+      setIndividualError("");
+      setIndividualMessage("");
 
-      await fetchPermissions(true);
+      await updateUserPermissions(selectedUserId, individualPermissions);
 
-      setMessage(`${ROLE_CONFIG[activeRole].label} permissions refreshed.`);
+      setIndividualMessage("Individual permissions updated successfully.");
+
+      await fetchIndividualUsers(individualRole);
+
+      await fetchSelectedUserPermissions(selectedUserId);
     } catch (err) {
-      console.error("RESET ROLE PERMISSIONS ERROR:", err);
+      console.error("SAVE INDIVIDUAL PERMISSIONS ERROR:", err);
+
+      setIndividualError(
+        err?.message || "Failed to save individual permissions.",
+      );
+    } finally {
+      setIndividualSaving(false);
     }
   };
 
-  // ========================================
-  // GET PERMISSION DEFINITION
-  // ========================================
+  const resetIndividualPermissions = async () => {
+    if (!selectedUserId) {
+      setIndividualError(`Select an ${individualRole} first.`);
+      return;
+    }
 
-  const getDefinition = (permission) => {
-    return (
-      definitionMap[permission] || {
-        key: permission,
-        label: permission,
-        description: "Permission for this role.",
-      }
-    );
+    try {
+      setIndividualResetting(true);
+      setIndividualError("");
+      setIndividualMessage("");
+
+      const data = await resetUserPermissions(selectedUserId);
+
+      const permissions = Array.isArray(data?.permissions)
+        ? data.permissions
+        : roleDefaultPermissions;
+
+      setIndividualPermissions(permissions);
+
+      setIndividualMessage("User permissions reset to role defaults.");
+
+      await fetchIndividualUsers(individualRole);
+
+      await fetchSelectedUserPermissions(selectedUserId);
+    } catch (err) {
+      console.error("RESET INDIVIDUAL PERMISSIONS ERROR:", err);
+
+      setIndividualError(err?.message || "Failed to reset user permissions.");
+    } finally {
+      setIndividualResetting(false);
+    }
   };
 
-  // ========================================
-  // LOADING STATE
-  // ========================================
+  const isIndividualCustomized =
+    selectedUser?.isCustomized === true ||
+    (Array.isArray(selectedUser?.permissions) &&
+      selectedUser.permissions !== null);
+
+  const individualPermissionCount = individualPermissions.length;
+
+  const individualRolePermissionCount = roleDefaultPermissions.length;
 
   if (loading) {
     return (
-      <div className="min-h-[70vh] flex items-center justify-center bg-[#050b18]">
-        <div className="flex flex-col items-center gap-3 text-slate-400">
-          <Loader2 size={32} className="animate-spin" />
-
-          <p className="text-sm">Loading role permissions...</p>
+      <div className="flex min-h-[70vh] items-center justify-center">
+        <div className="flex items-center gap-3 text-slate-400">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span>Loading role permissions...</span>
         </div>
       </div>
     );
   }
 
-  // ========================================
-  // RENDER
-  // ========================================
-
   return (
-    <div className="min-h-screen bg-[#050b18] text-white p-4 sm:p-6 lg:p-8">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* ====================================
-            HEADER
-        ==================================== */}
+    <div className="space-y-8 p-6">
+      {/* Header */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="mb-2 flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-700 bg-slate-900">
+              <ShieldCheck className="h-5 w-5 text-slate-200" />
+            </div>
 
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
-                <ShieldCheck size={22} className="text-indigo-400" />
-              </div>
+            <div>
+              <h1 className="text-2xl font-bold text-white">
+                Role & Permissions
+              </h1>
 
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-bold">
-                  Role & Permissions
-                </h1>
-
-                <p className="text-sm text-slate-400 mt-1">
-                  Control what each role can access across SupportAI.
-                </p>
-              </div>
+              <p className="mt-1 text-sm text-slate-400">
+                Manage role defaults and individual user access.
+              </p>
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={() => fetchPermissions(true)}
-            disabled={refreshing}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-sm font-medium transition disabled:opacity-50"
-          >
-            <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
-            Refresh
-          </button>
         </div>
 
-        {/* ====================================
-            STATUS MESSAGES
-        ==================================== */}
+        <button
+          type="button"
+          onClick={() =>
+            fetchPermissions({
+              showLoader: false,
+            })
+          }
+          disabled={refreshing}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <RefreshCw
+            className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+          />
+          Refresh
+        </button>
+      </div>
 
-        {message && (
-          <div className="flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
-            <Check size={18} />
+      {/* Global messages */}
+      {message && (
+        <div className="flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+          <Check className="h-4 w-4" />
+          {message}
+        </div>
+      )}
 
-            <span>{message}</span>
+      {error && (
+        <div className="flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          <X className="h-4 w-4" />
+          {error}
+        </div>
+      )}
 
-            <button
-              type="button"
-              onClick={() => setMessage("")}
-              className="ml-auto text-emerald-400 hover:text-white"
-            >
-              <X size={16} />
-            </button>
-          </div>
-        )}
+      {/* Role selection */}
+      <section>
+        <div className="mb-4">
+          <h2 className="text-lg font-semibold text-white">Role Defaults</h2>
 
-        {error && (
-          <div className="flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-            <X size={18} />
+          <p className="mt-1 text-sm text-slate-500">
+            These permissions are inherited by users unless they have individual
+            permissions.
+          </p>
+        </div>
 
-            <span>{error}</span>
-
-            <button
-              type="button"
-              onClick={() => setError("")}
-              className="ml-auto text-red-400 hover:text-white"
-            >
-              <X size={16} />
-            </button>
-          </div>
-        )}
-
-        {/* ====================================
-            ROLE SELECTOR
-        ==================================== */}
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid gap-4 md:grid-cols-3">
           {Object.entries(ROLE_CONFIG).map(([role, config]) => {
             const Icon = config.icon;
-
-            const active = activeRole === role;
-
-            const permissionCount = roles[role]?.length || 0;
+            const isActive = activeRole === role;
 
             return (
               <button
                 key={role}
                 type="button"
-                onClick={() => {
-                  setActiveRole(role);
-                  setMessage("");
-                  setError("");
-                }}
-                aria-pressed={active}
-                className={`
-                    group
-                    relative
-                    w-full
-                    text-left
-                    rounded-2xl
-                    border
-                    p-5
-                    transition-all
-                    duration-200
-                    focus:outline-none
-                    focus:ring-2
-                    focus:ring-indigo-500/50
-                    ${
-                      active
-                        ? `
-                          border-indigo-500
-                          bg-indigo-500/[0.12]
-                          shadow-lg
-                          shadow-indigo-500/10
-                          ring-1
-                          ring-indigo-500/30
-                        `
-                        : `
-                          border-white/10
-                          bg-white/[0.02]
-                          hover:border-white/20
-                          hover:bg-white/[0.05]
-                        `
-                    }
-                  `}
+                onClick={() => setActiveRole(role)}
+                className={`rounded-2xl border p-5 text-left transition ${
+                  isActive
+                    ? "border-slate-500 bg-slate-800/80 shadow-lg shadow-black/10"
+                    : "border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-800/60"
+                }`}
               >
-                {/* ACTIVE INDICATOR */}
-
-                {active && (
-                  <div className="absolute inset-0 rounded-2xl border border-indigo-400/20 pointer-events-none" />
-                )}
-
-                <div className="flex items-start justify-between gap-4">
-                  {/* ROLE ICON + INFO */}
-
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className={`
-                          w-11
-                          h-11
-                          shrink-0
-                          rounded-xl
-                          flex
-                          items-center
-                          justify-center
-                          border
-                          transition-all
-                          duration-200
-                          ${
-                            active
-                              ? `
-                                bg-indigo-500
-                                border-indigo-400
-                                text-white
-                                shadow-lg
-                                shadow-indigo-500/25
-                              `
-                              : `
-                                bg-white/5
-                                border-white/5
-                                text-slate-400
-                                group-hover:text-slate-200
-                              `
-                          }
-                        `}
-                    >
-                      <Icon size={20} />
-                    </div>
-
-                    <div className="min-w-0">
-                      <h2
-                        className={`
-                            font-semibold
-                            transition-colors
-                            ${active ? "text-white" : "text-slate-200"}
-                          `}
-                      >
-                        {config.label}
-                      </h2>
-
-                      <p
-                        className={`
-                            text-xs
-                            mt-1
-                            leading-5
-                            ${active ? "text-indigo-200/70" : "text-slate-500"}
-                          `}
-                      >
-                        {config.description}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* FULL ROUND CHECK */}
-
+                <div className="flex items-start justify-between">
                   <div
-                    className={`
-                        shrink-0
-                        w-7
-                        h-7
-                        rounded-full
-                        border
-                        flex
-                        items-center
-                        justify-center
-                        transition-all
-                        duration-200
-                        ${
-                          active
-                            ? `
-                              bg-indigo-500
-                              border-indigo-400
-                              text-white
-                              shadow-md
-                              shadow-indigo-500/30
-                            `
-                            : `
-                              bg-transparent
-                              border-white/15
-                              text-transparent
-                            `
-                        }
-                      `}
+                    className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                      isActive
+                        ? "bg-white text-slate-950"
+                        : "bg-slate-800 text-slate-300"
+                    }`}
                   >
-                    <Check size={15} strokeWidth={3} />
+                    <Icon className="h-5 w-5" />
                   </div>
+
+                  {isActive && (
+                    <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-slate-200">
+                      Active
+                    </span>
+                  )}
                 </div>
 
-                {/* PERMISSION COUNT */}
+                <h3 className="mt-4 font-semibold text-white">
+                  {config.label}
+                </h3>
 
-                <div
-                  className={`
-                      mt-5
-                      pt-4
-                      border-t
-                      flex
-                      items-center
-                      justify-between
-                      text-xs
-                      ${active ? "border-indigo-500/20" : "border-white/5"}
-                    `}
-                >
-                  <span
-                    className={active ? "text-indigo-200/70" : "text-slate-500"}
-                  >
-                    Permissions enabled
-                  </span>
+                <p className="mt-1 text-sm leading-5 text-slate-500">
+                  {config.description}
+                </p>
 
-                  <span
-                    className={`
-                        font-semibold
-                        px-2.5
-                        py-1
-                        rounded-full
-                        ${
-                          active
-                            ? "bg-indigo-500/20 text-indigo-300"
-                            : "bg-white/5 text-slate-300"
-                        }
-                      `}
-                  >
-                    {permissionCount}
-                  </span>
+                <div className="mt-4 text-xs text-slate-400">
+                  {(roles[role] || []).length} permissions enabled
                 </div>
               </button>
             );
           })}
         </div>
+      </section>
 
-        {/* ====================================
-            PERMISSION MATRIX
-        ==================================== */}
+      {/* Role permission matrix */}
+      <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
+        <div className="flex flex-col gap-4 border-b border-slate-800 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-semibold text-white">
+              {ROLE_CONFIG[activeRole].label} Permissions
+            </h2>
 
-        <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
-          {/* TABLE HEADER */}
-
-          <div className="px-5 py-4 border-b border-white/10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div>
-              <h2 className="font-semibold text-lg">
-                {ROLE_CONFIG[activeRole].label} Permissions
-              </h2>
-
-              <p className="text-xs text-slate-500 mt-1">
-                Enable or disable permissions for this role.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={saveRolePermissions}
-              disabled={saving}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save size={16} />
-                  Save Changes
-                </>
-              )}
-            </button>
+            <p className="mt-1 text-sm text-slate-500">
+              Configure the default permissions for this role.
+            </p>
           </div>
 
-          {/* PERMISSION GROUPS */}
+          <button
+            type="button"
+            onClick={saveRolePermissions}
+            disabled={saving}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            {saving ? "Saving..." : "Save Role Defaults"}
+          </button>
+        </div>
 
-          <div className="divide-y divide-white/5">
-            {PERMISSION_GROUPS.map((group) => (
-              <div key={group.name} className="p-5">
-                <div className="flex items-center gap-2 mb-4">
-                  <ChevronDown size={16} className="text-slate-500" />
+        <div className="divide-y divide-slate-800">
+          {PERMISSION_GROUPS.map((group) => {
+            const groupPermissions = group.permissions.filter(
+              (permission) =>
+                permissionDefinitions.some(
+                  (definition) => definition.key === permission,
+                ) || true,
+            );
 
-                  <h3 className="text-sm font-semibold text-slate-200">
-                    {group.name}
-                  </h3>
+            if (groupPermissions.length === 0) {
+              return null;
+            }
+
+            return (
+              <div key={group.title} className="p-5">
+                <div className="mb-4">
+                  <h3 className="font-medium text-slate-200">{group.title}</h3>
                 </div>
 
                 <div className="space-y-2">
-                  {group.keys.map((permission) => {
+                  {groupPermissions.map((permission) => {
+                    const enabled = activePermissions.includes(permission);
+
                     const definition = getDefinition(permission);
-
-                    const enabled = roles[activeRole]?.includes(permission);
-
-                    const accessLabel = getAccessLabel(
-                      activeRole,
-                      permission,
-                      enabled,
-                    );
 
                     return (
                       <div
                         key={permission}
-                        className={`
-                              flex
-                              flex-col
-                              sm:flex-row
-                              sm:items-center
-                              gap-4
-                              rounded-xl
-                              border
-                              px-4
-                              py-3
-                              transition
-                              ${
-                                enabled
-                                  ? "border-indigo-500/20 bg-indigo-500/[0.04]"
-                                  : "border-white/5 bg-black/10 hover:bg-white/[0.02]"
-                              }
-                            `}
+                        className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-3"
                       >
-                        {/* PERMISSION INFO */}
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-medium text-slate-200">
+                              {definition.label ||
+                                getPermissionLabel(permission)}
+                            </p>
 
-                        <div className="flex-1 min-w-0">
-                          <div
-                            className={`
-                                  font-medium
-                                  text-sm
-                                  ${enabled ? "text-white" : "text-slate-200"}
-                                `}
-                          >
-                            {definition.label}
-                          </div>
-
-                          <div className="text-xs text-slate-500 mt-1">
-                            {definition.description}
-                          </div>
-                        </div>
-
-                        {/* ACCESS + TOGGLE */}
-
-                        <div className="flex items-center gap-3">
-                          <span
-                            className={`
-                                  text-xs
-                                  font-medium
-                                  min-w-[75px]
-                                  text-right
-                                  ${
-                                    enabled
-                                      ? "text-emerald-400"
-                                      : "text-slate-600"
-                                  }
-                                `}
-                          >
-                            {accessLabel}
-                          </span>
-
-                          {/* TOGGLE */}
-
-                          <button
-                            type="button"
-                            role="switch"
-                            aria-checked={enabled}
-                            aria-label={`Toggle ${definition.label}`}
-                            onClick={() =>
-                              togglePermission(activeRole, permission)
-                            }
-                            className={`
-                                  relative
-                                  w-11
-                                  h-6
-                                  shrink-0
-                                  rounded-full
-                                  transition-all
-                                  duration-200
-                                  ${enabled ? "bg-indigo-600" : "bg-slate-700"}
-                                `}
-                          >
                             <span
-                              className={`
-                                    absolute
-                                    top-1
-                                    w-4
-                                    h-4
-                                    rounded-full
-                                    bg-white
-                                    shadow-sm
-                                    transition-all
-                                    duration-200
-                                    ${enabled ? "left-6" : "left-1"}
-                                  `}
-                            />
-                          </button>
+                              className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                enabled
+                                  ? "bg-emerald-500/10 text-emerald-300"
+                                  : "bg-slate-800 text-slate-500"
+                              }`}
+                            >
+                              {getAccessLabel(activeRole, permission, enabled)}
+                            </span>
+                          </div>
+
+                          <p className="mt-1 text-xs text-slate-500">
+                            {definition.description ||
+                              getPermissionDescription(permission)}
+                          </p>
                         </div>
+
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={enabled}
+                          onClick={() => togglePermission(permission)}
+                          disabled={
+                            activeRole === "admin" &&
+                            permission === "dashboard.view" &&
+                            enabled
+                          }
+                          className={`relative h-6 w-11 shrink-0 rounded-full transition ${
+                            enabled ? "bg-emerald-500" : "bg-slate-700"
+                          } disabled:cursor-not-allowed disabled:opacity-70`}
+                        >
+                          <span
+                            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition ${
+                              enabled ? "left-[22px]" : "left-0.5"
+                            }`}
+                          />
+                        </button>
                       </div>
                     );
                   })}
                 </div>
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
 
-        {/* ====================================
-            SECURITY NOTE
-        ==================================== */}
-
-        <div className="rounded-2xl border border-indigo-500/10 bg-indigo-500/[0.04] p-5">
+        <div className="border-t border-slate-800 bg-slate-950/30 px-5 py-4">
           <div className="flex items-start gap-3">
-            <Shield size={19} className="text-indigo-400 mt-0.5 shrink-0" />
+            <Shield className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
 
+            <p className="text-xs leading-5 text-slate-500">
+              Role defaults apply automatically to users whose individual
+              permissions are set to <code>null</code>. Individual permissions
+              can override these defaults for agents and customers.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Individual permissions */}
+      <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
+        <div className="border-b border-slate-800 p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h3 className="text-sm font-semibold text-slate-200">
-                Permission Security
-              </h3>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 text-slate-300">
+                  <Users className="h-5 w-5" />
+                </div>
 
-              <p className="text-xs leading-5 text-slate-500 mt-1">
-                Permissions are enforced on the backend. Changing the frontend
-                UI alone does not grant access to protected SupportAI APIs.
-              </p>
+                <div>
+                  <h2 className="font-semibold text-white">
+                    Individual User Permissions
+                  </h2>
+
+                  <p className="mt-1 text-sm text-slate-500">
+                    Override role defaults for a specific agent or customer.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex rounded-xl border border-slate-700 bg-slate-950 p-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setIndividualRole("agent");
+                  setSelectedUserId("");
+                }}
+                className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                  individualRole === "agent"
+                    ? "bg-slate-700 text-white"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Agents
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIndividualRole("customer");
+                  setSelectedUserId("");
+                }}
+                className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                  individualRole === "customer"
+                    ? "bg-slate-700 text-white"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                Customers
+              </button>
             </div>
           </div>
         </div>
-      </div>
+
+        {/* User selector */}
+        <div className="border-b border-slate-800 p-5">
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+            <div className="relative">
+              <label className="mb-2 block text-sm font-medium text-slate-300">
+                Select {individualRole === "agent" ? "Agent" : "Customer"}
+              </label>
+
+              <button
+                type="button"
+                onClick={() => setUserDropdownOpen((previous) => !previous)}
+                disabled={individualLoading || individualUsers.length === 0}
+                className="flex w-full items-center justify-between rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-left transition hover:border-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  {selectedUser ? (
+                    <>
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-800 text-sm font-semibold text-slate-300">
+                        {selectedUser.avatar ? (
+                          <img
+                            src={getAvatarUrl(selectedUser.avatar)}
+                            alt={selectedUser.name || "User"}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          (selectedUser.name || "U").charAt(0).toUpperCase()
+                        )}
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-white">
+                          {selectedUser.name || "Unnamed User"}
+                        </p>
+
+                        <p className="truncate text-xs text-slate-500">
+                          {selectedUser.email || ""}
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <span className="text-sm text-slate-500">
+                      {individualLoading
+                        ? "Loading users..."
+                        : individualUsers.length === 0
+                          ? `No ${individualRole}s found`
+                          : `Select an ${individualRole}`}
+                    </span>
+                  )}
+                </div>
+
+                <ChevronDown
+                  className={`h-4 w-4 shrink-0 text-slate-500 transition ${
+                    userDropdownOpen ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+
+              {userDropdownOpen && individualUsers.length > 0 && (
+                <div className="absolute left-0 right-0 top-full z-30 mt-2 max-h-72 overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 p-1 shadow-2xl">
+                  {individualUsers.map((user) => {
+                    const userId = String(user._id || user.id);
+
+                    const isSelected = userId === String(selectedUserId);
+
+                    return (
+                      <button
+                        key={userId}
+                        type="button"
+                        onClick={() => {
+                          setSelectedUserId(userId);
+                          setUserDropdownOpen(false);
+                        }}
+                        className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition ${
+                          isSelected ? "bg-slate-800" : "hover:bg-slate-800/70"
+                        }`}
+                      >
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-800 text-sm font-semibold text-slate-300">
+                          {user.avatar ? (
+                            <img
+                              src={getAvatarUrl(user.avatar)}
+                              alt={user.name || "User"}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            (user.name || "U").charAt(0).toUpperCase()
+                          )}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-slate-200">
+                            {user.name || "Unnamed User"}
+                          </p>
+
+                          <p className="truncate text-xs text-slate-500">
+                            {user.email || ""}
+                          </p>
+                        </div>
+
+                        {user.isCustomized && (
+                          <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-300">
+                            Custom
+                          </span>
+                        )}
+
+                        {isSelected && (
+                          <Check className="h-4 w-4 shrink-0 text-emerald-400" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              {selectedUser && (
+                <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
+                  <p className="text-xs text-slate-500">Current access</p>
+
+                  <p className="mt-1 text-sm font-medium text-slate-200">
+                    {isIndividualCustomized ? "Customized" : "Role Defaults"}
+                  </p>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => fetchIndividualUsers(individualRole)}
+                disabled={individualLoading}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-4 text-sm font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${
+                    individualLoading ? "animate-spin" : ""
+                  }`}
+                />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {individualUsers.length === 0 && !individualLoading && (
+            <div className="mt-4 rounded-xl border border-dashed border-slate-800 bg-slate-950/40 px-4 py-6 text-center">
+              <Users className="mx-auto h-6 w-6 text-slate-600" />
+
+              <p className="mt-2 text-sm text-slate-400">
+                No {individualRole === "agent" ? "agents" : "customers"} are
+                available.
+              </p>
+            </div>
+          )}
+
+          {individualError && (
+            <div className="mt-4 flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              <X className="h-4 w-4" />
+              {individualError}
+            </div>
+          )}
+
+          {individualMessage && (
+            <div className="mt-4 flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+              <Check className="h-4 w-4" />
+              {individualMessage}
+            </div>
+          )}
+        </div>
+
+        {/* Selected user information */}
+        {selectedUser && (
+          <>
+            <div className="grid gap-4 border-b border-slate-800 bg-slate-950/30 p-5 sm:grid-cols-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-600">
+                  User
+                </p>
+
+                <p className="mt-1 text-sm font-medium text-slate-200">
+                  {selectedUser.name || "Unnamed User"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-600">
+                  Role
+                </p>
+
+                <p className="mt-1 text-sm font-medium capitalize text-slate-200">
+                  {selectedUser.role || individualRole}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-600">
+                  Permissions
+                </p>
+
+                <p className="mt-1 text-sm font-medium text-slate-200">
+                  {individualPermissionCount} / {individualRolePermissionCount}{" "}
+                  role defaults
+                </p>
+              </div>
+            </div>
+
+            {/* Individual permission matrix */}
+            <div className="divide-y divide-slate-800">
+              {PERMISSION_GROUPS.map((group) => {
+                const groupPermissions = group.permissions;
+
+                return (
+                  <div key={group.title} className="p-5">
+                    <div className="mb-4">
+                      <h3 className="font-medium text-slate-200">
+                        {group.title}
+                      </h3>
+
+                      <p className="mt-1 text-xs text-slate-500">
+                        These settings affect only this selected user.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      {groupPermissions.map((permission) => {
+                        const enabled =
+                          individualPermissions.includes(permission);
+
+                        const roleDefault =
+                          roleDefaultPermissions.includes(permission);
+
+                        const definition = getDefinition(permission);
+
+                        return (
+                          <div
+                            key={permission}
+                            className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-3"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-medium text-slate-200">
+                                  {definition.label ||
+                                    getPermissionLabel(permission)}
+                                </p>
+
+                                {roleDefault && (
+                                  <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                                    Role Default
+                                  </span>
+                                )}
+
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                    enabled
+                                      ? "bg-emerald-500/10 text-emerald-300"
+                                      : "bg-slate-800 text-slate-500"
+                                  }`}
+                                >
+                                  {enabled ? "Allowed" : "No Access"}
+                                </span>
+                              </div>
+
+                              <p className="mt-1 text-xs text-slate-500">
+                                {definition.description ||
+                                  getPermissionDescription(permission)}
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={enabled}
+                              onClick={() =>
+                                toggleIndividualPermission(permission)
+                              }
+                              className={`relative h-6 w-11 shrink-0 rounded-full transition ${
+                                enabled ? "bg-emerald-500" : "bg-slate-700"
+                              }`}
+                            >
+                              <span
+                                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition ${
+                                  enabled ? "left-[22px]" : "left-0.5"
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Individual actions */}
+            <div className="flex flex-col gap-3 border-t border-slate-800 bg-slate-950/30 p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-200">
+                  Individual access override
+                </p>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  Save custom permissions or reset this user to the role
+                  defaults.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={resetIndividualPermissions}
+                  disabled={individualResetting || individualSaving}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {individualResetting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  Reset to Role Defaults
+                </button>
+
+                <button
+                  type="button"
+                  onClick={saveIndividualPermissions}
+                  disabled={
+                    individualSaving || individualResetting || individualLoading
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {individualSaving ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  {individualSaving
+                    ? "Saving..."
+                    : "Save Individual Permissions"}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* Security note */}
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-slate-400" />
+
+          <div>
+            <h3 className="text-sm font-semibold text-slate-200">
+              Permission inheritance
+            </h3>
+
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              Admin permissions are controlled by the global administrator role.
+              Agents and customers inherit their role defaults when their
+              individual permissions are
+              <code className="mx-1 rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300">
+                null
+              </code>
+              . Once individual permissions are saved, that user's custom
+              permission list is used instead. Resetting the user restores
+              inheritance from the role.
+            </p>
+          </div>
+        </div>
+      </section>
     </div>
   );
 };

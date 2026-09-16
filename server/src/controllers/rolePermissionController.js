@@ -1,4 +1,5 @@
 import RolePermission from "../models/RolePermission.js";
+import User from "../models/User.js";
 
 import {
   ROLE_PERMISSIONS,
@@ -10,6 +11,42 @@ import {
 // ==========================================
 
 const VALID_ROLES = ["admin", "agent", "customer"];
+
+const INDIVIDUAL_PERMISSION_ROLES = ["agent", "customer"];
+
+// ==========================================
+// VALIDATE PERMISSIONS
+// ==========================================
+
+const validatePermissions = (permissions) => {
+  if (!Array.isArray(permissions)) {
+    return {
+      valid: false,
+      message: "Permissions must be an array.",
+    };
+  }
+
+  const validPermissionKeys = PERMISSION_DEFINITIONS.map(
+    (permission) => permission.key,
+  );
+
+  const invalidPermissions = permissions.filter(
+    (permission) => !validPermissionKeys.includes(permission),
+  );
+
+  if (invalidPermissions.length > 0) {
+    return {
+      valid: false,
+      message: "Invalid permissions supplied.",
+      invalidPermissions,
+    };
+  }
+
+  return {
+    valid: true,
+    permissions: [...new Set(permissions)],
+  };
+};
 
 // ==========================================
 // GET ALL ROLE PERMISSIONS
@@ -28,8 +65,6 @@ export const getRolePermissions = async (req, res) => {
         return {
           role,
 
-          // Use customized MongoDB permissions
-          // if they exist, otherwise use defaults.
           permissions:
             savedPermissions?.permissions || ROLE_PERMISSIONS[role] || [],
         };
@@ -61,7 +96,6 @@ export const getSingleRolePermissions = async (req, res) => {
   try {
     const { role } = req.params;
 
-    // Validate role
     if (!VALID_ROLES.includes(role)) {
       return res.status(400).json({
         success: false,
@@ -113,52 +147,23 @@ export const updateRolePermissions = async (req, res) => {
     }
 
     // ----------------------------------------
-    // Validate permissions array
+    // Validate permissions
     // ----------------------------------------
 
-    if (!Array.isArray(permissions)) {
+    const validation = validatePermissions(permissions);
+
+    if (!validation.valid) {
       return res.status(400).json({
         success: false,
-        message: "Permissions must be an array.",
+        message: validation.message,
+        invalidPermissions: validation.invalidPermissions || [],
       });
     }
 
-    // ----------------------------------------
-    // Get all valid permission keys
-    // ----------------------------------------
-
-    const validPermissionKeys = PERMISSION_DEFINITIONS.map(
-      (permission) => permission.key,
-    );
-
-    // ----------------------------------------
-    // Remove invalid permissions
-    // ----------------------------------------
-
-    const invalidPermissions = permissions.filter(
-      (permission) => !validPermissionKeys.includes(permission),
-    );
-
-    if (invalidPermissions.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid permissions supplied.",
-        invalidPermissions,
-      });
-    }
-
-    // ----------------------------------------
-    // Remove duplicate permissions
-    // ----------------------------------------
-
-    const uniquePermissions = [...new Set(permissions)];
+    const uniquePermissions = validation.permissions;
 
     // ----------------------------------------
     // Admin safety check
-    // ----------------------------------------
-    // Admin must always have dashboard access.
-    // This prevents accidentally locking every
-    // admin out of the administration area.
     // ----------------------------------------
 
     if (role === "admin" && !uniquePermissions.includes("dashboard.view")) {
@@ -169,7 +174,7 @@ export const updateRolePermissions = async (req, res) => {
     }
 
     // ----------------------------------------
-    // Save / Update permissions
+    // Save / Update role permissions
     // ----------------------------------------
 
     const rolePermission = await RolePermission.findOneAndUpdate(
@@ -208,27 +213,445 @@ export const updateRolePermissions = async (req, res) => {
   }
 };
 
+// ==========================================
+// GET MY EFFECTIVE PERMISSIONS
+// ==========================================
+// GET /api/role-permissions/me
+// ==========================================
+//
+// Returns individual permissions when the user
+// has a custom permission set.
+//
+// Otherwise returns role permissions.
+// ==========================================
+
 export const getMyPermissions = async (req, res) => {
   try {
-    const role = req.user?.role;
-    if (!role) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Authentication required." });
-    }
-    const savedPermissions = await RolePermission.findOne({ role }).lean();
-    return res
-      .status(200)
-      .json({
-        success: true,
-        role,
-        permissions:
-          savedPermissions?.permissions || ROLE_PERMISSIONS[role] || [],
+    const userId = req.user?.id || req.user?._id || req.user?.userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
       });
+    }
+
+    const user = await User.findById(userId)
+      .select("name email role permissions")
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    let permissions;
+
+    // ----------------------------------------
+    // Individual permissions
+    // ----------------------------------------
+
+    if (Array.isArray(user.permissions)) {
+      permissions = user.permissions;
+    } else {
+      // --------------------------------------
+      // Role permissions
+      // --------------------------------------
+
+      const savedRolePermissions = await RolePermission.findOne({
+        role: user.role,
+      }).lean();
+
+      permissions =
+        savedRolePermissions?.permissions || ROLE_PERMISSIONS[user.role] || [];
+    }
+
+    return res.status(200).json({
+      success: true,
+
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+
+      role: user.role,
+
+      permissions,
+
+      isCustomized: Array.isArray(user.permissions),
+    });
   } catch (error) {
     console.error("GET MY PERMISSIONS ERROR:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch your permissions." });
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch your permissions.",
+    });
+  }
+};
+
+// ==========================================
+// GET USERS FOR INDIVIDUAL PERMISSIONS
+// ==========================================
+// GET /api/role-permissions/users?role=customer
+// GET /api/role-permissions/users?role=agent
+// ==========================================
+//
+// Admin can use this endpoint to load all
+// customers or agents.
+// ==========================================
+
+export const getUsersForPermissions = async (req, res) => {
+  try {
+    const { role } = req.query;
+
+    // ----------------------------------------
+    // Validate role
+    // ----------------------------------------
+
+    if (!INDIVIDUAL_PERMISSION_ROLES.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "Role must be either agent or customer.",
+      });
+    }
+
+    // ----------------------------------------
+    // Get users
+    // ----------------------------------------
+
+    const users = await User.find({ role })
+      .select("name email avatar status availability permissions createdAt")
+      .sort({ name: 1 })
+      .lean();
+
+    // ----------------------------------------
+    // Add effective permission information
+    // ----------------------------------------
+
+    const rolePermissions = await RolePermission.findOne({
+      role,
+    }).lean();
+
+    const defaultPermissions =
+      rolePermissions?.permissions || ROLE_PERMISSIONS[role] || [];
+
+    const usersWithPermissionInfo = users.map((user) => {
+      const isCustomized = Array.isArray(user.permissions);
+
+      const effectivePermissions = isCustomized
+        ? user.permissions
+        : defaultPermissions;
+
+      return {
+        ...user,
+
+        isCustomized,
+
+        effectivePermissions,
+
+        permissionCount: effectivePermissions.length,
+
+        rolePermissionCount: defaultPermissions.length,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+
+      role,
+
+      users: usersWithPermissionInfo,
+
+      rolePermissions: defaultPermissions,
+
+      total: usersWithPermissionInfo.length,
+    });
+  } catch (error) {
+    console.error("GET USERS FOR PERMISSIONS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch users for permissions.",
+    });
+  }
+};
+
+// ==========================================
+// GET INDIVIDUAL USER PERMISSIONS
+// ==========================================
+// GET /api/role-permissions/users/:userId
+// ==========================================
+
+export const getUserPermissions = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // ----------------------------------------
+    // Find user
+    // ----------------------------------------
+
+    const user = await User.findById(userId)
+      .select("name email avatar role status availability permissions")
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    // ----------------------------------------
+    // Only agent/customer individual
+    // permissions are managed here.
+    // ----------------------------------------
+
+    if (!INDIVIDUAL_PERMISSION_ROLES.includes(user.role)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Individual permissions are only available for agents and customers.",
+      });
+    }
+
+    // ----------------------------------------
+    // Get role defaults
+    // ----------------------------------------
+
+    const savedRolePermissions = await RolePermission.findOne({
+      role: user.role,
+    }).lean();
+
+    const rolePermissions =
+      savedRolePermissions?.permissions || ROLE_PERMISSIONS[user.role] || [];
+
+    // ----------------------------------------
+    // Determine effective permissions
+    // ----------------------------------------
+
+    const isCustomized = Array.isArray(user.permissions);
+
+    const effectivePermissions = isCustomized
+      ? user.permissions
+      : rolePermissions;
+
+    return res.status(200).json({
+      success: true,
+
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar,
+        role: user.role,
+        status: user.status,
+        availability: user.availability,
+      },
+
+      permissions: effectivePermissions,
+
+      effectivePermissions,
+
+      rolePermissions,
+
+      isCustomized,
+    });
+  } catch (error) {
+    console.error("GET USER PERMISSIONS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch user permissions.",
+    });
+  }
+};
+
+// ==========================================
+// UPDATE INDIVIDUAL USER PERMISSIONS
+// ==========================================
+// PATCH /api/role-permissions/users/:userId
+// ==========================================
+//
+// Body:
+//
+// {
+//   "permissions": [
+//     "dashboard.view",
+//     "tickets.view"
+//   ]
+// }
+//
+// ==========================================
+
+export const updateUserPermissions = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { permissions } = req.body;
+
+    // ----------------------------------------
+    // Find user
+    // ----------------------------------------
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    // ----------------------------------------
+    // Only agent/customer
+    // ----------------------------------------
+
+    if (!INDIVIDUAL_PERMISSION_ROLES.includes(user.role)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Individual permissions can only be changed for agents and customers.",
+      });
+    }
+
+    // ----------------------------------------
+    // Validate permissions
+    // ----------------------------------------
+
+    const validation = validatePermissions(permissions);
+
+    if (!validation.valid) {
+      return res.status(400).json({
+        success: false,
+        message: validation.message,
+        invalidPermissions: validation.invalidPermissions || [],
+      });
+    }
+
+    const uniquePermissions = validation.permissions;
+
+    // ----------------------------------------
+    // Save individual permissions
+    // ----------------------------------------
+
+    user.permissions = uniquePermissions;
+
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+
+      message: `${user.role} individual permissions updated successfully.`,
+
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+
+      permissions: user.permissions,
+
+      isCustomized: true,
+    });
+  } catch (error) {
+    console.error("UPDATE USER PERMISSIONS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update user permissions.",
+    });
+  }
+};
+
+// ==========================================
+// RESET INDIVIDUAL USER PERMISSIONS
+// ==========================================
+// DELETE /api/role-permissions/users/:userId
+// ==========================================
+//
+// Reset means:
+//
+// permissions = null
+//
+// The user will then inherit the permissions
+// from their role again.
+// ==========================================
+
+export const resetUserPermissions = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // ----------------------------------------
+    // Find user
+    // ----------------------------------------
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    // ----------------------------------------
+    // Only agent/customer
+    // ----------------------------------------
+
+    if (!INDIVIDUAL_PERMISSION_ROLES.includes(user.role)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Individual permissions can only be reset for agents and customers.",
+      });
+    }
+
+    // ----------------------------------------
+    // Reset to role defaults
+    // ----------------------------------------
+
+    user.permissions = null;
+
+    await user.save();
+
+    // ----------------------------------------
+    // Get current role permissions
+    // ----------------------------------------
+
+    const savedRolePermissions = await RolePermission.findOne({
+      role: user.role,
+    }).lean();
+
+    const rolePermissions =
+      savedRolePermissions?.permissions || ROLE_PERMISSIONS[user.role] || [];
+
+    return res.status(200).json({
+      success: true,
+
+      message: `${user.role} permissions reset to role defaults.`,
+
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+
+      permissions: rolePermissions,
+
+      isCustomized: false,
+    });
+  } catch (error) {
+    console.error("RESET USER PERMISSIONS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to reset user permissions.",
+    });
   }
 };

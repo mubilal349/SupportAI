@@ -146,6 +146,11 @@ const userSchema = new mongoose.Schema(
       default: "offline",
     },
 
+    permissions: {
+      type: [String],
+      default: null,
+    },
+
     // ==========================================
     // ACTIVITY
     // ==========================================

@@ -1,4 +1,22 @@
-import { getRolePermissions } from "../services/permissionService.js";
+import { getAuthenticatedUserPermissions } from "../services/permissionService.js";
+
+// ==========================================
+// GET CURRENT USER PERMISSIONS
+// ==========================================
+//
+// Permission priority:
+//
+// 1. Individual user permissions
+// 2. Role permissions
+// 3. Default ROLE_PERMISSIONS
+//
+// This makes individual customer/agent
+// permission overrides actually effective.
+// ==========================================
+
+const getCurrentUserPermissions = async (req) => {
+  return await getAuthenticatedUserPermissions(req);
+};
 
 // ==========================================
 // REQUIRE ONE PERMISSION
@@ -7,21 +25,39 @@ import { getRolePermissions } from "../services/permissionService.js";
 export const requirePermission = (permission) => {
   return async (req, res, next) => {
     try {
-      const role = req.user?.role;
+      // --------------------------------------
+      // Validate permission configuration
+      // --------------------------------------
 
+      if (!permission) {
+        return res.status(500).json({
+          success: false,
+          message: "No permission was configured for this route.",
+        });
+      }
+
+      // --------------------------------------
       // User must be authenticated
-      if (!role) {
+      // --------------------------------------
+
+      if (!req.user) {
         return res.status(401).json({
           success: false,
           message: "Authentication required.",
         });
       }
 
-      const permissions = await getRolePermissions(role);
+      // --------------------------------------
+      // Get effective permissions
+      // --------------------------------------
 
-      // Check whether the user's role has
-      // the requested permission.
-      if (!permissions.includes(permission)) {
+      const userPermissions = await getCurrentUserPermissions(req);
+
+      // --------------------------------------
+      // Check permission
+      // --------------------------------------
+
+      if (!userPermissions.includes(permission)) {
         return res.status(403).json({
           success: false,
           message: "You do not have permission to perform this action.",
@@ -48,14 +84,9 @@ export const requirePermission = (permission) => {
 export const requireAnyPermission = (permissions = []) => {
   return async (req, res, next) => {
     try {
-      const role = req.user?.role;
-
-      if (!role) {
-        return res.status(401).json({
-          success: false,
-          message: "Authentication required.",
-        });
-      }
+      // --------------------------------------
+      // Validate permission configuration
+      // --------------------------------------
 
       if (!Array.isArray(permissions) || permissions.length === 0) {
         return res.status(500).json({
@@ -64,7 +95,27 @@ export const requireAnyPermission = (permissions = []) => {
         });
       }
 
-      const userPermissions = await getRolePermissions(role);
+      // --------------------------------------
+      // User must be authenticated
+      // --------------------------------------
+
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          message: "Authentication required.",
+        });
+      }
+
+      // --------------------------------------
+      // Get effective permissions
+      // --------------------------------------
+
+      const userPermissions = await getCurrentUserPermissions(req);
+
+      // --------------------------------------
+      // Check whether at least one permission
+      // exists.
+      // --------------------------------------
 
       const hasAccess = permissions.some((permission) =>
         userPermissions.includes(permission),
@@ -74,6 +125,7 @@ export const requireAnyPermission = (permissions = []) => {
         return res.status(403).json({
           success: false,
           message: "You do not have permission to access this resource.",
+          permissions,
         });
       }
 
@@ -96,14 +148,9 @@ export const requireAnyPermission = (permissions = []) => {
 export const requireAllPermissions = (permissions = []) => {
   return async (req, res, next) => {
     try {
-      const role = req.user?.role;
-
-      if (!role) {
-        return res.status(401).json({
-          success: false,
-          message: "Authentication required.",
-        });
-      }
+      // --------------------------------------
+      // Validate permission configuration
+      // --------------------------------------
 
       if (!Array.isArray(permissions) || permissions.length === 0) {
         return res.status(500).json({
@@ -112,7 +159,26 @@ export const requireAllPermissions = (permissions = []) => {
         });
       }
 
-      const userPermissions = await getRolePermissions(role);
+      // --------------------------------------
+      // User must be authenticated
+      // --------------------------------------
+
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          message: "Authentication required.",
+        });
+      }
+
+      // --------------------------------------
+      // Get effective permissions
+      // --------------------------------------
+
+      const userPermissions = await getCurrentUserPermissions(req);
+
+      // --------------------------------------
+      // Check whether ALL permissions exist.
+      // --------------------------------------
 
       const hasAccess = permissions.every((permission) =>
         userPermissions.includes(permission),
@@ -122,6 +188,7 @@ export const requireAllPermissions = (permissions = []) => {
         return res.status(403).json({
           success: false,
           message: "You do not have permission to access this resource.",
+          permissions,
         });
       }
 

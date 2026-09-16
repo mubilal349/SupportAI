@@ -52,7 +52,27 @@ const request = async (url, options = {}) => {
 };
 
 // ==========================================
+// GET CURRENT USER PERMISSIONS
+// ==========================================
+//
+// Used by ProtectedRoute.
+//
+// Returns effective permissions:
+// - Individual permissions if customized
+// - Otherwise role permissions
+// ==========================================
+
+export const getMyPermissions = async () => {
+  return request("/role-permissions/me");
+};
+
+// ==========================================
 // GET ALL ROLE PERMISSIONS
+// ==========================================
+//
+// Admin only.
+//
+// Returns role defaults and permission definitions.
 // ==========================================
 
 export const getRolePermissions = async () => {
@@ -74,6 +94,13 @@ export const getSingleRolePermissions = async (role) => {
 // ==========================================
 // UPDATE ROLE PERMISSIONS
 // ==========================================
+//
+// Updates the default permissions for an entire
+// role.
+//
+// It does NOT overwrite individual user
+// custom permissions.
+// ==========================================
 
 export const updateRolePermissions = async (role, permissions) => {
   if (!role) {
@@ -90,5 +117,101 @@ export const updateRolePermissions = async (role, permissions) => {
     body: JSON.stringify({
       permissions,
     }),
+  });
+};
+
+// ==========================================
+// GET USERS FOR INDIVIDUAL PERMISSIONS
+// ==========================================
+//
+// role:
+// - "customer"
+// - "agent"
+//
+// Example:
+//
+// getUsersForPermissions("customer")
+// ==========================================
+
+export const getUsersForPermissions = async (role) => {
+  if (!role) {
+    throw new Error("Role is required.");
+  }
+
+  if (!["agent", "customer"].includes(role)) {
+    throw new Error(
+      "Individual permissions are only available for agents and customers.",
+    );
+  }
+
+  return request(`/role-permissions/users?role=${encodeURIComponent(role)}`);
+};
+
+// ==========================================
+// GET ONE USER'S PERMISSIONS
+// ==========================================
+//
+// Example:
+//
+// getUserPermissions(userId)
+// ==========================================
+
+export const getUserPermissions = async (userId) => {
+  if (!userId) {
+    throw new Error("User ID is required.");
+  }
+
+  return request(`/role-permissions/users/${userId}`);
+};
+
+// ==========================================
+// UPDATE ONE USER'S PERMISSIONS
+// ==========================================
+//
+// Example:
+//
+// updateUserPermissions(userId, [
+//   "dashboard.view",
+//   "tickets.view"
+// ])
+// ==========================================
+
+export const updateUserPermissions = async (userId, permissions) => {
+  if (!userId) {
+    throw new Error("User ID is required.");
+  }
+
+  if (!Array.isArray(permissions)) {
+    throw new Error("Permissions must be an array.");
+  }
+
+  return request(`/role-permissions/users/${userId}`, {
+    method: "PATCH",
+
+    body: JSON.stringify({
+      permissions,
+    }),
+  });
+};
+
+// ==========================================
+// RESET ONE USER'S PERMISSIONS
+// ==========================================
+//
+// Reset means:
+//
+// permissions = null
+//
+// The user will inherit permissions from
+// their role again.
+// ==========================================
+
+export const resetUserPermissions = async (userId) => {
+  if (!userId) {
+    throw new Error("User ID is required.");
+  }
+
+  return request(`/role-permissions/users/${userId}`, {
+    method: "DELETE",
   });
 };
