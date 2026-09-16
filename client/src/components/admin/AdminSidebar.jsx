@@ -13,6 +13,7 @@ import {
   LayoutDashboard,
   MessageSquare,
   Menu,
+  AlertTriangle,
   Settings,
   ShieldCheck,
   Ticket,
@@ -66,6 +67,11 @@ const AdminSidebar = () => {
       label: "SLA Management",
       path: "/admin/sla",
       icon: Clock3,
+    },
+    {
+      label: "Escalations",
+      path: "/admin/escalations",
+      icon: AlertTriangle,
     },
     {
       label: "Analytics",

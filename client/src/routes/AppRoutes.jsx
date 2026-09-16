@@ -41,6 +41,8 @@ import AdminNotifications from "../pages/admin/AdminNotifications";
 
 import AdminRolePermissions from "../pages/admin/AdminRolePermissions";
 
+import AdminEscalations from "../pages/admin/escalation/AdminEscalations";
+
 // Customer
 import CustomerDashboard from "../pages/customer/Dashboard";
 import CustomerChat from "../pages/customer/Chat";
@@ -211,6 +213,17 @@ const AppRoutes = () => {
                 requiredPermission="agents.manage"
               >
                 <AdminAgentDetails />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Escalations */}
+
+          <Route
+            path="escalations"
+            element={
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <AdminEscalations />
               </ProtectedRoute>
             }
           />

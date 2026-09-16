@@ -20,6 +20,7 @@ import adminDashboardRoutes from "./routes/adminDashboardRoutes.js";
 import adminUserRoutes from "./routes/adminUserRoutes.js";
 import adminAgentRoutes from "./routes/adminAgentRoutes.js";
 import adminTicketRoutes from "./routes/adminTicketRoutes.js";
+import adminEscalationRoutes from "./routes/adminEscalationRoutes.js";
 
 import rolePermissionRoutes from "./routes/rolePermissionRoutes.js";
 
@@ -73,5 +74,6 @@ app.use("/api/admin/dashboard", adminDashboardRoutes);
 app.use("/api/admin/users", adminUserRoutes);
 app.use("/api/admin/agents", adminAgentRoutes);
 app.use("/api/admin/tickets", adminTicketRoutes);
+app.use("/api/admin/escalations", adminEscalationRoutes);
 
 export default app;
