@@ -28,6 +28,7 @@ import {
   Copy,
   MessageCircle,
   Plus,
+  Star,
 } from "lucide-react";
 import { io } from "socket.io-client";
 import { useNavigate, useParams } from "react-router-dom";
@@ -2693,6 +2694,76 @@ const AgentTicketDetails = () => {
                 </div>
               )}
             </section>
+
+            {/* CUSTOMER RATING */}
+
+            {ticket?.customerRating != null && (
+              <section className="rounded-3xl border border-slate-800 bg-slate-900/40 p-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Star size={17} className="text-amber-400" />
+
+                    <h3 className="text-sm font-semibold text-white">
+                      Customer Rating
+                    </h3>
+                  </div>
+
+                  <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-300">
+                    {Number(ticket.customerRating)}/5
+                  </span>
+                </div>
+
+                {/* STARS */}
+
+                <div className="flex items-center gap-1">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <Star
+                      key={star}
+                      size={21}
+                      className={
+                        star <= Number(ticket.customerRating)
+                          ? "fill-amber-400 text-amber-400"
+                          : "text-slate-700"
+                      }
+                    />
+                  ))}
+                </div>
+
+                {/* FEEDBACK */}
+
+                {ticket?.customerFeedback?.trim() && (
+                  <div className="mt-4">
+                    <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-slate-600">
+                      Customer Feedback
+                    </p>
+
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
+                      <p className="whitespace-pre-wrap text-sm leading-6 text-slate-400">
+                        {ticket.customerFeedback}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* RATED DATE */}
+
+                {ticket?.ratedAt && (
+                  <div className="mt-4 border-t border-slate-800 pt-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-600">Rated</span>
+
+                      <span className="text-[11px] text-slate-500">
+                        {formatDate(ticket.ratedAt)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* ASSIGNMENT */}
+
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/40 p-5"></section>
 
             {/* ASSIGNMENT */}
 

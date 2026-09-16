@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import User from "../models/User.js";
 import Ticket from "../models/Ticket.js";
 
@@ -44,15 +45,24 @@ export const getAdminAgents = async ({
 
   const agentIds = agents.map((agent) => agent._id);
 
-  const workload = await Ticket.aggregate([
+  // ============================================================
+  // GET AGENT WORKLOAD + CUSTOMER RATINGS
+  // ============================================================
+
+  const agentStats = await Ticket.aggregate([
     {
       $match: {
         assignedAgent: { $in: agentIds },
       },
     },
+
     {
       $group: {
         _id: "$assignedAgent",
+
+        // ======================================================
+        // WORKLOAD
+        // ======================================================
 
         totalTickets: {
           $sum: 1,
@@ -81,31 +91,114 @@ export const getAdminAgents = async ({
             $cond: [{ $eq: ["$status", "resolved"] }, 1, 0],
           },
         },
+
+        // ======================================================
+        // CUSTOMER RATINGS
+        //
+        // Supports both:
+        // customerRating
+        // satisfaction.rating
+        // ======================================================
+
+        totalRatings: {
+          $sum: {
+            $cond: [
+              {
+                $or: [
+                  {
+                    $and: [
+                      { $gte: ["$customerRating", 1] },
+                      { $lte: ["$customerRating", 5] },
+                    ],
+                  },
+                  {
+                    $and: [
+                      { $gte: ["$satisfaction.rating", 1] },
+                      { $lte: ["$satisfaction.rating", 5] },
+                    ],
+                  },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+
+        ratingSum: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $gte: ["$customerRating", 1] },
+                  { $lte: ["$customerRating", 5] },
+                ],
+              },
+              "$customerRating",
+              {
+                $cond: [
+                  {
+                    $and: [
+                      { $gte: ["$satisfaction.rating", 1] },
+                      { $lte: ["$satisfaction.rating", 5] },
+                    ],
+                  },
+                  "$satisfaction.rating",
+                  0,
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+
+    // ==========================================================
+    // CALCULATE AVERAGE RATING
+    // ==========================================================
+
+    {
+      $addFields: {
+        averageRating: {
+          $cond: [
+            { $gt: ["$totalRatings", 0] },
+            {
+              $divide: ["$ratingSum", "$totalRatings"],
+            },
+            null,
+          ],
+        },
       },
     },
   ]);
 
-  const workloadMap = new Map(workload.map((item) => [String(item._id), item]));
+  const statsMap = new Map(agentStats.map((item) => [String(item._id), item]));
+
+  // ============================================================
+  // RETURN AGENTS
+  // ============================================================
 
   return agents.map((agent) => {
-    const stats = workloadMap.get(String(agent._id)) || {
-      totalTickets: 0,
-      openTickets: 0,
-      inProgressTickets: 0,
-      waitingTickets: 0,
-      resolvedTickets: 0,
-    };
+    const stats = statsMap.get(String(agent._id));
 
     return {
       ...agent,
 
       workload: {
-        totalTickets: stats.totalTickets,
-        openTickets: stats.openTickets,
-        inProgressTickets: stats.inProgressTickets,
-        waitingTickets: stats.waitingTickets,
-        resolvedTickets: stats.resolvedTickets,
+        totalTickets: stats?.totalTickets || 0,
+        openTickets: stats?.openTickets || 0,
+        inProgressTickets: stats?.inProgressTickets || 0,
+        waitingTickets: stats?.waitingTickets || 0,
+        resolvedTickets: stats?.resolvedTickets || 0,
       },
+
+      // Customer rating
+      averageRating:
+        stats?.averageRating != null
+          ? Number(stats.averageRating.toFixed(1))
+          : null,
+
+      totalRatings: stats?.totalRatings || 0,
     };
   });
 };
@@ -126,6 +219,10 @@ export const getAdminAgentById = async (agentId) => {
     return null;
   }
 
+  // ============================================================
+  // GET TICKET STATS + CUSTOMER RATING
+  // ============================================================
+
   const [
     totalTickets,
     openTickets,
@@ -133,39 +230,128 @@ export const getAdminAgentById = async (agentId) => {
     waitingTickets,
     resolvedTickets,
     closedTickets,
+    ratingStats,
   ] = await Promise.all([
+    // Total
     Ticket.countDocuments({
       assignedAgent: agentId,
     }),
 
+    // Open
     Ticket.countDocuments({
       assignedAgent: agentId,
       status: "open",
     }),
 
+    // In Progress
     Ticket.countDocuments({
       assignedAgent: agentId,
       status: "in-progress",
     }),
 
+    // Waiting
     Ticket.countDocuments({
       assignedAgent: agentId,
       status: "waiting",
     }),
 
+    // Resolved
     Ticket.countDocuments({
       assignedAgent: agentId,
       status: "resolved",
     }),
 
+    // Closed
     Ticket.countDocuments({
       assignedAgent: agentId,
       status: "closed",
     }),
+
+    // ==========================================================
+    // CUSTOMER RATING
+    // ==========================================================
+
+    Ticket.aggregate([
+      {
+        $match: {
+          assignedAgent: new mongoose.Types.ObjectId(agentId),
+
+          $or: [
+            {
+              customerRating: {
+                $gte: 1,
+                $lte: 5,
+              },
+            },
+            {
+              "satisfaction.rating": {
+                $gte: 1,
+                $lte: 5,
+              },
+            },
+          ],
+        },
+      },
+
+      {
+        $project: {
+          rating: {
+            $cond: [
+              {
+                $and: [
+                  { $gte: ["$customerRating", 1] },
+                  { $lte: ["$customerRating", 5] },
+                ],
+              },
+              "$customerRating",
+              "$satisfaction.rating",
+            ],
+          },
+        },
+      },
+
+      {
+        $group: {
+          _id: null,
+
+          averageRating: {
+            $avg: "$rating",
+          },
+
+          totalRatings: {
+            $sum: 1,
+          },
+        },
+      },
+    ]),
   ]);
+
+  const ratingData = ratingStats[0] || {
+    averageRating: null,
+    totalRatings: 0,
+  };
+
+  // ============================================================
+  // RETURN AGENT
+  // ============================================================
 
   return {
     ...agent,
+
+    // ==========================================================
+    // CUSTOMER RATING
+    // ==========================================================
+
+    averageRating:
+      ratingData.averageRating != null
+        ? Number(ratingData.averageRating.toFixed(1))
+        : null,
+
+    totalRatings: ratingData.totalRatings || 0,
+
+    // ==========================================================
+    // WORKLOAD
+    // ==========================================================
 
     workload: {
       totalTickets,

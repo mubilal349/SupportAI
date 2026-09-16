@@ -548,13 +548,25 @@ const AgentDetails = () => {
             {/* Rating */}
 
             <div className="flex gap-3">
-              <Star size={17} className="text-slate-600" />
+              <Star size={17} className="text-amber-400" />
 
               <div>
                 <p className="text-[11px] text-slate-600">Customer Rating</p>
 
                 <p className="mt-1 text-sm text-slate-300">
-                  {rating ? `★ ${rating} / 5` : "No rating yet"}
+                  {agent?.averageRating != null ? (
+                    <>
+                      <span className="text-amber-400">★</span>{" "}
+                      {Number(agent.averageRating).toFixed(1)} / 5
+                      {agent?.totalRatings > 0 && (
+                        <span className="ml-2 text-xs text-slate-600">
+                          ({agent.totalRatings} ratings)
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    "No rating yet"
+                  )}
                 </p>
               </div>
             </div>
