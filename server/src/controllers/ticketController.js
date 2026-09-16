@@ -7,6 +7,8 @@ import User from "../models/User.js";
 
 import { createSlaDates } from "../utils/sla.js";
 
+import { calculateSlaDeadlinesService } from "../services/slaService.js";
+
 import { generateAIResponse } from "../services/aiService.js";
 
 import {
@@ -453,14 +455,20 @@ export const createTicket = async (req, res) => {
 
     /*
      * =====================================================
-     * CREATE SLA DATES
+     * CREATE SLA DATES FROM ADMIN SLA POLICY
      * =====================================================
+     *
+     * The SLA Management page controls these values.
+     *
+     * Example:
+     * urgent → 30 min response / 4 hour resolution
+     * high   → 60 min response / 8 hour resolution
+     * medium → 120 min response / 24 hour resolution
+     * low    → 240 min response / 48 hour resolution
+     *
      */
 
-    const sla = createSlaDates({
-      createdAt: now,
-      priority: ticketPriority,
-    });
+    const sla = await calculateSlaDeadlinesService(ticketPriority, now);
 
     /*
      * =====================================================
