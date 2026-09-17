@@ -17,26 +17,32 @@ import {
 const router = express.Router();
 
 // ============================================================
-// AGENT KNOWLEDGE BASE
+// CUSTOMER / AGENT / ADMIN — READ ACCESS
 // ============================================================
 
 // GET /api/knowledge-base
-router.get("/", authenticateToken, requireAgent, getAllKnowledgeBaseArticles);
+// Customers can view published articles
+router.get("/", authenticateToken, getAllKnowledgeBaseArticles);
 
 // GET /api/knowledge-base/search?q=password
-router.get("/search", authenticateToken, requireAgent, searchKnowledgeBase);
+// Customers can search published articles
+router.get("/search", authenticateToken, searchKnowledgeBase);
 
 // GET /api/knowledge-base/:id
-router.get("/:id", authenticateToken, requireAgent, getKnowledgeBaseArticle);
+// Customers can view a published article
+router.get("/:id", authenticateToken, getKnowledgeBaseArticle);
 
 // ============================================================
-// MANAGEMENT
+// AGENT / ADMIN — MANAGEMENT
 // ============================================================
 
+// POST /api/knowledge-base
 router.post("/", authenticateToken, requireAgent, createKnowledgeBaseArticle);
 
+// PUT /api/knowledge-base/:id
 router.put("/:id", authenticateToken, requireAgent, updateKnowledgeBaseArticle);
 
+// DELETE /api/knowledge-base/:id
 router.delete(
   "/:id",
   authenticateToken,

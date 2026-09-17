@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Bot,
+  BookOpen,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -13,7 +14,6 @@ import {
   Ticket,
   X,
 } from "lucide-react";
-
 import { Link, NavLink } from "react-router-dom";
 
 import {
@@ -80,6 +80,12 @@ const workspaceItems = [
     label: "My Tickets",
     to: "/agent/my-tickets",
     icon: ClipboardList,
+    end: true,
+  },
+  {
+    label: "Knowledge Base",
+    to: "/agent/knowledge-base",
+    icon: BookOpen,
     end: true,
   },
   {

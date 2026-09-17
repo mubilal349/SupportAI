@@ -155,7 +155,15 @@ export const getKnowledgeBaseArticle = async (req, res) => {
 
 export const createKnowledgeBaseArticle = async (req, res) => {
   try {
-    const { title, category, content, solution, tags, isPublished } = req.body;
+    const {
+      title,
+      category,
+      content,
+      solution,
+      solutionVideoUrl,
+      tags,
+      isPublished,
+    } = req.body;
 
     if (!title?.trim()) {
       return res.status(400).json({
@@ -185,11 +193,18 @@ export const createKnowledgeBaseArticle = async (req, res) => {
       });
     }
 
+    // Optional video URL
+    const videoUrl =
+      solutionVideoUrl !== undefined && solutionVideoUrl !== null
+        ? String(solutionVideoUrl).trim()
+        : "";
+
     const article = await KnowledgeBase.create({
       title: title.trim(),
       category: category.trim(),
       content: content.trim(),
       solution: solution.trim(),
+      solutionVideoUrl: videoUrl,
       tags: Array.isArray(tags) ? tags : [],
       isPublished: typeof isPublished === "boolean" ? isPublished : true,
       createdBy: req.user?.id || null,
@@ -219,7 +234,15 @@ export const updateKnowledgeBaseArticle = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { title, category, content, solution, tags, isPublished } = req.body;
+    const {
+      title,
+      category,
+      content,
+      solution,
+      solutionVideoUrl,
+      tags,
+      isPublished,
+    } = req.body;
 
     const article = await KnowledgeBase.findById(id);
 
@@ -272,6 +295,12 @@ export const updateKnowledgeBaseArticle = async (req, res) => {
       }
 
       article.solution = String(solution).trim();
+    }
+
+    // Update / remove solution video
+    if (solutionVideoUrl !== undefined) {
+      article.solutionVideoUrl =
+        solutionVideoUrl === null ? "" : String(solutionVideoUrl).trim();
     }
 
     if (tags !== undefined) {

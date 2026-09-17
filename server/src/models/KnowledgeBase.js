@@ -28,6 +28,12 @@ const knowledgeBaseSchema = new mongoose.Schema(
       trim: true,
     },
 
+    solutionVideoUrl: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     tags: {
       type: [String],
       default: [],

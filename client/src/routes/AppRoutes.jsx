@@ -43,6 +43,8 @@ import AdminRolePermissions from "../pages/admin/AdminRolePermissions";
 
 import AdminEscalations from "../pages/admin/escalation/AdminEscalations";
 
+import AdminArticleView from "../pages/admin/knowledge-base/ArticleView";
+
 // Customer
 import CustomerDashboard from "../pages/customer/Dashboard";
 import CustomerChat from "../pages/customer/Chat";
@@ -70,6 +72,8 @@ import MyTickets from "../pages/agent/tickets/MyTickets";
 import AgentCustomerProfile from "../pages/agent/AgentCustomerProfile";
 import EscalatedTickets from "../pages/agent/EscalatedTickets";
 import AgentAnalytics from "../pages/agent/AgentAnalytics";
+import AgentKnowledgeBase from "../pages/agent/KnowledgeBase";
+import KnowledgeBaseDetails from "../pages/agent/KnowledgeBaseDetails";
 
 // Route Protection
 import ProtectedRoute from "./ProtectedRoute";
@@ -242,6 +246,7 @@ const AppRoutes = () => {
             }
           />
 
+          {/* Create New Article */}
           <Route
             path="knowledge-base/new"
             element={
@@ -254,6 +259,20 @@ const AppRoutes = () => {
             }
           />
 
+          {/* Edit Existing Article */}
+          <Route
+            path="knowledge-base/:articleId/edit"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="knowledge_base.manage"
+              >
+                <AdminArticleEditor />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* View Existing Article */}
           <Route
             path="knowledge-base/:articleId"
             element={
@@ -261,7 +280,7 @@ const AppRoutes = () => {
                 allowedRoles={["admin"]}
                 requiredPermission="knowledge_base.manage"
               >
-                <AdminArticleEditor />
+                <AdminArticleView />
               </ProtectedRoute>
             }
           />
@@ -449,6 +468,34 @@ const AppRoutes = () => {
                 requiredPermission="tickets.view"
               >
                 <EscalatedTickets />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ========================================
+        KNOWLEDGE BASE
+    ======================================== */}
+
+          <Route
+            path="knowledge-base"
+            element={
+              <ProtectedRoute
+                allowedRoles={["agent"]}
+                requiredPermission="knowledge_base.view"
+              >
+                <AgentKnowledgeBase />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="knowledge-base/:articleId"
+            element={
+              <ProtectedRoute
+                allowedRoles={["agent"]}
+                requiredPermission="knowledge_base.view"
+              >
+                <KnowledgeBaseDetails />
               </ProtectedRoute>
             }
           />

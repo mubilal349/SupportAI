@@ -1,7 +1,6 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowLeft,
   ArrowRight,
   BookOpen,
   Bot,
@@ -23,12 +22,25 @@ import {
   ThumbsUp,
   Eye,
   Clock3,
+  Loader2,
+  Video,
+  ExternalLink,
+  Lightbulb,
 } from "lucide-react";
+
+import {
+  getAllKnowledgeBaseArticles,
+  searchKnowledgeBase,
+} from "../../../services/adminKnowledgeBaseService.js";
 
 const KnowledgeBase = () => {
   // =========================================================
   // STATE
   // =========================================================
+
+  const [articles, setArticles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
@@ -86,164 +98,238 @@ const KnowledgeBase = () => {
   ];
 
   // =========================================================
-  // KNOWLEDGE BASE ARTICLES
+  // LOAD KNOWLEDGE BASE ARTICLES
   // =========================================================
 
-  const articles = [
-    {
-      id: 1,
-      title: "How to get started with SupportAI",
-      description:
-        "Learn how to ask questions, start conversations and get help from SupportAI.",
-      category: "Getting Started",
-      categoryId: "getting-started",
-      icon: Sparkles,
-      views: 1248,
-      readTime: "3 min read",
-      updated: "Sep 2, 2026",
-      tags: ["getting started", "supportai", "beginner"],
-      content: [
-        "SupportAI helps you find answers to common questions and troubleshoot problems using AI-powered support.",
-        "To get started, open the SupportAI chat from your customer dashboard and describe your issue as clearly as possible.",
-        "You can ask follow-up questions, provide additional details and continue the conversation until your issue is resolved.",
-        "If SupportAI cannot resolve your problem, you can escalate the conversation to human support or create a support ticket.",
-      ],
-    },
-    {
-      id: 2,
-      title: "How to create a support ticket",
-      description:
-        "Create a ticket when your issue requires assistance from a human support specialist.",
-      category: "Tickets",
-      categoryId: "tickets",
-      icon: Ticket,
-      views: 982,
-      readTime: "4 min read",
-      updated: "Sep 1, 2026",
-      tags: ["ticket", "support", "request"],
-      content: [
-        "Support tickets are useful when your issue requires human assistance or cannot be resolved through SupportAI.",
-        "Open the My Tickets section from the customer dashboard and select Create Ticket.",
-        "Enter a clear subject and provide a detailed description of the problem.",
-        "You can also attach relevant files or screenshots to help the support team understand the issue.",
-        "After submitting your ticket, you can track its status from the My Tickets page.",
-      ],
-    },
-    {
-      id: 3,
-      title: "Managing your account",
-      description:
-        "Update your profile information, password and account preferences.",
-      category: "Account & Security",
-      categoryId: "account",
-      icon: User,
-      views: 846,
-      readTime: "3 min read",
-      updated: "Aug 30, 2026",
-      tags: ["profile", "account", "password"],
-      content: [
-        "You can manage your SupportAI account from the Profile section of your customer dashboard.",
-        "Your profile allows you to update your name, email address, phone number, company and other available preferences.",
-        "You can also change your password from the Security section.",
-        "For security reasons, always use a strong password and avoid sharing your account credentials.",
-      ],
-    },
-    {
-      id: 4,
-      title: "How AI support works",
-      description:
-        "Understand how SupportAI analyzes your request and finds the best solution.",
-      category: "AI Support",
-      categoryId: "ai",
-      icon: Bot,
-      views: 763,
-      readTime: "5 min read",
-      updated: "Aug 28, 2026",
-      tags: ["ai", "chatbot", "support"],
-      content: [
-        "SupportAI uses artificial intelligence to understand your question and provide relevant support information.",
-        "The system analyzes your request and uses available support knowledge to generate an answer.",
-        "For better results, provide specific information about your problem, including error messages or relevant details.",
-        "If the AI response does not resolve your issue, you can request human assistance.",
-      ],
-    },
-    {
-      id: 5,
-      title: "Contacting human support",
-      description:
-        "Learn how to escalate your request to a support specialist.",
-      category: "Tickets",
-      categoryId: "tickets",
-      icon: LifeBuoy,
-      views: 692,
-      readTime: "2 min read",
-      updated: "Aug 27, 2026",
-      tags: ["human support", "agent", "escalation"],
-      content: [
-        "SupportAI is designed to resolve many common issues automatically.",
-        "If your issue requires human assistance, you can escalate the conversation or create a support ticket.",
-        "When contacting a human support specialist, provide as much relevant information as possible.",
-        "This helps the support team investigate and resolve your issue more quickly.",
-      ],
-    },
-    {
-      id: 6,
-      title: "Keeping your account secure",
-      description:
-        "Follow these recommendations to keep your SupportAI account protected.",
-      category: "Security & Privacy",
-      categoryId: "security",
-      icon: Shield,
-      views: 521,
-      readTime: "4 min read",
-      updated: "Aug 25, 2026",
-      tags: ["security", "privacy", "password"],
-      content: [
-        "Protect your SupportAI account by using a unique and strong password.",
-        "Never share your password or authentication information with other people.",
-        "Review your profile information regularly and report suspicious activity to support.",
-        "When using SupportAI from a shared computer, always sign out when you are finished.",
-      ],
-    },
-    {
-      id: 7,
-      title: "How to reset your password",
-      description:
-        "Learn how to recover access to your account when you forget your password.",
-      category: "Account & Security",
-      categoryId: "account",
-      icon: Shield,
-      views: 1187,
-      readTime: "3 min read",
-      updated: "Aug 24, 2026",
-      tags: ["password", "reset", "account"],
-      content: [
-        "If you forget your password, use the password recovery option available on the SupportAI login page.",
-        "Enter the email address associated with your account and follow the instructions provided.",
-        "Choose a strong new password that you have not used elsewhere.",
-        "If you cannot recover your account, contact the support team for assistance.",
-      ],
-    },
-    {
-      id: 8,
-      title: "Understanding ticket statuses",
-      description:
-        "Learn what Open, In Progress, Resolved and Closed ticket statuses mean.",
-      category: "Tickets",
-      categoryId: "tickets",
-      icon: FileQuestion,
-      views: 439,
-      readTime: "3 min read",
-      updated: "Aug 22, 2026",
-      tags: ["ticket status", "open", "resolved", "closed"],
-      content: [
-        "Open means your ticket has been submitted and is waiting for support processing.",
-        "In Progress means a support specialist is actively working on your issue.",
-        "Resolved means the support team believes the issue has been addressed.",
-        "Closed means the ticket has been completed and is no longer active.",
-      ],
-    },
-  ];
+  const loadArticles = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      const response = searchQuery.trim()
+        ? await searchKnowledgeBase(searchQuery)
+        : await getAllKnowledgeBaseArticles();
+
+      const loadedArticles = Array.isArray(response?.articles)
+        ? response.articles
+        : [];
+
+      setArticles(loadedArticles);
+    } catch (err) {
+      console.error("Customer Knowledge Base error:", err);
+
+      setError(err.message || "Failed to load Knowledge Base articles.");
+
+      setArticles([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [searchQuery]);
+
+  // =========================================================
+  // LOAD / SEARCH
+  // =========================================================
+
+  useEffect(() => {
+    const timer = setTimeout(
+      () => {
+        loadArticles();
+      },
+      searchQuery.trim() ? 350 : 0,
+    );
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, loadArticles]);
+
+  // =========================================================
+  // CATEGORY HELPERS
+  // =========================================================
+
+  const getCategoryId = (categoryName) => {
+    const normalized = String(categoryName || "")
+      .trim()
+      .toLowerCase();
+
+    const matchingCategory = categories.find(
+      (category) =>
+        category.title.toLowerCase() === normalized ||
+        category.id === normalized,
+    );
+
+    if (matchingCategory) {
+      return matchingCategory.id;
+    }
+
+    return normalized.replace(/\s+/g, "-");
+  };
+
+  const getCategoryConfig = (categoryName) => {
+    const categoryId = getCategoryId(categoryName);
+
+    return (
+      categories.find((category) => category.id === categoryId) || {
+        id: categoryId,
+        title: categoryName || "General",
+        description: "Helpful SupportAI resources.",
+        icon: BookOpen,
+        color: "blue",
+      }
+    );
+  };
+
+  // =========================================================
+  // FORMAT DATE
+  // =========================================================
+
+  const formatDate = (date) => {
+    if (!date) return "Recently updated";
+
+    const parsedDate = new Date(date);
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      return "Recently updated";
+    }
+
+    return parsedDate.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  // =========================================================
+  // ESTIMATED READ TIME
+  // =========================================================
+
+  const getReadTime = (article) => {
+    const text = [article?.title, article?.content, article?.solution]
+      .filter(Boolean)
+      .join(" ");
+
+    const words = text.trim().split(/\s+/).filter(Boolean).length;
+
+    if (!words) {
+      return "1 min read";
+    }
+
+    return `${Math.max(1, Math.ceil(words / 200))} min read`;
+  };
+
+  // =========================================================
+  // YOUTUBE HELPERS
+  // =========================================================
+
+  const getYouTubeVideoId = (url) => {
+    if (!url) return null;
+
+    try {
+      const parsedUrl = new URL(url);
+
+      const hostname = parsedUrl.hostname.toLowerCase();
+
+      // youtube.com/watch?v=VIDEO_ID
+      if (
+        hostname === "youtube.com" ||
+        hostname === "www.youtube.com" ||
+        hostname === "m.youtube.com"
+      ) {
+        const watchId = parsedUrl.searchParams.get("v");
+
+        if (watchId) {
+          return watchId;
+        }
+
+        // youtube.com/shorts/VIDEO_ID
+        const shortsMatch = parsedUrl.pathname.match(/^\/shorts\/([^/?]+)/);
+
+        if (shortsMatch) {
+          return shortsMatch[1];
+        }
+
+        // youtube.com/embed/VIDEO_ID
+        const embedMatch = parsedUrl.pathname.match(/^\/embed\/([^/?]+)/);
+
+        if (embedMatch) {
+          return embedMatch[1];
+        }
+      }
+
+      // youtu.be/VIDEO_ID
+      if (hostname === "youtu.be") {
+        const videoId = parsedUrl.pathname.replace("/", "").split("/")[0];
+
+        return videoId || null;
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  // =========================================================
+  // NORMALIZE ARTICLES
+  // =========================================================
+
+  const normalizedArticles = useMemo(() => {
+    return articles.map((article) => {
+      const categoryConfig = getCategoryConfig(article.category);
+
+      const contentArray = Array.isArray(article.content)
+        ? article.content
+        : String(article.content || "")
+            .split(/\n+/)
+            .map((item) => item.trim())
+            .filter(Boolean);
+
+      return {
+        ...article,
+        id: article._id,
+        categoryId: categoryConfig.id,
+        category: article.category || "General",
+        description:
+          article.description ||
+          contentArray[0] ||
+          "Read this Knowledge Base article to learn more.",
+        content: contentArray,
+        solution: article.solution || "",
+        tags: Array.isArray(article.tags) ? article.tags : [],
+        views: article.views || 0,
+        readTime: getReadTime(article),
+        updated: formatDate(article.updatedAt || article.createdAt),
+        icon: categoryConfig.icon,
+        solutionVideoUrl: article.solutionVideoUrl || "",
+      };
+    });
+  }, [articles]);
+
+  // =========================================================
+  // FILTERED ARTICLES
+  // =========================================================
+
+  const filteredArticles = useMemo(() => {
+    return normalizedArticles.filter((article) => {
+      if (selectedCategory === "All") {
+        return true;
+      }
+
+      return article.categoryId === selectedCategory;
+    });
+  }, [normalizedArticles, selectedCategory]);
+
+  // =========================================================
+  // AVAILABLE CATEGORY COUNTS
+  // =========================================================
+
+  const articleCategoryCounts = useMemo(() => {
+    const counts = {};
+
+    normalizedArticles.forEach((article) => {
+      counts[article.categoryId] = (counts[article.categoryId] || 0) + 1;
+    });
+
+    return counts;
+  }, [normalizedArticles]);
 
   // =========================================================
   // FAQ
@@ -343,6 +429,24 @@ const KnowledgeBase = () => {
   ];
 
   // =========================================================
+  // FILTER FAQ
+  // =========================================================
+
+  const filteredFaqs = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    if (!query) {
+      return faqs;
+    }
+
+    return faqs.filter(
+      (faq) =>
+        faq.question.toLowerCase().includes(query) ||
+        faq.answer.toLowerCase().includes(query),
+    );
+  }, [searchQuery]);
+
+  // =========================================================
   // COLOR HELPERS
   // =========================================================
 
@@ -384,53 +488,6 @@ const KnowledgeBase = () => {
   };
 
   // =========================================================
-  // FILTERED ARTICLES
-  // =========================================================
-
-  const filteredArticles = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-
-    return articles.filter((article) => {
-      const matchesCategory =
-        selectedCategory === "All" || article.categoryId === selectedCategory;
-
-      if (!query) {
-        return matchesCategory;
-      }
-
-      const searchableText = [
-        article.title,
-        article.description,
-        article.category,
-        ...article.tags,
-        ...article.content,
-      ]
-        .join(" ")
-        .toLowerCase();
-
-      return matchesCategory && searchableText.includes(query);
-    });
-  }, [searchQuery, selectedCategory]);
-
-  // =========================================================
-  // FAQ FILTER
-  // =========================================================
-
-  const filteredFaqs = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-
-    if (!query) {
-      return faqs;
-    }
-
-    return faqs.filter(
-      (faq) =>
-        faq.question.toLowerCase().includes(query) ||
-        faq.answer.toLowerCase().includes(query),
-    );
-  }, [searchQuery, faqs]);
-
-  // =========================================================
   // HANDLERS
   // =========================================================
 
@@ -438,8 +495,13 @@ const KnowledgeBase = () => {
     setSelectedCategory(categoryId);
 
     if (categoryId === "All") {
-      setSearchQuery("");
+      return;
     }
+
+    window.scrollTo({
+      top: 650,
+      behavior: "smooth",
+    });
   };
 
   const handleFeedback = (articleId, type) => {
@@ -451,6 +513,7 @@ const KnowledgeBase = () => {
 
   const handleOpenArticle = (article) => {
     setSelectedArticle(article);
+
     setFeedback((previous) => ({
       ...previous,
       [article.id]: previous[article.id] || null,
@@ -500,6 +563,7 @@ const KnowledgeBase = () => {
               className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2.5 text-xs font-semibold transition hover:bg-blue-700 sm:px-4"
             >
               <Sparkles className="h-4 w-4" />
+
               <span className="hidden sm:inline">Ask SupportAI</span>
             </Link>
           </div>
@@ -582,6 +646,36 @@ const KnowledgeBase = () => {
         </section>
 
         {/* ===================================================
+            ERROR
+        =================================================== */}
+
+        {error && (
+          <section className="mt-6 rounded-2xl border border-red-500/20 bg-red-500/5 p-5">
+            <div className="flex items-start gap-3">
+              <X className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
+
+              <div>
+                <p className="text-sm font-semibold text-red-300">
+                  Unable to load Knowledge Base
+                </p>
+
+                <p className="mt-1 text-xs leading-5 text-red-300/70">
+                  {error}
+                </p>
+
+                <button
+                  type="button"
+                  onClick={loadArticles}
+                  className="mt-4 rounded-xl bg-red-500/10 px-4 py-2 text-xs font-medium text-red-300 transition hover:bg-red-500/20"
+                >
+                  Try again
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* ===================================================
             SEARCH SUMMARY
         =================================================== */}
 
@@ -648,6 +742,8 @@ const KnowledgeBase = () => {
 
               const isSelected = selectedCategory === category.id;
 
+              const count = articleCategoryCounts[category.id] || 0;
+
               return (
                 <button
                   type="button"
@@ -681,12 +777,19 @@ const KnowledgeBase = () => {
                     {category.description}
                   </p>
 
-                  <span
-                    className={`mt-4 flex items-center gap-1 text-[10px] font-medium ${colors.text}`}
-                  >
-                    {isSelected ? "Viewing articles" : "Explore articles"}
-                    <ArrowRight className="h-3 w-3" />
-                  </span>
+                  <div className="mt-4 flex items-center justify-between">
+                    <span
+                      className={`flex items-center gap-1 text-[10px] font-medium ${colors.text}`}
+                    >
+                      {isSelected ? "Viewing articles" : "Explore articles"}
+
+                      <ArrowRight className="h-3 w-3" />
+                    </span>
+
+                    <span className="text-[10px] text-slate-700">
+                      {count} {count === 1 ? "article" : "articles"}
+                    </span>
+                  </div>
                 </button>
               );
             })}
@@ -706,7 +809,7 @@ const KnowledgeBase = () => {
 
               <h2 className="mt-2 text-xl font-bold">
                 {selectedCategory === "All"
-                  ? "Popular articles"
+                  ? "Knowledge Base articles"
                   : categories.find((item) => item.id === selectedCategory)
                       ?.title || "Articles"}
               </h2>
@@ -716,20 +819,34 @@ const KnowledgeBase = () => {
               </p>
             </div>
 
-            <div className="text-xs text-slate-700">
-              {filteredArticles.length} articles
-            </div>
+            {!loading && (
+              <div className="text-xs text-slate-700">
+                {filteredArticles.length} articles
+              </div>
+            )}
           </div>
 
-          {filteredArticles.length === 0 ? (
+          {/* LOADING */}
+
+          {loading ? (
+            <div className="flex min-h-[300px] items-center justify-center rounded-2xl border border-slate-800 bg-[#0a1323]">
+              <div className="flex flex-col items-center gap-3">
+                <Loader2 className="h-7 w-7 animate-spin text-blue-400" />
+
+                <p className="text-xs text-slate-600">
+                  Loading Knowledge Base...
+                </p>
+              </div>
+            </div>
+          ) : filteredArticles.length === 0 ? (
             <div className="rounded-2xl border border-slate-800 bg-[#0a1323] px-6 py-14 text-center">
               <Search className="mx-auto h-9 w-9 text-slate-700" />
 
               <p className="mt-4 text-sm font-medium">No articles found</p>
 
               <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-slate-600">
-                We couldn't find any knowledge-base articles matching your
-                search. Try different keywords or ask SupportAI for help.
+                We couldn't find any published Knowledge Base articles matching
+                your search.
               </p>
 
               <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
@@ -781,20 +898,29 @@ const KnowledgeBase = () => {
                         <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-slate-700 transition group-hover:translate-x-1 group-hover:text-slate-400" />
                       </div>
 
-                      <p className="mt-2 text-xs leading-5 text-slate-600">
+                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-600">
                         {article.description}
                       </p>
 
                       <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-slate-700">
-                        <span className="inline-flex items-center gap-1">
-                          <Eye className="h-3 w-3" />
-                          {article.views}
-                        </span>
+                        {article.views > 0 && (
+                          <span className="inline-flex items-center gap-1">
+                            <Eye className="h-3 w-3" />
+                            {article.views}
+                          </span>
+                        )}
 
                         <span className="inline-flex items-center gap-1">
                           <Clock3 className="h-3 w-3" />
                           {article.readTime}
                         </span>
+
+                        {article.solutionVideoUrl && (
+                          <span className="inline-flex items-center gap-1 text-purple-400">
+                            <Video className="h-3 w-3" />
+                            Video
+                          </span>
+                        )}
 
                         <span className="ml-auto inline-flex items-center gap-1 text-slate-500 group-hover:text-blue-400">
                           Read article
@@ -950,12 +1076,18 @@ const KnowledgeBase = () => {
           }}
         >
           <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-800 bg-[#08111f] shadow-2xl">
-            {/* Modal header */}
+            {/* =================================================
+                MODAL HEADER
+            ================================================= */}
 
             <div className="flex items-start justify-between gap-4 border-b border-slate-800 p-5 sm:p-6">
               <div className="flex min-w-0 items-start gap-4">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
-                  <selectedArticle.icon className="h-5 w-5" />
+                  {(() => {
+                    const Icon = selectedArticle.icon || BookOpen;
+
+                    return <Icon className="h-5 w-5" />;
+                  })()}
                 </div>
 
                 <div className="min-w-0">
@@ -968,10 +1100,12 @@ const KnowledgeBase = () => {
                   </h2>
 
                   <div className="mt-2 flex flex-wrap items-center gap-3 text-[10px] text-slate-600">
-                    <span className="inline-flex items-center gap-1">
-                      <Eye className="h-3 w-3" />
-                      {selectedArticle.views} views
-                    </span>
+                    {selectedArticle.views > 0 && (
+                      <span className="inline-flex items-center gap-1">
+                        <Eye className="h-3 w-3" />
+                        {selectedArticle.views} views
+                      </span>
+                    )}
 
                     <span className="inline-flex items-center gap-1">
                       <Clock3 className="h-3 w-3" />
@@ -993,47 +1127,151 @@ const KnowledgeBase = () => {
               </button>
             </div>
 
-            {/* Modal content */}
+            {/* =================================================
+                MODAL CONTENT
+            ================================================= */}
 
             <div className="overflow-y-auto p-5 sm:p-7">
               <div className="max-w-2xl">
+                {/* DESCRIPTION */}
+
                 <p className="text-sm leading-7 text-slate-400">
                   {selectedArticle.description}
                 </p>
 
-                <div className="mt-7 space-y-5">
-                  {selectedArticle.content.map((paragraph, index) => (
-                    <div
-                      key={`${selectedArticle.id}-${index}`}
-                      className="flex gap-3"
-                    >
-                      <div className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-500/10 text-blue-400">
-                        <span className="text-[9px] font-bold">
-                          {index + 1}
-                        </span>
+                {/* =================================================
+                    ARTICLE CONTENT
+                ================================================= */}
+
+                <div className="mt-7">
+                  <div className="mb-4 flex items-center gap-2">
+                    <BookOpen className="h-4 w-4 text-blue-400" />
+
+                    <h3 className="text-sm font-semibold text-white">
+                      Article
+                    </h3>
+                  </div>
+
+                  <div className="space-y-5">
+                    {selectedArticle.content.map((paragraph, index) => (
+                      <div
+                        key={`${selectedArticle.id}-${index}`}
+                        className="flex gap-3"
+                      >
+                        <div className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-500/10 text-blue-400">
+                          <span className="text-[9px] font-bold">
+                            {index + 1}
+                          </span>
+                        </div>
+
+                        <p className="whitespace-pre-line text-sm leading-7 text-slate-500">
+                          {paragraph}
+                        </p>
                       </div>
+                    ))}
+                  </div>
+                </div>
 
-                      <p className="text-sm leading-7 text-slate-500">
-                        {paragraph}
-                      </p>
+                {/* =================================================
+                    SOLUTION
+                ================================================= */}
+
+                {selectedArticle.solution && (
+                  <div className="mt-8 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
+                    <div className="flex items-center gap-2">
+                      <Lightbulb className="h-5 w-5 text-emerald-400" />
+
+                      <h3 className="text-sm font-semibold text-emerald-300">
+                        Solution
+                      </h3>
                     </div>
-                  ))}
-                </div>
 
-                {/* Tags */}
+                    <div className="mt-4 whitespace-pre-line text-sm leading-7 text-slate-400">
+                      {selectedArticle.solution}
+                    </div>
+                  </div>
+                )}
 
-                <div className="mt-7 flex flex-wrap gap-2">
-                  {selectedArticle.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-[10px] text-slate-500"
-                    >
-                      #{tag}
-                    </span>
-                  ))}
-                </div>
+                {/* =================================================
+                    SOLUTION VIDEO
+                ================================================= */}
 
-                {/* Feedback */}
+                {selectedArticle.solutionVideoUrl?.trim() && (
+                  <div className="mt-8 rounded-2xl border border-purple-500/20 bg-purple-500/5 p-5">
+                    <div className="flex items-center gap-2">
+                      <Video className="h-5 w-5 text-purple-400" />
+
+                      <div>
+                        <h3 className="text-sm font-semibold text-purple-300">
+                          Video Solution
+                        </h3>
+
+                        <p className="mt-1 text-[10px] text-slate-600">
+                          Watch this video for a visual walkthrough.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 overflow-hidden rounded-2xl border border-slate-800 bg-black">
+                      {getYouTubeVideoId(selectedArticle.solutionVideoUrl) ? (
+                        <div className="aspect-video w-full">
+                          <iframe
+                            src={`https://www.youtube.com/embed/${getYouTubeVideoId(
+                              selectedArticle.solutionVideoUrl,
+                            )}`}
+                            title={`Video solution for ${selectedArticle.title}`}
+                            className="h-full w-full"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            allowFullScreen
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
+                          <Video className="h-10 w-10 text-purple-400" />
+
+                          <p className="mt-4 text-sm font-semibold text-white">
+                            Video solution available
+                          </p>
+
+                          <p className="mt-2 max-w-md text-xs leading-5 text-slate-600">
+                            Open the video using the button below.
+                          </p>
+
+                          <a
+                            href={selectedArticle.solutionVideoUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-5 inline-flex items-center gap-2 rounded-xl bg-purple-600 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-purple-500"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                            Watch Video
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* =================================================
+                    TAGS
+                ================================================= */}
+
+                {selectedArticle.tags.length > 0 && (
+                  <div className="mt-7 flex flex-wrap gap-2">
+                    {selectedArticle.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-[10px] text-slate-500"
+                      >
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* =================================================
+                    FEEDBACK
+                ================================================= */}
 
                 <div className="mt-8 rounded-2xl border border-slate-800 bg-[#0a1323] p-5">
                   <div className="text-center">
@@ -1089,7 +1327,9 @@ const KnowledgeBase = () => {
                   </div>
                 </div>
 
-                {/* Article CTA */}
+                {/* =================================================
+                    ARTICLE CTA
+                ================================================= */}
 
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
                   <Link

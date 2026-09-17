@@ -8,6 +8,8 @@ import {
   X,
   Plus,
   AlertCircle,
+  Video,
+  ExternalLink,
 } from "lucide-react";
 
 import {
@@ -27,6 +29,7 @@ const ArticleEditor = () => {
     category: "General",
     content: "",
     solution: "",
+    solutionVideoUrl: "",
     tags: [],
     isPublished: false,
   });
@@ -65,6 +68,7 @@ const ArticleEditor = () => {
           category: article.category || "General",
           content: article.content || "",
           solution: article.solution || "",
+          solutionVideoUrl: article.solutionVideoUrl || "",
           tags: Array.isArray(article.tags) ? article.tags : [],
           isPublished: Boolean(article.isPublished),
         });
@@ -141,6 +145,31 @@ const ArticleEditor = () => {
   };
 
   // ==========================================
+  // VIDEO URL VALIDATION
+  // ==========================================
+
+  const validateVideoUrl = (url) => {
+    const trimmedUrl = url.trim();
+
+    // Video URL is optional.
+    if (!trimmedUrl) {
+      return "";
+    }
+
+    try {
+      const parsedUrl = new URL(trimmedUrl);
+
+      if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+        return "Video URL must start with http:// or https://";
+      }
+
+      return "";
+    } catch {
+      return "Please enter a valid video URL.";
+    }
+  };
+
+  // ==========================================
   // VALIDATION
   // ==========================================
 
@@ -159,6 +188,12 @@ const ArticleEditor = () => {
 
     if (!form.solution.trim()) {
       return "Solution is required.";
+    }
+
+    const videoError = validateVideoUrl(form.solutionVideoUrl);
+
+    if (videoError) {
+      return videoError;
     }
 
     return "";
@@ -188,6 +223,7 @@ const ArticleEditor = () => {
         category: form.category.trim(),
         content: form.content.trim(),
         solution: form.solution.trim(),
+        solutionVideoUrl: form.solutionVideoUrl.trim(),
         tags: form.tags,
         isPublished: form.isPublished,
       };
@@ -228,7 +264,9 @@ const ArticleEditor = () => {
     alert(
       `Preview:\n\n${form.title || "Untitled Article"}\n\n${
         form.content || "No content."
-      }\n\nSolution:\n${form.solution || "No solution."}`,
+      }\n\nSolution:\n${form.solution || "No solution."}\n\nVideo:\n${
+        form.solutionVideoUrl || "No video added."
+      }`,
     );
   };
 
@@ -271,7 +309,7 @@ const ArticleEditor = () => {
 
         <p className="mt-1 text-sm text-slate-500">
           {isEditing
-            ? "Update the article information, solution, tags, and publication status."
+            ? "Update the article information, solution, video, tags, and publication status."
             : "Create a support article that agents can use while helping customers."}
         </p>
       </div>
@@ -404,6 +442,67 @@ const ArticleEditor = () => {
               This solution can be searched by agents while replying to
               customers.
             </p>
+          </div>
+
+          {/* SOLUTION VIDEO */}
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <Video size={16} className="text-blue-400" />
+
+              <label className="text-xs font-medium text-slate-400">
+                Solution Video URL
+              </label>
+
+              <span className="rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] text-slate-500">
+                Optional
+              </span>
+            </div>
+
+            <input
+              type="url"
+              value={form.solutionVideoUrl}
+              onChange={(e) => update("solutionVideoUrl", e.target.value)}
+              placeholder="https://www.youtube.com/watch?v=..."
+              disabled={saving}
+              className="w-full rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 transition focus:border-blue-500/50 disabled:cursor-not-allowed disabled:opacity-60"
+            />
+
+            <p className="mt-2 text-xs leading-5 text-slate-600">
+              Add an optional YouTube or video URL that demonstrates the
+              solution. Customers will see it when viewing the published
+              article.
+            </p>
+
+            {/* VIDEO URL PREVIEW */}
+            {form.solutionVideoUrl.trim() && (
+              <div className="mt-3 flex flex-col gap-3 rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400">
+                    <Video size={18} />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-200">
+                      Solution video added
+                    </p>
+
+                    <p className="truncate text-xs text-slate-500">
+                      {form.solutionVideoUrl}
+                    </p>
+                  </div>
+                </div>
+
+                <a
+                  href={form.solutionVideoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 transition hover:bg-slate-800 hover:text-white"
+                >
+                  <ExternalLink size={14} />
+                  Test Link
+                </a>
+              </div>
+            )}
           </div>
 
           {/* TAGS */}

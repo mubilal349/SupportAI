@@ -15,6 +15,8 @@ import {
   Loader2,
   CheckCircle2,
   X,
+  ArrowRight,
+  Video,
 } from "lucide-react";
 
 import {
@@ -74,7 +76,7 @@ const KnowledgeBase = () => {
   );
 
   // ============================================================
-  // INITIAL LOAD
+  // INITIAL LOAD / SEARCH
   // ============================================================
 
   useEffect(() => {
@@ -87,6 +89,32 @@ const KnowledgeBase = () => {
 
     return () => clearTimeout(timer);
   }, [searchQuery, loadArticles]);
+
+  // ============================================================
+  // OPEN ARTICLE
+  // ============================================================
+
+  const handleOpenArticle = (article) => {
+    if (!article?._id) {
+      setError("Unable to open this article because its ID is missing.");
+      return;
+    }
+
+    navigate(`/admin/knowledge-base/${article._id}`);
+  };
+
+  // ============================================================
+  // EDIT ARTICLE
+  // ============================================================
+
+  const handleEditArticle = (article) => {
+    if (!article?._id) {
+      setError("Unable to edit this article because its ID is missing.");
+      return;
+    }
+
+    navigate(`/admin/knowledge-base/${article._id}/edit`);
+  };
 
   // ============================================================
   // CATEGORIES
@@ -197,7 +225,13 @@ const KnowledgeBase = () => {
   const formatDate = (date) => {
     if (!date) return "—";
 
-    return new Date(date).toLocaleDateString("en-US", {
+    const parsedDate = new Date(date);
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      return "—";
+    }
+
+    return parsedDate.toLocaleDateString("en-US", {
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -427,7 +461,10 @@ const KnowledgeBase = () => {
           </div>
         ) : (
           <div className="overflow-hidden rounded-2xl border border-slate-800 bg-[#0a1222]">
-            {/* Desktop table */}
+            {/* ================================================== */}
+            {/* DESKTOP TABLE */}
+            {/* ================================================== */}
+
             <div className="hidden overflow-x-auto lg:block">
               <table className="w-full">
                 <thead>
@@ -464,26 +501,46 @@ const KnowledgeBase = () => {
                       key={article._id}
                       className="border-b border-slate-800/70 transition hover:bg-slate-800/20"
                     >
+                      {/* ARTICLE */}
                       <td className="px-5 py-4">
-                        <div className="max-w-md">
-                          <p className="font-semibold text-white">
-                            {article.title}
-                          </p>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenArticle(article)}
+                          className="group block max-w-md text-left"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400 transition group-hover:bg-blue-500/20">
+                              <BookOpen size={16} />
+                            </div>
 
-                          <p className="mt-1 line-clamp-2 text-sm text-slate-500">
-                            {article.content}
-                          </p>
-                        </div>
+                            <div className="min-w-0">
+                              <p className="font-semibold text-white transition-colors group-hover:text-blue-400">
+                                {article.title}
+                              </p>
+
+                              <p className="mt-1 line-clamp-2 text-sm text-slate-500 transition-colors group-hover:text-slate-400">
+                                {article.content}
+                              </p>
+
+                              <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-400 opacity-0 transition-opacity group-hover:opacity-100">
+                                Read article
+                                <ArrowRight size={12} />
+                              </span>
+                            </div>
+                          </div>
+                        </button>
                       </td>
 
+                      {/* CATEGORY */}
                       <td className="px-5 py-4">
                         <span className="inline-flex rounded-lg border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300">
-                          {article.category}
+                          {article.category || "General"}
                         </span>
                       </td>
 
+                      {/* TAGS + VIDEO */}
                       <td className="px-5 py-4">
-                        <div className="flex max-w-[220px] flex-wrap gap-1.5">
+                        <div className="flex max-w-[250px] flex-wrap gap-1.5">
                           {(article.tags || []).slice(0, 3).map((tag) => (
                             <span
                               key={tag}
@@ -499,9 +556,20 @@ const KnowledgeBase = () => {
                               +{(article.tags || []).length - 3}
                             </span>
                           )}
+
+                          {article.solutionVideoUrl?.trim() && (
+                            <span
+                              title="This article has a solution video"
+                              className="inline-flex items-center gap-1 rounded-md bg-purple-500/10 px-2 py-1 text-[11px] font-medium text-purple-300"
+                            >
+                              <Video size={11} />
+                              Video
+                            </span>
+                          )}
                         </div>
                       </td>
 
+                      {/* STATUS */}
                       <td className="px-5 py-4">
                         <button
                           type="button"
@@ -526,25 +594,35 @@ const KnowledgeBase = () => {
                         </button>
                       </td>
 
+                      {/* UPDATED */}
                       <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-400">
                         {formatDate(article.updatedAt)}
                       </td>
 
+                      {/* ACTIONS */}
                       <td className="px-5 py-4">
                         <div className="flex justify-end gap-2">
+                          {/* VIEW */}
+                          <button
+                            type="button"
+                            title="View article"
+                            onClick={() => handleOpenArticle(article)}
+                            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 text-slate-400 transition hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:text-emerald-300"
+                          >
+                            <Eye size={16} />
+                          </button>
+
+                          {/* EDIT */}
                           <button
                             type="button"
                             title="Edit article"
-                            onClick={() =>
-                              navigate(
-                                `/admin/knowledge-base/${article._id}/edit`,
-                              )
-                            }
+                            onClick={() => handleEditArticle(article)}
                             className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 text-slate-400 transition hover:border-blue-500/40 hover:bg-blue-500/10 hover:text-blue-300"
                           >
                             <Pencil size={16} />
                           </button>
 
+                          {/* DELETE */}
                           <button
                             type="button"
                             title="Delete article"
@@ -561,20 +639,40 @@ const KnowledgeBase = () => {
               </table>
             </div>
 
-            {/* Mobile cards */}
+            {/* ================================================== */}
+            {/* MOBILE CARDS */}
+            {/* ================================================== */}
+
             <div className="divide-y divide-slate-800 lg:hidden">
               {filteredArticles.map((article) => (
                 <div key={article._id} className="p-4">
                   <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <h3 className="font-semibold text-white">
-                        {article.title}
-                      </h3>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenArticle(article)}
+                      className="group min-w-0 text-left"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400">
+                          <BookOpen size={16} />
+                        </div>
 
-                      <p className="mt-1 line-clamp-2 text-sm text-slate-500">
-                        {article.content}
-                      </p>
-                    </div>
+                        <div className="min-w-0">
+                          <h3 className="font-semibold text-white transition-colors group-hover:text-blue-400">
+                            {article.title}
+                          </h3>
+
+                          <p className="mt-1 line-clamp-2 text-sm text-slate-500">
+                            {article.content}
+                          </p>
+
+                          <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-400">
+                            Read article
+                            <ArrowRight size={12} />
+                          </span>
+                        </div>
+                      </div>
+                    </button>
 
                     <button
                       type="button"
@@ -589,9 +687,10 @@ const KnowledgeBase = () => {
                     </button>
                   </div>
 
+                  {/* CATEGORY + TAGS + VIDEO */}
                   <div className="mt-3 flex flex-wrap gap-2">
                     <span className="rounded-lg bg-slate-800 px-2.5 py-1 text-xs text-slate-300">
-                      {article.category}
+                      {article.category || "General"}
                     </span>
 
                     {(article.tags || []).slice(0, 3).map((tag) => (
@@ -602,28 +701,48 @@ const KnowledgeBase = () => {
                         #{tag}
                       </span>
                     ))}
+
+                    {article.solutionVideoUrl?.trim() && (
+                      <span className="inline-flex items-center gap-1 rounded-lg bg-purple-500/10 px-2.5 py-1 text-xs font-medium text-purple-300">
+                        <Video size={13} />
+                        Video
+                      </span>
+                    )}
                   </div>
 
-                  <div className="mt-4 flex items-center justify-between">
+                  {/* FOOTER */}
+                  <div className="mt-4 flex items-center justify-between gap-3">
                     <span className="text-xs text-slate-500">
                       Updated {formatDate(article.updatedAt)}
                     </span>
 
                     <div className="flex gap-2">
+                      {/* VIEW */}
                       <button
                         type="button"
-                        onClick={() =>
-                          navigate(`/admin/knowledge-base/${article._id}/edit`)
-                        }
-                        className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:text-blue-300"
+                        title="View article"
+                        onClick={() => handleOpenArticle(article)}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 text-slate-400 transition hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:text-emerald-300"
+                      >
+                        <Eye size={16} />
+                      </button>
+
+                      {/* EDIT */}
+                      <button
+                        type="button"
+                        title="Edit article"
+                        onClick={() => handleEditArticle(article)}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 text-slate-400 transition hover:border-blue-500/40 hover:bg-blue-500/10 hover:text-blue-300"
                       >
                         <Pencil size={16} />
                       </button>
 
+                      {/* DELETE */}
                       <button
                         type="button"
+                        title="Delete article"
                         onClick={() => setDeleteArticle(article)}
-                        className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:text-red-300"
+                        className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 text-slate-400 transition hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-300"
                       >
                         <Trash2 size={16} />
                       </button>
