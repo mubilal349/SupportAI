@@ -24,6 +24,7 @@ import adminEscalationRoutes from "./routes/adminEscalationRoutes.js";
 import adminSlaRoutes from "./routes/adminSlaRoutes.js";
 import adminAnalyticsRoutes from "./routes/adminAnalyticsRoutes.js";
 import cannedResponseRoutes from "./routes/cannedResponseRoutes.js";
+import auditLogRoutes from "./routes/auditLogRoutes.js";
 
 import rolePermissionRoutes from "./routes/rolePermissionRoutes.js";
 
@@ -81,5 +82,6 @@ app.use("/api/admin/escalations", adminEscalationRoutes);
 app.use("/api/admin/sla", adminSlaRoutes);
 app.use("/api/admin/analytics", adminAnalyticsRoutes);
 app.use("/api/canned-responses", cannedResponseRoutes);
+app.use("/api/audit-logs", auditLogRoutes);
 
 export default app;

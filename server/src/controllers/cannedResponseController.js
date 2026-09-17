@@ -1,4 +1,5 @@
 import CannedResponse from "../models/CannedResponse.js";
+import { createAuditLog } from "../utils/auditLogger.js";
 
 // ==========================================
 // GET ALL CANNED RESPONSES
@@ -105,6 +106,20 @@ export const createCannedResponse = async (req, res) => {
     const populatedResponse = await CannedResponse.findById(response._id)
       .populate("createdBy", "name email")
       .populate("updatedBy", "name email");
+
+    await createAuditLog({
+      req,
+      action: "CANNED_RESPONSE_CREATED",
+      resourceType: "CannedResponse",
+      resourceId: response._id,
+      description: `Created canned response "${response.title}"`,
+      metadata: {
+        title: response.title,
+        shortcut: response.shortcut,
+        category: response.category,
+        isActive: response.isActive,
+      },
+    });
 
     return res.status(201).json({
       success: true,
