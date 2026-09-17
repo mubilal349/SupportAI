@@ -1,6 +1,11 @@
 import { createContext, useContext, useEffect, useState } from "react";
 
-import { getProfile, loginUser, registerUser } from "../services/authService";
+import {
+  getProfile,
+  loginUser,
+  registerUser,
+  loginWithGoogle as loginWithGoogleService,
+} from "../services/authService";
 
 const AuthContext = createContext(null);
 
@@ -18,6 +23,25 @@ export const AuthProvider = ({ children }) => {
 
     if (!data?.token || !data?.user) {
       throw new Error("Invalid login response.");
+    }
+
+    localStorage.setItem("supportai_token", data.token);
+
+    setUser(data.user);
+
+    return data;
+  };
+
+  /*
+   * =========================================================
+   * GOOGLE LOGIN
+   * =========================================================
+   */
+  const loginWithGoogle = async (googleData) => {
+    const data = await loginWithGoogleService(googleData);
+
+    if (!data?.token || !data?.user) {
+      throw new Error("Invalid Google login response.");
     }
 
     localStorage.setItem("supportai_token", data.token);
@@ -113,6 +137,7 @@ export const AuthProvider = ({ children }) => {
         user,
         loading,
         login,
+        loginWithGoogle,
         register,
         logout,
       }}

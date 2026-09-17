@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useGoogleLogin } from "@react-oauth/google";
 import {
   ArrowRight,
   Eye,
@@ -15,7 +16,8 @@ import { useAuth } from "../../context/AuthContext";
 
 const Login = () => {
   const navigate = useNavigate();
-  const { login } = useAuth();
+
+  const { login, loginWithGoogle } = useAuth();
 
   const [formData, setFormData] = useState({
     email: "",
@@ -25,6 +27,7 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -38,6 +41,30 @@ const Login = () => {
       setError("");
     }
   };
+
+  /*
+   * =========================================================
+   * REDIRECT BY ROLE
+   * =========================================================
+   */
+
+  const redirectByRole = (user) => {
+    const role = user?.role;
+
+    if (role === "admin") {
+      navigate("/admin", { replace: true });
+    } else if (role === "agent") {
+      navigate("/agent", { replace: true });
+    } else {
+      navigate("/support", { replace: true });
+    }
+  };
+
+  /*
+   * =========================================================
+   * NORMAL LOGIN
+   * =========================================================
+   */
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -57,15 +84,7 @@ const Login = () => {
         password: formData.password,
       });
 
-      const role = data?.user?.role;
-
-      if (role === "admin") {
-        navigate("/admin", { replace: true });
-      } else if (role === "agent") {
-        navigate("/agent", { replace: true });
-      } else {
-        navigate("/support", { replace: true });
-      }
+      redirectByRole(data?.user);
     } catch (err) {
       console.error("Login error:", err);
 
@@ -78,6 +97,79 @@ const Login = () => {
     }
   };
 
+  /*
+   * =========================================================
+   * GOOGLE LOGIN
+   * =========================================================
+   */
+
+  const googleLogin = useGoogleLogin({
+    flow: "implicit",
+
+    onSuccess: async (tokenResponse) => {
+      try {
+        setError("");
+        setGoogleLoading(true);
+
+        console.log("Google token received.");
+
+        /*
+         * Google returns the ID token as `credential`
+         * when using the Google Identity Services flow.
+         */
+
+        const credential = tokenResponse?.credential;
+
+        if (!credential) {
+          console.error("Google response:", tokenResponse);
+
+          throw new Error("Google did not return an ID token.");
+        }
+
+        const data = await loginWithGoogle({
+          credential,
+        });
+
+        console.log("Google authentication successful.");
+
+        redirectByRole(data?.user);
+      } catch (err) {
+        console.error("Google login error:", err?.response?.data || err);
+
+        setError(
+          err?.response?.data?.message ||
+            err?.message ||
+            "Unable to sign in with Google. Please try again.",
+        );
+      } finally {
+        setGoogleLoading(false);
+      }
+    },
+
+    onError: () => {
+      console.error("Google Login Failed.");
+
+      setGoogleLoading(false);
+
+      setError("Google sign-in was cancelled or failed.");
+    },
+  });
+
+  /*
+   * =========================================================
+   * GOOGLE BUTTON
+   * =========================================================
+   */
+
+  const handleGoogleLogin = () => {
+    setError("");
+    setGoogleLoading(true);
+
+    googleLogin();
+  };
+
+  const isLoading = loading || googleLoading;
+
   return (
     <div className="min-h-screen overflow-hidden bg-slate-950 text-white">
       <div className="grid min-h-screen lg:grid-cols-2">
@@ -86,8 +178,6 @@ const Login = () => {
         ====================================================== */}
 
         <div className="relative hidden overflow-hidden lg:flex">
-          {/* Background */}
-
           <div className="absolute inset-0 bg-gradient-to-br from-blue-600/20 via-slate-950 to-purple-600/20" />
 
           <div className="absolute -left-24 top-20 h-72 w-72 animate-pulse rounded-full bg-blue-500/10 blur-3xl" />
@@ -96,8 +186,6 @@ const Login = () => {
             className="absolute bottom-20 right-0 h-80 w-80 animate-pulse rounded-full bg-purple-500/10 blur-3xl"
             style={{ animationDelay: "1s" }}
           />
-
-          {/* Decorative moving glow */}
 
           <div className="absolute left-1/2 top-1/2 h-96 w-96 -translate-x-1/2 -translate-y-1/2 animate-[spin_20s_linear_infinite] rounded-full border border-blue-500/5" />
 
@@ -217,6 +305,71 @@ const Login = () => {
             )}
 
             {/* =================================================
+                GOOGLE LOGIN
+            ================================================== */}
+
+            <button
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={isLoading}
+              className="group mb-6 flex w-full items-center justify-center gap-3 rounded-xl border border-slate-800 bg-slate-900 px-5 py-3.5 font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-700 hover:bg-slate-800 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {googleLoading ? (
+                <>
+                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-500 border-t-white" />
+
+                  <span>Connecting to Google...</span>
+                </>
+              ) : (
+                <>
+                  {/* Google Icon */}
+
+                  <svg
+                    className="h-5 w-5"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      fill="#4285F4"
+                      d="M21.35 12.27c0-.78-.07-1.53-.22-2.27H12v4.3h5.23a4.47 4.47 0 0 1-1.94 2.93v2.45h3.14c1.84-1.69 2.92-4.18 2.92-7.41Z"
+                    />
+
+                    <path
+                      fill="#34A853"
+                      d="M12 21.75c2.63 0 4.84-.87 6.45-2.36l-3.14-2.45c-.87.58-1.98.92-3.31.92-2.54 0-4.7-1.72-5.47-4.03H3.29v2.53A9.75 9.75 0 0 0 12 21.75Z"
+                    />
+
+                    <path
+                      fill="#FBBC05"
+                      d="M6.53 13.83A5.86 5.86 0 0 1 6.22 12c0-.64.11-1.26.31-1.83V7.64H3.29A9.75 9.75 0 0 0 2.25 12c0 1.57.38 3.05 1.04 4.36l3.24-2.53Z"
+                    />
+
+                    <path
+                      fill="#EA4335"
+                      d="M12 6.14c1.43 0 2.72.49 3.73 1.45l2.8-2.8C16.84 3.13 14.63 2.25 12 2.25a9.75 9.75 0 0 0-8.71 5.39l3.24 2.53C7.3 7.86 9.46 6.14 12 6.14Z"
+                    />
+                  </svg>
+
+                  <span>Continue with Google</span>
+                </>
+              )}
+            </button>
+
+            {/* Divider */}
+
+            <div className="relative mb-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-slate-800" />
+              </div>
+
+              <div className="relative flex justify-center text-xs">
+                <span className="bg-slate-950 px-4 text-slate-500">
+                  OR CONTINUE WITH EMAIL
+                </span>
+              </div>
+            </div>
+
+            {/* =================================================
                 FORM
             ================================================== */}
 
@@ -246,7 +399,7 @@ const Login = () => {
                     placeholder="you@example.com"
                     value={formData.email}
                     onChange={handleChange}
-                    disabled={loading}
+                    disabled={isLoading}
                     className="w-full rounded-xl border border-slate-800 bg-slate-900 py-3.5 pl-12 pr-4 text-white outline-none transition-all duration-300 placeholder:text-slate-600 focus:-translate-y-0.5 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                   />
                 </div>
@@ -282,14 +435,14 @@ const Login = () => {
                     placeholder="Enter your password"
                     value={formData.password}
                     onChange={handleChange}
-                    disabled={loading}
+                    disabled={isLoading}
                     className="w-full rounded-xl border border-slate-800 bg-slate-900 py-3.5 pl-12 pr-12 text-white outline-none transition-all duration-300 placeholder:text-slate-600 focus:-translate-y-0.5 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                   />
 
                   <button
                     type="button"
                     onClick={() => setShowPassword((prev) => !prev)}
-                    disabled={loading}
+                    disabled={isLoading}
                     aria-label={
                       showPassword ? "Hide password" : "Show password"
                     }
@@ -308,11 +461,9 @@ const Login = () => {
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={isLoading}
                 className="group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-blue-600 px-5 py-3.5 font-semibold text-white shadow-lg shadow-blue-600/20 transition-all duration-300 hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-xl hover:shadow-blue-600/30 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {/* Button shine */}
-
                 <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
 
                 {loading ? (

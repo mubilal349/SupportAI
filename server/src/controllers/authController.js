@@ -1,6 +1,10 @@
 import bcrypt from "bcryptjs";
 import User from "../models/User.js";
+import { OAuth2Client } from "google-auth-library";
 import generateToken from "../utils/generateToken.js";
+
+// ========================================== // GOOGLE AUTHENTICATION CLIENT // ==========================================
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 /* =========================================================
    REGISTER
@@ -163,6 +167,187 @@ export const login = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error during login.",
+    });
+  }
+};
+
+/* =========================================================
+   GOOGLE LOGIN / REGISTER
+========================================================= */
+
+export const googleLogin = async (req, res) => {
+  try {
+    const { credential } = req.body;
+
+    if (!credential) {
+      return res.status(400).json({
+        success: false,
+        message: "Google credential is required.",
+      });
+    }
+
+    // ==========================================
+    // VERIFY GOOGLE ID TOKEN
+    // ==========================================
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+
+    if (!payload) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid Google credential.",
+      });
+    }
+
+    const {
+      sub: googleId,
+      email,
+      name,
+      picture,
+      email_verified: emailVerified,
+    } = payload;
+
+    if (!email || !emailVerified) {
+      return res.status(401).json({
+        success: false,
+        message: "Google email could not be verified.",
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // ==========================================
+    // FIND USER BY GOOGLE ID
+    // ==========================================
+
+    let user = await User.findOne({
+      googleId,
+    });
+
+    // ==========================================
+    // IF GOOGLE ID DOESN'T EXIST,
+    // CHECK EMAIL
+    // ==========================================
+
+    if (!user) {
+      user = await User.findOne({
+        email: normalizedEmail,
+      });
+
+      // ==========================================
+      // EXISTING LOCAL ACCOUNT
+      // LINK GOOGLE ACCOUNT
+      // ==========================================
+
+      if (user) {
+        user.googleId = googleId;
+
+        // Keep existing local account information.
+        // Only change provider if appropriate.
+        if (!user.authProvider) {
+          user.authProvider = "local";
+        }
+
+        if (!user.avatar && picture) {
+          user.avatar = picture;
+        }
+
+        await user.save();
+      }
+    }
+
+    // ==========================================
+    // CREATE NEW GOOGLE CUSTOMER
+    // ==========================================
+
+    if (!user) {
+      user = await User.create({
+        name: name || "Google User",
+        email: normalizedEmail,
+        password: null,
+        googleId,
+        authProvider: "google",
+        role: "customer",
+        avatar: picture || "",
+        status: "active",
+      });
+    }
+
+    // ==========================================
+    // CHECK ACCOUNT STATUS
+    // ==========================================
+
+    if (user.status !== "active") {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is not active.",
+      });
+    }
+
+    // ==========================================
+    // UPDATE LAST SEEN
+    // ==========================================
+
+    user.lastSeen = new Date();
+
+    await user.save();
+
+    // ==========================================
+    // GENERATE SUPPORTAI JWT
+    // ==========================================
+
+    const token = generateToken(user);
+
+    // ==========================================
+    // RETURN USER
+    // ==========================================
+
+    return res.status(200).json({
+      success: true,
+      message: "Google authentication successful.",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar || null,
+        phone: user.phone || "",
+        company: user.company || "",
+        timezone: user.timezone || "Asia/Karachi",
+        language: user.language || "English",
+        theme: user.theme || "dark",
+        preferredChannel: user.preferredChannel || "chat",
+
+        notificationPreferences: {
+          email: user.notificationPreferences?.email ?? true,
+          ticketUpdates: user.notificationPreferences?.ticketUpdates ?? true,
+          newMessages: user.notificationPreferences?.newMessages ?? true,
+          ticketResolved: user.notificationPreferences?.ticketResolved ?? true,
+        },
+
+        aiSupport: {
+          enabled: user.aiSupport?.enabled ?? true,
+          allowAutoResponse: user.aiSupport?.allowAutoResponse ?? true,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("========== GOOGLE AUTH ERROR ==========");
+    console.error("Message:", error.message);
+    console.error("Name:", error.name);
+    console.error("Stack:", error.stack);
+    console.error("=======================================");
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error during Google authentication.",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };

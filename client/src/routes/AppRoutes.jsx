@@ -500,8 +500,8 @@ const AppRoutes = () => {
       <Route element={<ProtectedRoute allowedRoles={["customer"]} />}>
         <Route path="/support" element={<SupportLayout />}>
           {/* ========================================
-        DASHBOARD
-    ======================================== */}
+                   DASHBOARD
+             ======================================== */}
 
           <Route
             index
