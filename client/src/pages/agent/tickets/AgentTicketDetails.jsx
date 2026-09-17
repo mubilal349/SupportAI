@@ -43,6 +43,8 @@ import {
   escalateAgentTicket,
 } from "../../../services/agentService";
 
+import { getAllCannedResponses } from "../../../services/adminCannedResponseService";
+
 import { useAuth } from "../../../context/AuthContext";
 
 // ============================================================
@@ -167,98 +169,6 @@ const KNOWLEDGE_BASE_ARTICLES = [
       "A useful technical issue report should include the affected feature, steps to reproduce the problem, expected behavior, actual behavior, error messages, and relevant screenshots.",
     solution:
       "To help us investigate this technical issue, please provide the steps that led to the problem, what you expected to happen, what actually happened, and any error message you received. Screenshots are also helpful if available.",
-  },
-];
-
-// ============================================================
-// CANNED RESPONSES
-// ============================================================
-//
-// These are local for now.
-// Later they can be moved to MongoDB/admin management.
-//
-// ============================================================
-
-const CANNED_RESPONSES = [
-  {
-    id: "cr-001",
-    title: "Greeting",
-    category: "General",
-    shortcut: "greeting",
-    content:
-      "Hello! Thank you for contacting support. I'm happy to help you with your issue.",
-  },
-  {
-    id: "cr-002",
-    title: "Request More Information",
-    category: "General",
-    shortcut: "more-info",
-    content:
-      "Thank you for reaching out. To help us investigate this issue, could you please provide a few more details about what you are experiencing?",
-  },
-  {
-    id: "cr-003",
-    title: "Request Screenshot",
-    category: "Troubleshooting",
-    shortcut: "screenshot",
-    content:
-      "Could you please provide a screenshot of the issue you are experiencing? This will help us investigate the problem more accurately.",
-  },
-  {
-    id: "cr-004",
-    title: "Troubleshooting Steps",
-    category: "Troubleshooting",
-    shortcut: "troubleshoot",
-    content:
-      "Please try refreshing the page and clearing your browser cache and cookies. If the issue continues, please try using an incognito/private window or another browser and let us know if the problem persists.",
-  },
-  {
-    id: "cr-005",
-    title: "Investigating Issue",
-    category: "Support",
-    shortcut: "investigating",
-    content:
-      "Thank you for the information. I'm currently investigating this issue and will provide you with an update as soon as possible.",
-  },
-  {
-    id: "cr-006",
-    title: "Follow Up",
-    category: "Follow-up",
-    shortcut: "follow-up",
-    content:
-      "Hello! I'm following up on your support request to check whether you still need assistance. Please let us know if the issue has been resolved or if you need further help.",
-  },
-  {
-    id: "cr-007",
-    title: "Escalation",
-    category: "Escalation",
-    shortcut: "escalation",
-    content:
-      "I understand the importance of this issue. I'm escalating your ticket to the appropriate support team so it can receive further investigation and assistance.",
-  },
-  {
-    id: "cr-008",
-    title: "Issue Resolved",
-    category: "Resolution",
-    shortcut: "resolved",
-    content:
-      "I'm glad to let you know that the issue has been resolved. Please try again and let us know if everything is working correctly.",
-  },
-  {
-    id: "cr-009",
-    title: "Closing Ticket",
-    category: "Resolution",
-    shortcut: "closing",
-    content:
-      "Since the issue appears to be resolved, we'll proceed with closing this ticket. If you need any further assistance, please don't hesitate to contact us again.",
-  },
-  {
-    id: "cr-010",
-    title: "Thank You",
-    category: "General",
-    shortcut: "thank-you",
-    content:
-      "Thank you for your patience and cooperation while we worked on this issue. We appreciate you contacting SupportAI.",
   },
 ];
 
@@ -574,6 +484,9 @@ const AgentTicketDetails = () => {
 
   const [cannedResponsesOpen, setCannedResponsesOpen] = useState(false);
   const [cannedResponseSearch, setCannedResponseSearch] = useState("");
+
+  const [cannedResponses, setCannedResponses] = useState([]);
+  const [cannedResponsesLoading, setCannedResponsesLoading] = useState(false);
 
   // ==========================================================
   // LOAD TICKET
@@ -1280,7 +1193,7 @@ const AgentTicketDetails = () => {
     const query = cannedResponseSearch.trim().toLowerCase();
 
     if (!query) {
-      return CANNED_RESPONSES;
+      return cannedResponses;
     }
 
     const words = query
@@ -1288,49 +1201,77 @@ const AgentTicketDetails = () => {
       .map((word) => word.trim())
       .filter(Boolean);
 
-    return CANNED_RESPONSES.map((response) => {
-      const searchableText = [
-        response.title,
-        response.category,
-        response.shortcut,
-        response.content,
-      ]
-        .join(" ")
-        .toLowerCase();
+    return cannedResponses
+      .map((response) => {
+        const searchableText = [
+          response.title || "",
+          response.category || "",
+          response.shortcut || "",
+          response.content || "",
+        ]
+          .join(" ")
+          .toLowerCase();
 
-      let score = 0;
+        let score = 0;
 
-      words.forEach((word) => {
-        if (response.title.toLowerCase().includes(word)) {
-          score += 10;
-        }
+        words.forEach((word) => {
+          if ((response.title || "").toLowerCase().includes(word)) {
+            score += 10;
+          }
 
-        if (response.category.toLowerCase().includes(word)) {
-          score += 6;
-        }
+          if ((response.category || "").toLowerCase().includes(word)) {
+            score += 6;
+          }
 
-        if (response.shortcut.toLowerCase().includes(word)) {
-          score += 5;
-        }
+          if ((response.shortcut || "").toLowerCase().includes(word)) {
+            score += 5;
+          }
 
-        if (response.content.toLowerCase().includes(word)) {
-          score += 3;
-        }
+          if ((response.content || "").toLowerCase().includes(word)) {
+            score += 3;
+          }
 
-        if (searchableText.includes(word)) {
-          score += 1;
-        }
-      });
+          if (searchableText.includes(word)) {
+            score += 1;
+          }
+        });
 
-      return {
-        response,
-        score,
-      };
-    })
+        return {
+          response,
+          score,
+        };
+      })
       .filter((item) => item.score > 0)
       .sort((a, b) => b.score - a.score)
       .map((item) => item.response);
-  }, [cannedResponseSearch]);
+  }, [cannedResponses, cannedResponseSearch]);
+
+  useEffect(() => {
+    const loadCannedResponses = async () => {
+      try {
+        setCannedResponsesLoading(true);
+
+        const data = await getAllCannedResponses();
+
+        const responses =
+          data?.data || data?.cannedResponses || data?.responses || data || [];
+
+        setCannedResponses(
+          Array.isArray(responses)
+            ? responses.filter((response) => response.isActive !== false)
+            : [],
+        );
+      } catch (error) {
+        console.error("Failed to load canned responses:", error);
+
+        setCannedResponses([]);
+      } finally {
+        setCannedResponsesLoading(false);
+      }
+    };
+
+    loadCannedResponses();
+  }, []);
 
   // ==========================================================
   // KNOWLEDGE BASE - INSERT SOLUTION
@@ -1367,14 +1308,26 @@ const AgentTicketDetails = () => {
 
     setComposerMode("reply");
 
+    // Get the customer's name from the ticket/customer data
+    const customerName =
+      ticket?.customer?.name ||
+      ticket?.user?.name ||
+      ticket?.createdBy?.name ||
+      "Customer";
+
+    const processedContent = cannedResponse.content.replace(
+      /{{\s*customerName\s*}}/gi,
+      customerName,
+    );
+
     setReply((previous) => {
       const current = previous.trim();
 
       if (!current) {
-        return cannedResponse.content;
+        return processedContent;
       }
 
-      return `${current}\n\n${cannedResponse.content}`;
+      return `${current}\n\n${processedContent}`;
     });
 
     setSuccess(`"${cannedResponse.title}" response inserted into your reply.`);
@@ -2086,11 +2039,46 @@ const AgentTicketDetails = () => {
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setCannedResponsesOpen((previous) => !previous);
+                  onClick={async () => {
+                    const willOpen = !cannedResponsesOpen;
+
+                    setCannedResponsesOpen(willOpen);
 
                     // Close Knowledge Base when opening Canned Responses.
                     setKnowledgeBaseOpen(false);
+
+                    if (willOpen) {
+                      try {
+                        setCannedResponsesLoading(true);
+
+                        const result = await getAllCannedResponses();
+
+                        console.log("Canned Responses:", result);
+
+                        const responses =
+                          result?.data ||
+                          result?.cannedResponses ||
+                          result?.responses ||
+                          [];
+
+                        setCannedResponses(
+                          Array.isArray(responses)
+                            ? responses.filter(
+                                (response) => response.isActive !== false,
+                              )
+                            : [],
+                        );
+                      } catch (error) {
+                        console.error(
+                          "Failed to load canned responses:",
+                          error,
+                        );
+
+                        setCannedResponses([]);
+                      } finally {
+                        setCannedResponsesLoading(false);
+                      }
+                    }
                   }}
                   className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition ${
                     cannedResponsesOpen
@@ -2503,7 +2491,26 @@ const AgentTicketDetails = () => {
                   {/* RESPONSE LIST */}
 
                   <div className="max-h-[420px] overflow-y-auto p-3">
-                    {cannedResponseResults.length === 0 ? (
+                    {/* LOADING */}
+
+                    {cannedResponsesLoading ? (
+                      <div className="px-4 py-10 text-center">
+                        <Loader2
+                          size={26}
+                          className="mx-auto mb-3 animate-spin text-emerald-400"
+                        />
+
+                        <p className="text-sm font-medium text-slate-400">
+                          Loading canned responses...
+                        </p>
+
+                        <p className="mt-1 text-xs text-slate-600">
+                          Fetching responses from SupportAI.
+                        </p>
+                      </div>
+                    ) : cannedResponseResults.length === 0 ? (
+                      /* EMPTY */
+
                       <div className="px-4 py-10 text-center">
                         <Search
                           size={30}
@@ -2519,10 +2526,12 @@ const AgentTicketDetails = () => {
                         </p>
                       </div>
                     ) : (
+                      /* RESPONSE LIST */
+
                       <div className="space-y-2">
                         {cannedResponseResults.map((cannedResponse) => (
                           <div
-                            key={cannedResponse.id}
+                            key={cannedResponse._id}
                             className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 transition hover:border-slate-700"
                           >
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start">

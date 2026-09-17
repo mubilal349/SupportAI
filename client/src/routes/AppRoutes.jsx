@@ -45,6 +45,8 @@ import AdminEscalations from "../pages/admin/escalation/AdminEscalations";
 
 import AdminArticleView from "../pages/admin/knowledge-base/ArticleView";
 
+import CannedResponseEditor from "../pages/admin/canned-responses/CannedResponseEditor";
+
 // Customer
 import CustomerDashboard from "../pages/customer/Dashboard";
 import CustomerChat from "../pages/customer/Chat";
@@ -295,6 +297,29 @@ const AppRoutes = () => {
                 requiredPermission="canned_responses.view"
               >
                 <AdminCannedResponses />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="canned-responses/new"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="canned_responses.view"
+              >
+                <CannedResponseEditor />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="canned-responses/:responseId/edit"
+            element={
+              <ProtectedRoute
+                allowedRoles={["admin"]}
+                requiredPermission="canned_responses.view"
+              >
+                <CannedResponseEditor />
               </ProtectedRoute>
             }
           />

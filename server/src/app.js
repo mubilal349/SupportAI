@@ -23,6 +23,7 @@ import adminTicketRoutes from "./routes/adminTicketRoutes.js";
 import adminEscalationRoutes from "./routes/adminEscalationRoutes.js";
 import adminSlaRoutes from "./routes/adminSlaRoutes.js";
 import adminAnalyticsRoutes from "./routes/adminAnalyticsRoutes.js";
+import cannedResponseRoutes from "./routes/cannedResponseRoutes.js";
 
 import rolePermissionRoutes from "./routes/rolePermissionRoutes.js";
 
@@ -79,5 +80,6 @@ app.use("/api/admin/tickets", adminTicketRoutes);
 app.use("/api/admin/escalations", adminEscalationRoutes);
 app.use("/api/admin/sla", adminSlaRoutes);
 app.use("/api/admin/analytics", adminAnalyticsRoutes);
+app.use("/api/canned-responses", cannedResponseRoutes);
 
 export default app;
