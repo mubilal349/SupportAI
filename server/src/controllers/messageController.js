@@ -1,6 +1,7 @@
 import Conversation from "../models/Conversation.js";
 import Message from "../models/Message.js";
 import { generateAIResponse } from "../services/aiService.js";
+import { createAuditLog } from "../services/auditLogService.js";
 
 // ==========================================
 // GET CONVERSATION MESSAGES
@@ -188,6 +189,8 @@ export const sendCustomerMessage = async (req, res) => {
     // ------------------------------------------
 
     if (requestedHuman) {
+      const previousStatus = conversation.status;
+
       const updatedConversation = await Conversation.findByIdAndUpdate(
         conversation._id,
         {
@@ -207,6 +210,29 @@ export const sendCustomerMessage = async (req, res) => {
         content:
           "Your conversation has been escalated to a human support agent. An agent will assist you shortly.",
         isRead: false,
+      });
+
+      // ==========================================
+      // AUDIT LOG
+      // ==========================================
+
+      await createAuditLog({
+        req,
+        action: "ESCALATION_CREATED",
+        resource: {
+          type: "conversation",
+          id: conversation._id,
+        },
+        description: `Customer escalated conversation "${conversation._id}" to human support.`,
+        metadata: {
+          conversationId: conversation._id,
+          customerId: req.user?._id || null,
+          previousStatus,
+          newStatus: "escalated",
+          supportType: "Human",
+          escalationSource: "customer_message",
+          messageId: customerMessage._id,
+        },
       });
 
       return res.status(201).json({
@@ -305,6 +331,21 @@ export const escalateConversation = async (req, res) => {
   try {
     const { conversationId } = req.params;
 
+    // Get previous conversation state first
+    const existingConversation = await Conversation.findOne({
+      _id: conversationId,
+      customer: req.user._id,
+    });
+
+    if (!existingConversation) {
+      return res.status(404).json({
+        success: false,
+        message: "Conversation not found",
+      });
+    }
+
+    const previousStatus = existingConversation.status;
+
     const conversation = await Conversation.findOneAndUpdate(
       {
         _id: conversationId,
@@ -336,6 +377,28 @@ export const escalateConversation = async (req, res) => {
       isRead: false,
     });
 
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      action: "ESCALATION_CREATED",
+      resource: {
+        type: "conversation",
+        id: conversation._id,
+      },
+      description: `Customer escalated conversation "${conversation._id}" to human support.`,
+      metadata: {
+        conversationId: conversation._id,
+        customerId: req.user?._id || null,
+        previousStatus,
+        newStatus: conversation.status,
+        supportType: conversation.supportType,
+        escalationSource: "customer_action",
+      },
+    });
+
     res.json({
       success: true,
       message: "Conversation escalated successfully",
@@ -361,6 +424,21 @@ export const escalateConversation = async (req, res) => {
 export const resolveConversation = async (req, res) => {
   try {
     const { conversationId } = req.params;
+
+    // Get previous conversation state first
+    const existingConversation = await Conversation.findOne({
+      _id: conversationId,
+      customer: req.user._id,
+    });
+
+    if (!existingConversation) {
+      return res.status(404).json({
+        success: false,
+        message: "Conversation not found",
+      });
+    }
+
+    const previousStatus = existingConversation.status;
 
     const conversation = await Conversation.findOneAndUpdate(
       {
@@ -389,6 +467,27 @@ export const resolveConversation = async (req, res) => {
       senderType: "system",
       content: "This conversation has been marked as resolved.",
       isRead: false,
+    });
+
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      action: "CONVERSATION_RESOLVED",
+      resource: {
+        type: "conversation",
+        id: conversation._id,
+      },
+      description: `Customer resolved conversation "${conversation._id}".`,
+      metadata: {
+        conversationId: conversation._id,
+        customerId: req.user?._id || null,
+        previousStatus,
+        newStatus: conversation.status,
+        resolvedAt: conversation.resolvedAt,
+      },
     });
 
     res.json({

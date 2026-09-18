@@ -25,6 +25,8 @@ import adminSlaRoutes from "./routes/adminSlaRoutes.js";
 import adminAnalyticsRoutes from "./routes/adminAnalyticsRoutes.js";
 import cannedResponseRoutes from "./routes/cannedResponseRoutes.js";
 import auditLogRoutes from "./routes/auditLogRoutes.js";
+import systemSettingsRoutes from "./routes/systemSettingsRoutes.js";
+import notificationSettingsRoutes from "./routes/notificationSettingsRoutes.js";
 
 import rolePermissionRoutes from "./routes/rolePermissionRoutes.js";
 
@@ -83,5 +85,7 @@ app.use("/api/admin/sla", adminSlaRoutes);
 app.use("/api/admin/analytics", adminAnalyticsRoutes);
 app.use("/api/canned-responses", cannedResponseRoutes);
 app.use("/api/audit-logs", auditLogRoutes);
+app.use("/api/system-settings", systemSettingsRoutes);
+app.use("/api/notification-settings", notificationSettingsRoutes);
 
 export default app;

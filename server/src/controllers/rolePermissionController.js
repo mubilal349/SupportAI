@@ -6,6 +6,8 @@ import {
   PERMISSION_DEFINITIONS,
 } from "../config/permissions.js";
 
+import { createAuditLog } from "../services/auditLogService.js";
+
 // ==========================================
 // VALID ROLES
 // ==========================================
@@ -174,6 +176,17 @@ export const updateRolePermissions = async (req, res) => {
     }
 
     // ----------------------------------------
+    // Get previous permissions
+    // ----------------------------------------
+
+    const existingRolePermission = await RolePermission.findOne({
+      role,
+    }).lean();
+
+    const previousPermissions =
+      existingRolePermission?.permissions || ROLE_PERMISSIONS[role] || [];
+
+    // ----------------------------------------
     // Save / Update role permissions
     // ----------------------------------------
 
@@ -190,6 +203,30 @@ export const updateRolePermissions = async (req, res) => {
         setDefaultsOnInsert: true,
       },
     );
+
+    // ----------------------------------------
+    // AUDIT LOG
+    // ----------------------------------------
+
+    await createAuditLog({
+      req,
+
+      action: "ROLE_PERMISSIONS_UPDATED",
+
+      resource: {
+        type: "role_permission",
+        id: role,
+      },
+
+      description: `Updated ${role} role permissions.`,
+
+      metadata: {
+        role,
+        previousPermissions,
+        newPermissions: uniquePermissions,
+        permissionCount: uniquePermissions.length,
+      },
+    });
 
     // ----------------------------------------
     // Response
@@ -217,12 +254,6 @@ export const updateRolePermissions = async (req, res) => {
 // GET MY EFFECTIVE PERMISSIONS
 // ==========================================
 // GET /api/role-permissions/me
-// ==========================================
-//
-// Returns individual permissions when the user
-// has a custom permission set.
-//
-// Otherwise returns role permissions.
 // ==========================================
 
 export const getMyPermissions = async (req, res) => {
@@ -299,10 +330,6 @@ export const getMyPermissions = async (req, res) => {
 // ==========================================
 // GET /api/role-permissions/users?role=customer
 // GET /api/role-permissions/users?role=agent
-// ==========================================
-//
-// Admin can use this endpoint to load all
-// customers or agents.
 // ==========================================
 
 export const getUsersForPermissions = async (req, res) => {
@@ -476,17 +503,6 @@ export const getUserPermissions = async (req, res) => {
 // ==========================================
 // PATCH /api/role-permissions/users/:userId
 // ==========================================
-//
-// Body:
-//
-// {
-//   "permissions": [
-//     "dashboard.view",
-//     "tickets.view"
-//   ]
-// }
-//
-// ==========================================
 
 export const updateUserPermissions = async (req, res) => {
   try {
@@ -535,12 +551,67 @@ export const updateUserPermissions = async (req, res) => {
     const uniquePermissions = validation.permissions;
 
     // ----------------------------------------
+    // Get previous permissions
+    // ----------------------------------------
+
+    const previousPermissions = Array.isArray(user.permissions)
+      ? [...user.permissions]
+      : null;
+
+    // ----------------------------------------
+    // Get role defaults
+    // ----------------------------------------
+
+    const savedRolePermissions = await RolePermission.findOne({
+      role: user.role,
+    }).lean();
+
+    const rolePermissions =
+      savedRolePermissions?.permissions || ROLE_PERMISSIONS[user.role] || [];
+
+    // ----------------------------------------
     // Save individual permissions
     // ----------------------------------------
 
     user.permissions = uniquePermissions;
 
     await user.save();
+
+    // ----------------------------------------
+    // AUDIT LOG
+    // ----------------------------------------
+
+    await createAuditLog({
+      req,
+
+      action: "USER_PERMISSIONS_UPDATED",
+
+      resource: {
+        type: "user",
+        id: user._id,
+      },
+
+      description: `Updated individual permissions for ${user.name || user.email}.`,
+
+      metadata: {
+        targetUserId: user._id,
+        targetUserName: user.name || "",
+        targetUserEmail: user.email || "",
+        targetRole: user.role,
+
+        previousPermissions,
+
+        newPermissions: uniquePermissions,
+
+        rolePermissions,
+
+        permissionCount: uniquePermissions.length,
+      },
+    });
+
+    // ----------------------------------------
+    // Response
+    // ----------------------------------------
 
     return res.status(200).json({
       success: true,
@@ -573,14 +644,6 @@ export const updateUserPermissions = async (req, res) => {
 // ==========================================
 // DELETE /api/role-permissions/users/:userId
 // ==========================================
-//
-// Reset means:
-//
-// permissions = null
-//
-// The user will then inherit the permissions
-// from their role again.
-// ==========================================
 
 export const resetUserPermissions = async (req, res) => {
   try {
@@ -612,6 +675,14 @@ export const resetUserPermissions = async (req, res) => {
     }
 
     // ----------------------------------------
+    // Capture previous permissions
+    // ----------------------------------------
+
+    const previousPermissions = Array.isArray(user.permissions)
+      ? [...user.permissions]
+      : null;
+
+    // ----------------------------------------
     // Reset to role defaults
     // ----------------------------------------
 
@@ -629,6 +700,40 @@ export const resetUserPermissions = async (req, res) => {
 
     const rolePermissions =
       savedRolePermissions?.permissions || ROLE_PERMISSIONS[user.role] || [];
+
+    // ----------------------------------------
+    // AUDIT LOG
+    // ----------------------------------------
+
+    await createAuditLog({
+      req,
+
+      action: "USER_PERMISSIONS_RESET",
+
+      resource: {
+        type: "user",
+        id: user._id,
+      },
+
+      description: `Reset individual permissions for ${user.name || user.email} to ${user.role} role defaults.`,
+
+      metadata: {
+        targetUserId: user._id,
+        targetUserName: user.name || "",
+        targetUserEmail: user.email || "",
+        targetRole: user.role,
+
+        previousPermissions,
+
+        restoredPermissions: rolePermissions,
+
+        permissionCount: rolePermissions.length,
+      },
+    });
+
+    // ----------------------------------------
+    // Response
+    // ----------------------------------------
 
     return res.status(200).json({
       success: true,

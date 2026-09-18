@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { isNotificationEnabled } from "./notificationSettingsService.js";
 
 /*
  * =========================================================
@@ -16,7 +17,7 @@ const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD;
 
 const EMAIL_FROM =
   process.env.EMAIL_FROM ||
-  `SupportAI <${EMAIL_USER || "no-reply@example.com"}>`;
+  `SupportAI <${EMAIL_USER || "no-reply@support_ai.com"}>`;
 
 /*
  * =========================================================
@@ -108,6 +109,24 @@ export const sendTicketCreatedEmail = async ({ customer, ticket }) => {
     throw new Error("Customer email is required for ticket creation email.");
   }
 
+  /*
+   * =======================================================
+   * CHECK NOTIFICATION SETTINGS
+   * =======================================================
+   */
+
+  const emailEnabled = await isNotificationEnabled("emailNotifications");
+
+  const ticketEnabled = await isNotificationEnabled("ticketNotifications");
+
+  if (!emailEnabled || !ticketEnabled) {
+    console.log(
+      `Ticket creation email skipped for ${customer.email}: notification setting disabled.`,
+    );
+
+    return null;
+  }
+
   const customerName = customer.name || "Customer";
 
   const ticketNumber = ticket?.ticketNumber || "N/A";
@@ -186,7 +205,6 @@ SupportAI Support Team
   "
 >
 
-  <!-- OUTER WRAPPER -->
   <table
     width="100%"
     cellpadding="0"
@@ -201,7 +219,6 @@ SupportAI Support Team
         style="padding:40px 16px;"
       >
 
-        <!-- MAIN CONTAINER -->
         <table
           width="100%"
           cellpadding="0"
@@ -235,7 +252,6 @@ SupportAI Support Team
               >
                 <tr>
 
-                  <!-- LOGO -->
                   <td
                     valign="middle"
                     style="width:60%;"
@@ -264,7 +280,6 @@ SupportAI Support Team
                     </div>
                   </td>
 
-                  <!-- STATUS -->
                   <td
                     align="right"
                     valign="middle"
@@ -294,17 +309,13 @@ SupportAI Support Team
             </td>
           </tr>
 
-
           <!-- CONTENT -->
           <tr>
             <td
               class="email-content"
-              style="
-                padding:34px 32px;
-              "
+              style="padding:34px 32px;"
             >
 
-              <!-- GREETING -->
               <div
                 style="
                   font-size:21px;
@@ -327,7 +338,6 @@ SupportAI Support Team
                 Thank you for contacting SupportAI. We've received your
                 support request and created a ticket for you.
               </div>
-
 
               <!-- SUCCESS MESSAGE -->
               <table
@@ -408,7 +418,6 @@ SupportAI Support Team
                 </tr>
               </table>
 
-
               <!-- TICKET SUMMARY -->
               <div
                 style="
@@ -433,7 +442,6 @@ SupportAI Support Team
                 Keep this information for your records.
               </div>
 
-
               <!-- TICKET CARD -->
               <table
                 width="100%"
@@ -448,7 +456,6 @@ SupportAI Support Team
                 "
               >
 
-                <!-- TICKET NUMBER -->
                 <tr>
                   <td
                     colspan="2"
@@ -488,8 +495,6 @@ SupportAI Support Team
                   </td>
                 </tr>
 
-
-                <!-- SUBJECT -->
                 <tr>
                   <td
                     colspan="2"
@@ -527,8 +532,6 @@ SupportAI Support Team
                   </td>
                 </tr>
 
-
-                <!-- CATEGORY + PRIORITY -->
                 <tr>
 
                   <td
@@ -567,13 +570,10 @@ SupportAI Support Team
 
                   </td>
 
-
                   <td
                     width="50%"
                     valign="top"
-                    style="
-                      padding:18px 20px;
-                    "
+                    style="padding:18px 20px;"
                   >
 
                     <div
@@ -606,8 +606,6 @@ SupportAI Support Team
 
                 </tr>
 
-
-                <!-- STATUS -->
                 <tr>
                   <td
                     colspan="2"
@@ -655,7 +653,6 @@ SupportAI Support Team
 
               </table>
 
-
               <!-- WHAT HAPPENS NEXT -->
               <table
                 width="100%"
@@ -701,7 +698,6 @@ SupportAI Support Team
                 </tr>
               </table>
 
-
               <!-- CTA -->
               <table
                 width="100%"
@@ -734,8 +730,6 @@ SupportAI Support Team
                 </tr>
               </table>
 
-
-              <!-- SECONDARY TEXT -->
               <div
                 style="
                   margin-top:18px;
@@ -751,7 +745,6 @@ SupportAI Support Team
 
             </td>
           </tr>
-
 
           <!-- FOOTER -->
           <tr>
@@ -831,6 +824,24 @@ export const sendTicketReplyEmail = async ({ customer, ticket, reply }) => {
     throw new Error("Customer email is required for ticket reply email.");
   }
 
+  /*
+   * =======================================================
+   * CHECK NOTIFICATION SETTINGS
+   * =======================================================
+   */
+
+  const emailEnabled = await isNotificationEnabled("emailNotifications");
+
+  const replyEnabled = await isNotificationEnabled("newReplyNotifications");
+
+  if (!emailEnabled || !replyEnabled) {
+    console.log(
+      `Ticket reply email skipped for ${customer.email}: notification setting disabled.`,
+    );
+
+    return null;
+  }
+
   const customerName = customer.name || "Customer";
 
   const ticketNumber = ticket?.ticketNumber || "N/A";
@@ -904,7 +915,6 @@ SupportAI Support Team
   "
 >
 
-  <!-- OUTER WRAPPER -->
   <table
     width="100%"
     cellpadding="0"
@@ -919,7 +929,6 @@ SupportAI Support Team
         style="padding:40px 16px;"
       >
 
-        <!-- EMAIL CONTAINER -->
         <table
           width="100%"
           cellpadding="0"
@@ -953,7 +962,6 @@ SupportAI Support Team
               >
                 <tr>
 
-                  <!-- BRAND -->
                   <td
                     valign="middle"
                     style="width:60%;"
@@ -984,7 +992,6 @@ SupportAI Support Team
 
                   </td>
 
-                  <!-- HEADER BADGE -->
                   <td
                     align="right"
                     valign="middle"
@@ -1016,17 +1023,13 @@ SupportAI Support Team
             </td>
           </tr>
 
-
           <!-- CONTENT -->
           <tr>
             <td
               class="email-content"
-              style="
-                padding:34px 32px;
-              "
+              style="padding:34px 32px;"
             >
 
-              <!-- GREETING -->
               <div
                 style="
                   font-size:21px;
@@ -1050,8 +1053,7 @@ SupportAI Support Team
                 SupportAI support ticket.
               </div>
 
-
-              <!-- NEW REPLY NOTIFICATION -->
+              <!-- NEW REPLY -->
               <table
                 width="100%"
                 cellpadding="0"
@@ -1076,7 +1078,6 @@ SupportAI Support Team
                     >
                       <tr>
 
-                        <!-- ICON -->
                         <td
                           valign="top"
                           style="width:40px;"
@@ -1100,7 +1101,6 @@ SupportAI Support Team
 
                         </td>
 
-                        <!-- MESSAGE -->
                         <td valign="middle">
 
                           <div
@@ -1136,7 +1136,6 @@ SupportAI Support Team
                 </tr>
               </table>
 
-
               <!-- TICKET SUMMARY -->
               <div
                 style="
@@ -1161,8 +1160,6 @@ SupportAI Support Team
                 Conversation reference
               </div>
 
-
-              <!-- TICKET CARD -->
               <table
                 width="100%"
                 cellpadding="0"
@@ -1176,7 +1173,6 @@ SupportAI Support Team
                 "
               >
 
-                <!-- TICKET NUMBER -->
                 <tr>
                   <td
                     style="
@@ -1215,14 +1211,8 @@ SupportAI Support Team
                   </td>
                 </tr>
 
-
-                <!-- SUBJECT -->
                 <tr>
-                  <td
-                    style="
-                      padding:18px 20px;
-                    "
-                  >
+                  <td style="padding:18px 20px;">
 
                     <div
                       style="
@@ -1254,7 +1244,6 @@ SupportAI Support Team
 
               </table>
 
-
               <!-- LATEST REPLY -->
               <div
                 style="
@@ -1279,8 +1268,6 @@ SupportAI Support Team
                 Here's the latest message from your support conversation.
               </div>
 
-
-              <!-- REPLY CARD -->
               <table
                 width="100%"
                 cellpadding="0"
@@ -1327,16 +1314,13 @@ SupportAI Support Team
                 </tr>
               </table>
 
-
               <!-- CTA -->
               <table
                 width="100%"
                 cellpadding="0"
                 cellspacing="0"
                 border="0"
-                style="
-                  margin-top:30px;
-                "
+                style="margin-top:30px;"
               >
                 <tr>
                   <td align="center">
@@ -1362,8 +1346,6 @@ SupportAI Support Team
                 </tr>
               </table>
 
-
-              <!-- HELPER MESSAGE -->
               <table
                 width="100%"
                 cellpadding="0"
@@ -1378,9 +1360,7 @@ SupportAI Support Team
 
                   <td
                     align="center"
-                    style="
-                      padding-top:22px;
-                    "
+                    style="padding-top:22px;"
                   >
 
                     <div
@@ -1399,8 +1379,6 @@ SupportAI Support Team
                 </tr>
               </table>
 
-
-              <!-- SIGNATURE -->
               <div
                 style="
                   margin-top:24px;
@@ -1412,18 +1390,13 @@ SupportAI Support Team
               >
                 Regards,<br />
 
-                <strong
-                  style="
-                    color:#334155;
-                  "
-                >
+                <strong style="color:#334155;">
                   SupportAI Support Team
                 </strong>
               </div>
 
             </td>
           </tr>
-
 
           <!-- FOOTER -->
           <tr>
@@ -1506,6 +1479,26 @@ export const sendTicketStatusEmail = async ({
 }) => {
   if (!customer?.email) {
     throw new Error("Customer email is required for status email.");
+  }
+
+  /*
+   * =======================================================
+   * CHECK NOTIFICATION SETTINGS
+   * =======================================================
+   */
+
+  const emailEnabled = await isNotificationEnabled("emailNotifications");
+
+  const statusEnabled = await isNotificationEnabled(
+    "statusChangeNotifications",
+  );
+
+  if (!emailEnabled || !statusEnabled) {
+    console.log(
+      `Ticket status email skipped for ${customer.email}: notification setting disabled.`,
+    );
+
+    return null;
   }
 
   const customerName = customer.name || "Customer";
@@ -1662,6 +1655,26 @@ SupportAI Support Team
 export const sendTicketResolvedEmail = async ({ customer, ticket }) => {
   if (!customer?.email) {
     throw new Error("Customer email is required for resolved ticket email.");
+  }
+
+  /*
+   * =======================================================
+   * CHECK NOTIFICATION SETTINGS
+   * =======================================================
+   */
+
+  const emailEnabled = await isNotificationEnabled("emailNotifications");
+
+  const statusEnabled = await isNotificationEnabled(
+    "statusChangeNotifications",
+  );
+
+  if (!emailEnabled || !statusEnabled) {
+    console.log(
+      `Ticket resolved email skipped for ${customer.email}: notification setting disabled.`,
+    );
+
+    return null;
   }
 
   const customerName = customer.name || "Customer";

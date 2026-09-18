@@ -6,13 +6,126 @@ import {
   RefreshCw,
   Loader2,
   AlertCircle,
+  Filter,
+  X,
 } from "lucide-react";
 
 import { getAuditLogs } from "../../../services/adminAuditService";
 
+const ACTION_OPTIONS = [
+  // Agents
+  "AGENT_CREATED",
+  "AGENT_UPDATED",
+  "AGENT_ROLE_CHANGED",
+  "AGENT_PERMISSIONS_UPDATED",
+  "AGENT_STATUS_CHANGED",
+  "AGENT_AVAILABILITY_CHANGED",
+  "AGENT_DELETED",
+  "AGENT_PASSWORD_RESET",
+
+  // Roles
+  "ROLE_CREATED",
+  "ROLE_UPDATED",
+  "ROLE_DELETED",
+  "ROLE_PERMISSIONS_UPDATED",
+  "USER_ROLE_CHANGED",
+
+  // Tickets
+  "TICKET_CREATED",
+  "TICKET_UPDATED",
+  "TICKET_ASSIGNED",
+  "TICKET_REASSIGNED",
+  "TICKET_STATUS_CHANGED",
+  "TICKET_PRIORITY_CHANGED",
+  "TICKET_ESCALATED",
+  "TICKET_RESOLVED",
+  "TICKET_REOPENED",
+  "TICKET_DELETED",
+
+  // Knowledge Base
+  "ARTICLE_CREATED",
+  "ARTICLE_UPDATED",
+  "ARTICLE_PUBLISHED",
+  "ARTICLE_UNPUBLISHED",
+  "ARTICLE_DELETED",
+
+  // Canned Responses
+  "CANNED_RESPONSE_CREATED",
+  "CANNED_RESPONSE_UPDATED",
+  "CANNED_RESPONSE_STATUS_CHANGED",
+  "CANNED_RESPONSE_DELETED",
+
+  // Escalations
+  "ESCALATION_CREATED",
+  "ESCALATION_UPDATED",
+  "ESCALATION_ASSIGNED",
+  "ESCALATION_RESOLVED",
+  "ESCALATION_CANCELLED",
+
+  // SLA
+  "SLA_SETTINGS_UPDATED",
+  "SLA_POLICY_CREATED",
+  "SLA_POLICY_UPDATED",
+  "SLA_POLICY_DELETED",
+
+  // Settings
+  "SYSTEM_SETTINGS_UPDATED",
+  "NOTIFICATION_SETTINGS_UPDATED",
+  "EMAIL_SETTINGS_UPDATED",
+  "AI_SETTINGS_UPDATED",
+
+  // Authentication / Security
+  "ADMIN_LOGIN",
+  "ADMIN_LOGOUT",
+  "LOGIN_FAILED",
+  "PASSWORD_CHANGED",
+  "PASSWORD_RESET",
+  "ACCOUNT_LOCKED",
+  "ACCOUNT_UNLOCKED",
+
+  // Files
+  "FILE_UPLOADED",
+  "FILE_DELETED",
+  "FILE_REPLACED",
+
+  // Customers
+  "CUSTOMER_CREATED",
+  "CUSTOMER_UPDATED",
+  "CUSTOMER_STATUS_CHANGED",
+  "CUSTOMER_DELETED",
+  "CUSTOMER_PASSWORD_RESET",
+
+  // Conversations
+  "CONVERSATION_RESOLVED",
+];
+
+const ROLE_OPTIONS = ["admin", "agent", "customer", "system"];
+
+const RESOURCE_OPTIONS = [
+  "agent",
+  "user",
+  "customer",
+  "ticket",
+  "article",
+  "knowledge_base",
+  "canned_response",
+  "escalation",
+  "conversation",
+  "sla_policy",
+  "system_settings",
+  "notification_settings",
+  "email_settings",
+  "ai_settings",
+  "file",
+];
+
 const AuditLogs = () => {
   const [logs, setLogs] = useState([]);
+
   const [search, setSearch] = useState("");
+  const [action, setAction] = useState("");
+  const [role, setRole] = useState("");
+  const [resourceType, setResourceType] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -23,6 +136,8 @@ const AuditLogs = () => {
     limit: 25,
     total: 0,
     totalPages: 0,
+    hasNextPage: false,
+    hasPreviousPage: false,
   });
 
   // ==========================================
@@ -43,6 +158,9 @@ const AuditLogs = () => {
         page: pagination.page,
         limit: pagination.limit,
         search,
+        action,
+        role,
+        resourceType,
       });
 
       const auditLogs = Array.isArray(response?.data) ? response.data : [];
@@ -59,7 +177,6 @@ const AuditLogs = () => {
       console.error("Failed to load audit logs:", err);
 
       setError(err?.message || "Failed to load audit logs.");
-
       setLogs([]);
     } finally {
       setLoading(false);
@@ -68,7 +185,7 @@ const AuditLogs = () => {
   };
 
   // ==========================================
-  // INITIAL LOAD
+  // INITIAL LOAD / PAGE CHANGE
   // ==========================================
 
   useEffect(() => {
@@ -76,7 +193,7 @@ const AuditLogs = () => {
   }, [pagination.page]);
 
   // ==========================================
-  // SEARCH
+  // FILTER / SEARCH
   // ==========================================
 
   useEffect(() => {
@@ -90,19 +207,33 @@ const AuditLogs = () => {
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, action, role, resourceType]);
 
   // ==========================================
   // FORMAT ACTION
   // ==========================================
 
-  const formatAction = (action) => {
-    if (!action) {
+  const formatAction = (value) => {
+    if (!value) {
       return "Performed an action";
     }
 
-    return action
+    return value
       .toLowerCase()
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  };
+
+  // ==========================================
+  // FORMAT RESOURCE
+  // ==========================================
+
+  const formatResource = (value) => {
+    if (!value) {
+      return "System";
+    }
+
+    return value
       .replace(/_/g, " ")
       .replace(/\b\w/g, (letter) => letter.toUpperCase());
   };
@@ -156,14 +287,43 @@ const AuditLogs = () => {
 
   const getTarget = (log) => {
     if (log?.resource?.type && log?.resource?.id) {
-      return `${log.resource.type} • ${log.resource.id}`;
+      return `${formatResource(log.resource.type)} • ${log.resource.id}`;
     }
 
     if (log?.resource?.type) {
-      return log.resource.type;
+      return formatResource(log.resource.type);
     }
 
     return "System";
+  };
+
+  // ==========================================
+  // ROLE LABEL
+  // ==========================================
+
+  const getRoleLabel = (roleValue) => {
+    if (!roleValue) {
+      return "System";
+    }
+
+    return roleValue.charAt(0).toUpperCase() + roleValue.slice(1);
+  };
+
+  // ==========================================
+  // ACTIVE FILTERS
+  // ==========================================
+
+  const activeFilterCount = [action, role, resourceType].filter(Boolean).length;
+
+  const clearFilters = () => {
+    setAction("");
+    setRole("");
+    setResourceType("");
+
+    setPagination((previous) => ({
+      ...previous,
+      page: 1,
+    }));
   };
 
   // ==========================================
@@ -205,6 +365,10 @@ const AuditLogs = () => {
     });
   };
 
+  // ==========================================
+  // RENDER
+  // ==========================================
+
   return (
     <div className="min-h-full px-4 py-6 sm:px-6 lg:px-8">
       {/* ==========================================
@@ -245,7 +409,7 @@ const AuditLogs = () => {
           SEARCH
       ========================================== */}
 
-      <div className="relative mb-5">
+      <div className="relative mb-4">
         <Search
           size={17}
           className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600"
@@ -257,6 +421,87 @@ const AuditLogs = () => {
           placeholder="Search audit logs..."
           className="w-full rounded-2xl border border-slate-800 bg-[#0a1222] py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-600 focus:border-blue-500/40"
         />
+      </div>
+
+      {/* ==========================================
+          FILTERS
+      ========================================== */}
+
+      <div className="mb-5 rounded-2xl border border-slate-800 bg-[#0a1222] p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Filter size={16} className="text-slate-500" />
+
+            <span className="text-sm font-medium text-slate-300">Filters</span>
+
+            {activeFilterCount > 0 && (
+              <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] font-semibold text-blue-400">
+                {activeFilterCount}
+              </span>
+            )}
+          </div>
+
+          {activeFilterCount > 0 && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 transition hover:text-white"
+            >
+              <X size={13} />
+              Clear
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {/* ACTION */}
+
+          <select
+            value={action}
+            onChange={(e) => setAction(e.target.value)}
+            className="rounded-xl border border-slate-800 bg-[#050b18] px-3 py-2.5 text-sm text-slate-300 outline-none focus:border-blue-500/40"
+          >
+            <option value="">All actions</option>
+
+            {ACTION_OPTIONS.map((item) => (
+              <option key={item} value={item}>
+                {formatAction(item)}
+              </option>
+            ))}
+          </select>
+
+          {/* ROLE */}
+
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            className="rounded-xl border border-slate-800 bg-[#050b18] px-3 py-2.5 text-sm text-slate-300 outline-none focus:border-blue-500/40"
+          >
+            <option value="">All roles</option>
+
+            {ROLE_OPTIONS.map((item) => (
+              <option key={item} value={item}>
+                {getRoleLabel(item)}
+              </option>
+            ))}
+          </select>
+
+          {/* RESOURCE */}
+
+          <select
+            value={resourceType}
+            onChange={(e) => setResourceType(e.target.value)}
+            className="rounded-xl border border-slate-800 bg-[#050b18] px-3 py-2.5 text-sm text-slate-300 outline-none focus:border-blue-500/40"
+          >
+            <option value="">All resources</option>
+
+            {RESOURCE_OPTIONS.map((item) => (
+              <option key={item} value={item}>
+                {formatResource(item)}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* ==========================================
@@ -313,18 +558,34 @@ const AuditLogs = () => {
                 {/* CONTENT */}
 
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-white">
-                    <span className="font-semibold">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-white">
                       {log?.actor?.name || "System"}
-                    </span>{" "}
-                    <span className="text-slate-500">
-                      {log?.description || formatAction(log?.action)}
                     </span>
+
+                    <span className="rounded-md border border-slate-800 bg-slate-900/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      {getRoleLabel(log?.actor?.role)}
+                    </span>
+
+                    {log?.action && (
+                      <span className="rounded-md border border-blue-500/10 bg-blue-500/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-400">
+                        {formatAction(log.action)}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="mt-1 text-sm text-slate-400">
+                    {log?.description || formatAction(log?.action)}
                   </p>
 
-                  <p className="mt-1 truncate text-xs text-slate-600">
-                    Target: {getTarget(log)}
-                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
+                    <span>
+                      Target:{" "}
+                      <span className="text-slate-500">{getTarget(log)}</span>
+                    </span>
+
+                    {log?.actor?.email && <span>{log.actor.email}</span>}
+                  </div>
                 </div>
 
                 {/* TIME */}

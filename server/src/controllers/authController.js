@@ -2,8 +2,12 @@ import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 import { OAuth2Client } from "google-auth-library";
 import generateToken from "../utils/generateToken.js";
+import { createAuditLog } from "../services/auditLogService.js";
 
-// ========================================== // GOOGLE AUTHENTICATION CLIENT // ==========================================
+// ==========================================
+// GOOGLE AUTHENTICATION CLIENT
+// ==========================================
+
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 /* =========================================================
@@ -42,6 +46,27 @@ export const register = async (req, res) => {
     });
 
     const token = generateToken(user);
+
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      actor: user,
+      action: "USER_REGISTERED",
+      resource: {
+        type: "user",
+        id: user._id,
+      },
+      description: `${user.name || user.email} registered a new customer account.`,
+      metadata: {
+        userId: user._id,
+        email: user.email,
+        role: user.role,
+        authProvider: "local",
+      },
+    });
 
     return res.status(201).json({
       success: true,
@@ -130,6 +155,27 @@ export const login = async (req, res) => {
     await user.save();
 
     const token = generateToken(user);
+
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      actor: user,
+      action: "USER_LOGIN",
+      resource: {
+        type: "user",
+        id: user._id,
+      },
+      description: `${user.name || user.email} logged in successfully.`,
+      metadata: {
+        userId: user._id,
+        email: user.email,
+        role: user.role,
+        authProvider: user.authProvider || "local",
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -302,6 +348,28 @@ export const googleLogin = async (req, res) => {
     // ==========================================
 
     const token = generateToken(user);
+
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      actor: user,
+      action: "GOOGLE_LOGIN",
+      resource: {
+        type: "user",
+        id: user._id,
+      },
+      description: `${user.name || user.email} authenticated using Google.`,
+      metadata: {
+        userId: user._id,
+        email: user.email,
+        role: user.role,
+        authProvider: "google",
+        googleId,
+      },
+    });
 
     // ==========================================
     // RETURN USER
@@ -607,6 +675,41 @@ export const updateProfile = async (req, res) => {
 
     const updatedUser = await User.findById(user._id).select("-password");
 
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      actor: user,
+      action: "PROFILE_UPDATED",
+      resource: {
+        type: "user",
+        id: user._id,
+      },
+      description: `${
+        user.name || user.email
+      } updated their profile and preferences.`,
+      metadata: {
+        userId: user._id,
+        email: user.email,
+        role: user.role,
+        updatedFields: {
+          name: name !== undefined,
+          email: email !== undefined,
+          phone: phone !== undefined,
+          company: company !== undefined,
+          timezone: timezone !== undefined,
+          language: language !== undefined,
+          theme: theme !== undefined,
+          preferredChannel: preferredChannel !== undefined,
+          notificationPreferences: notificationPreferences !== undefined,
+          aiSupport: aiSupport !== undefined,
+          avatar: Boolean(req.file),
+        },
+      },
+    });
+
     return res.status(200).json({
       success: true,
       message: "Profile and preferences updated successfully.",
@@ -666,6 +769,26 @@ export const changePassword = async (req, res) => {
     user.password = await bcrypt.hash(newPassword, 12);
 
     await user.save();
+
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      actor: user,
+      action: "PASSWORD_CHANGED",
+      resource: {
+        type: "user",
+        id: user._id,
+      },
+      description: `${user.name || user.email} changed their password.`,
+      metadata: {
+        userId: user._id,
+        email: user.email,
+        role: user.role,
+      },
+    });
 
     return res.status(200).json({
       success: true,

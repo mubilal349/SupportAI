@@ -4,6 +4,7 @@ import { useAuth } from "../../context/AuthContext";
 
 import {
   Activity,
+  Bell,
   BarChart3,
   BookOpen,
   ChevronLeft,
@@ -92,6 +93,11 @@ const AdminSidebar = () => {
       label: "Role & Permissions",
       path: "/admin/role-permissions",
       icon: ShieldCheck,
+    },
+    {
+      label: "Notification Management",
+      path: "/admin/notifications",
+      icon: Bell,
     },
   ];
 

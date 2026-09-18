@@ -47,6 +47,8 @@ import AdminArticleView from "../pages/admin/knowledge-base/ArticleView";
 
 import CannedResponseEditor from "../pages/admin/canned-responses/CannedResponseEditor";
 
+import NotificationManagement from "../pages/admin/settings/NotificationManagement";
+
 // Customer
 import CustomerDashboard from "../pages/customer/Dashboard";
 import CustomerChat from "../pages/customer/Chat";
@@ -387,6 +389,15 @@ const AppRoutes = () => {
             element={
               <ProtectedRoute allowedRoles={["admin"]}>
                 <AdminNotifications />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/admin/notifications"
+            element={
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <NotificationManagement />
               </ProtectedRoute>
             }
           />
