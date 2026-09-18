@@ -4,6 +4,8 @@ import {
   getSlaStatisticsService,
 } from "../services/slaService.js";
 
+import { createAuditLog } from "../services/auditLogService.js";
+
 // ==========================================
 // GET ADMIN ID
 // ==========================================
@@ -52,7 +54,28 @@ export const updateSlaPolicy = async (req, res) => {
   try {
     const adminId = getAdminId(req);
 
+    // Get previous policy before updating
+    const previousPolicy = await getSlaPolicyService();
+
     const policy = await updateSlaPolicyService(req.body, adminId);
+
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      action: "SLA_SETTINGS_UPDATED",
+      resource: {
+        type: "sla_policy",
+        id: policy?._id || null,
+      },
+      description: "Updated SLA policy settings.",
+      metadata: {
+        previousPolicy,
+        updatedPolicy: policy,
+      },
+    });
 
     return res.status(200).json({
       success: true,

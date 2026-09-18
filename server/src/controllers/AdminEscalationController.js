@@ -1,6 +1,8 @@
 import Ticket from "../models/Ticket.js";
 import User from "../models/User.js";
 
+import { createAuditLog } from "../services/auditLogService.js";
+
 // ==========================================
 // GET ALL ESCALATED TICKETS
 // ==========================================
@@ -156,6 +158,16 @@ export const updateEscalationStatus = async (req, res) => {
       });
     }
 
+    const previousStatus = ticket.status;
+
+    // Do not create an audit entry for an unchanged status.
+    if (previousStatus === status) {
+      return res.status(400).json({
+        success: false,
+        message: `Escalation is already ${status}.`,
+      });
+    }
+
     ticket.status = status;
 
     // Keep SLA resolution timestamp consistent.
@@ -168,6 +180,27 @@ export const updateEscalationStatus = async (req, res) => {
     }
 
     await ticket.save();
+
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      action: "ESCALATION_UPDATED",
+      resource: {
+        type: "escalation",
+        id: ticket._id,
+      },
+      description: `Changed escalation for ticket "${ticket.ticketNumber}" status from "${previousStatus}" to "${status}"`,
+      metadata: {
+        ticketId: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        previousStatus,
+        newStatus: status,
+        updateType: "status",
+      },
+    });
 
     await ticket.populate("assignedAgent", "name fullName email avatar status");
 
@@ -236,6 +269,15 @@ export const assignEscalation = async (req, res) => {
       });
     }
 
+    // ==========================================
+    // STORE PREVIOUS ASSIGNMENT
+    // ==========================================
+
+    const previousAgentId = ticket.assignedAgent || null;
+    const previousAgentName = ticket.assignedAgent
+      ? await User.findById(ticket.assignedAgent).select("name")
+      : null;
+
     ticket.assignedAgent = agent._id;
 
     // Move an open escalation into progress when
@@ -245,6 +287,32 @@ export const assignEscalation = async (req, res) => {
     }
 
     await ticket.save();
+
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      action: "ESCALATION_ASSIGNED",
+      resource: {
+        type: "escalation",
+        id: ticket._id,
+      },
+      description: previousAgentId
+        ? `Reassigned escalation for ticket "${ticket.ticketNumber}" to "${agent.name}"`
+        : `Assigned escalation for ticket "${ticket.ticketNumber}" to "${agent.name}"`,
+      metadata: {
+        ticketId: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        previousAgentId,
+        previousAgentName: previousAgentName?.name || null,
+        newAgentId: agent._id,
+        newAgentName: agent.name,
+        newAgentEmail: agent.email,
+        newStatus: ticket.status,
+      },
+    });
 
     await ticket.populate("assignedAgent", "name fullName email avatar status");
 
@@ -293,9 +361,39 @@ export const updateEscalationPriority = async (req, res) => {
       });
     }
 
+    const previousPriority = ticket.priority;
+
+    if (previousPriority === priority) {
+      return res.status(400).json({
+        success: false,
+        message: `Escalation priority is already ${priority}.`,
+      });
+    }
+
     ticket.priority = priority;
 
     await ticket.save();
+
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      action: "ESCALATION_UPDATED",
+      resource: {
+        type: "escalation",
+        id: ticket._id,
+      },
+      description: `Changed escalation for ticket "${ticket.ticketNumber}" priority from "${previousPriority}" to "${priority}"`,
+      metadata: {
+        ticketId: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        previousPriority,
+        newPriority: priority,
+        updateType: "priority",
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -365,6 +463,26 @@ export const addEscalationNote = async (req, res) => {
 
     await ticket.save();
 
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      action: "ESCALATION_UPDATED",
+      resource: {
+        type: "escalation",
+        id: ticket._id,
+      },
+      description: `Added an internal note to escalated ticket "${ticket.ticketNumber}"`,
+      metadata: {
+        ticketId: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        updateType: "internal_note",
+        noteLength: note.trim().length,
+      },
+    });
+
     return res.status(200).json({
       success: true,
       message: "Internal note added successfully.",
@@ -399,20 +517,44 @@ export const resolveEscalation = async (req, res) => {
       });
     }
 
+    const previousStatus = ticket.status;
+    const resolvedAt = new Date();
+
     ticket.status = "resolved";
 
     // Mark the escalation as handled while keeping
     // its historical escalation information.
     if (ticket.escalation) {
-      ticket.escalation.resolvedAt = new Date();
+      ticket.escalation.resolvedAt = resolvedAt;
       ticket.escalation.resolvedBy = req.user?.id || req.user?._id;
     }
 
     if (ticket.sla) {
-      ticket.sla.resolvedAt = new Date();
+      ticket.sla.resolvedAt = resolvedAt;
     }
 
     await ticket.save();
+
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      action: "ESCALATION_RESOLVED",
+      resource: {
+        type: "escalation",
+        id: ticket._id,
+      },
+      description: `Resolved escalation for ticket "${ticket.ticketNumber}"`,
+      metadata: {
+        ticketId: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        previousStatus,
+        newStatus: "resolved",
+        resolvedAt,
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -462,6 +604,9 @@ export const reassignToHumanSupport = async (req, res) => {
       });
     }
 
+    const previousAgentId = ticket.assignedAgent || null;
+    const previousStatus = ticket.status;
+
     /*
      * IMPORTANT:
      * Keep the ticket UNASSIGNED.
@@ -491,6 +636,28 @@ export const reassignToHumanSupport = async (req, res) => {
     }
 
     await ticket.save();
+
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      action: "ESCALATION_ASSIGNED",
+      resource: {
+        type: "escalation",
+        id: ticket._id,
+      },
+      description: `Reassigned escalated ticket "${ticket.ticketNumber}" to human support queue`,
+      metadata: {
+        ticketId: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        previousAgentId,
+        previousStatus,
+        newStatus: "open",
+        assignedToHumanSupportQueue: true,
+      },
+    });
 
     /*
      * ------------------------------------------------------

@@ -1,4 +1,5 @@
 import KnowledgeBase from "../models/KnowledgeBase.js";
+import { createAuditLog } from "../services/auditLogService.js";
 
 // ============================================================
 // GET ALL ARTICLES
@@ -211,6 +212,46 @@ export const createKnowledgeBaseArticle = async (req, res) => {
       updatedBy: req.user?.id || null,
     });
 
+    // ============================================================
+    // AUDIT LOG
+    // ============================================================
+
+    await createAuditLog({
+      req,
+      action: "ARTICLE_CREATED",
+      resource: {
+        type: "knowledge_base_article",
+        id: article._id,
+      },
+      description: `Created Knowledge Base article "${article.title}".`,
+      metadata: {
+        articleId: article._id,
+        title: article.title,
+        category: article.category,
+        isPublished: article.isPublished,
+        tags: article.tags,
+      },
+    });
+
+    // If the article is created as published, record publication too.
+    if (article.isPublished) {
+      await createAuditLog({
+        req,
+        action: "ARTICLE_PUBLISHED",
+        resource: {
+          type: "knowledge_base_article",
+          id: article._id,
+        },
+        description: `Published Knowledge Base article "${article.title}".`,
+        metadata: {
+          articleId: article._id,
+          title: article.title,
+          category: article.category,
+          publicationSource: "article_creation",
+        },
+      });
+    }
+
     return res.status(201).json({
       success: true,
       message: "Knowledge Base article created.",
@@ -252,6 +293,17 @@ export const updateKnowledgeBaseArticle = async (req, res) => {
         message: "Knowledge Base article not found.",
       });
     }
+
+    // Capture previous values before modifying the document.
+    const previousArticle = {
+      title: article.title,
+      category: article.category,
+      content: article.content,
+      solution: article.solution,
+      solutionVideoUrl: article.solutionVideoUrl,
+      tags: article.tags,
+      isPublished: article.isPublished,
+    };
 
     if (title !== undefined) {
       if (!String(title).trim()) {
@@ -315,6 +367,106 @@ export const updateKnowledgeBaseArticle = async (req, res) => {
 
     await article.save();
 
+    // Determine what changed.
+    const changedFields = [];
+
+    if (previousArticle.title !== article.title) {
+      changedFields.push("title");
+    }
+
+    if (previousArticle.category !== article.category) {
+      changedFields.push("category");
+    }
+
+    if (previousArticle.content !== article.content) {
+      changedFields.push("content");
+    }
+
+    if (previousArticle.solution !== article.solution) {
+      changedFields.push("solution");
+    }
+
+    if (previousArticle.solutionVideoUrl !== article.solutionVideoUrl) {
+      changedFields.push("solutionVideoUrl");
+    }
+
+    if (
+      JSON.stringify(previousArticle.tags || []) !==
+      JSON.stringify(article.tags || [])
+    ) {
+      changedFields.push("tags");
+    }
+
+    if (previousArticle.isPublished !== article.isPublished) {
+      changedFields.push("isPublished");
+    }
+
+    // ============================================================
+    // PUBLICATION STATUS AUDIT
+    // ============================================================
+
+    if (previousArticle.isPublished !== article.isPublished) {
+      await createAuditLog({
+        req,
+        action: article.isPublished
+          ? "ARTICLE_PUBLISHED"
+          : "ARTICLE_UNPUBLISHED",
+        resource: {
+          type: "knowledge_base_article",
+          id: article._id,
+        },
+        description: article.isPublished
+          ? `Published Knowledge Base article "${article.title}".`
+          : `Unpublished Knowledge Base article "${article.title}".`,
+        metadata: {
+          articleId: article._id,
+          title: article.title,
+          category: article.category,
+          previousPublishedState: previousArticle.isPublished,
+          newPublishedState: article.isPublished,
+        },
+      });
+    }
+
+    // ============================================================
+    // ARTICLE UPDATE AUDIT
+    // ============================================================
+
+    if (
+      changedFields.length > 0 &&
+      !(changedFields.length === 1 && changedFields[0] === "isPublished")
+    ) {
+      await createAuditLog({
+        req,
+        action: "ARTICLE_UPDATED",
+        resource: {
+          type: "knowledge_base_article",
+          id: article._id,
+        },
+        description: `Updated Knowledge Base article "${article.title}".`,
+        metadata: {
+          articleId: article._id,
+          title: article.title,
+          category: article.category,
+          changedFields,
+          previousValues: {
+            title: previousArticle.title,
+            category: previousArticle.category,
+            solutionVideoUrl: previousArticle.solutionVideoUrl,
+            tags: previousArticle.tags,
+            isPublished: previousArticle.isPublished,
+          },
+          newValues: {
+            title: article.title,
+            category: article.category,
+            solutionVideoUrl: article.solutionVideoUrl,
+            tags: article.tags,
+            isPublished: article.isPublished,
+          },
+        },
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: "Knowledge Base article updated.",
@@ -338,7 +490,8 @@ export const deleteKnowledgeBaseArticle = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const article = await KnowledgeBase.findByIdAndDelete(id);
+    // Fetch article first so the audit log can retain useful details.
+    const article = await KnowledgeBase.findById(id);
 
     if (!article) {
       return res.status(404).json({
@@ -346,6 +499,29 @@ export const deleteKnowledgeBaseArticle = async (req, res) => {
         message: "Knowledge Base article not found.",
       });
     }
+
+    await KnowledgeBase.findByIdAndDelete(id);
+
+    // ============================================================
+    // AUDIT LOG
+    // ============================================================
+
+    await createAuditLog({
+      req,
+      action: "ARTICLE_DELETED",
+      resource: {
+        type: "knowledge_base_article",
+        id: article._id,
+      },
+      description: `Deleted Knowledge Base article "${article.title}".`,
+      metadata: {
+        articleId: article._id,
+        title: article.title,
+        category: article.category,
+        isPublished: article.isPublished,
+        tags: article.tags,
+      },
+    });
 
     return res.status(200).json({
       success: true,

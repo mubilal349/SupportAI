@@ -14,6 +14,8 @@ import {
   getAdminCustomerActivity,
 } from "../services/adminUserService.js";
 
+import { createAuditLog } from "../services/auditLogService.js";
+
 // ============================================================
 // GET USERS
 // ============================================================
@@ -96,10 +98,69 @@ export const updateUser = async (req, res) => {
       });
     }
 
+    // ========================================================
+    // GET EXISTING USER BEFORE UPDATE
+    // ========================================================
+
+    const existingUser = await User.findById(userId).select(
+      "_id name email role status",
+    );
+
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
     const user = await updateAdminUser({
       userId,
       data: req.body,
       currentAdminId: req.user.id,
+    });
+
+    // ========================================================
+    // DETERMINE CHANGED FIELDS
+    // ========================================================
+
+    const changedFields = [];
+
+    const fieldsToCheck = ["name", "email", "role", "status"];
+
+    for (const field of fieldsToCheck) {
+      if (
+        req.body[field] !== undefined &&
+        String(existingUser[field] ?? "") !== String(req.body[field] ?? "")
+      ) {
+        changedFields.push(field);
+      }
+    }
+
+    // ========================================================
+    // AUDIT LOG
+    // ========================================================
+
+    const isCustomer = existingUser.role === "customer";
+
+    await createAuditLog({
+      req,
+      action: isCustomer ? "CUSTOMER_UPDATED" : "USER_UPDATED",
+      resource: {
+        type: isCustomer ? "customer" : "user",
+        id: existingUser._id,
+      },
+      description: isCustomer
+        ? `Updated customer "${existingUser.name}"`
+        : `Updated user "${existingUser.name}"`,
+      metadata: {
+        userId: existingUser._id,
+        previousName: existingUser.name,
+        previousEmail: existingUser.email,
+        previousRole: existingUser.role,
+        previousStatus: existingUser.status,
+        changedFields,
+        changes: req.body,
+      },
     });
 
     return res.status(200).json({
@@ -124,7 +185,6 @@ export const updateUser = async (req, res) => {
 export const updateUserStatus = async (req, res) => {
   try {
     const { userId } = req.params;
-
     const { status } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(userId)) {
@@ -134,10 +194,53 @@ export const updateUserStatus = async (req, res) => {
       });
     }
 
+    // ========================================================
+    // GET EXISTING USER
+    // ========================================================
+
+    const existingUser = await User.findById(userId).select(
+      "_id name email role status",
+    );
+
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    const previousStatus = existingUser.status;
+
     const user = await updateAdminUserStatus({
       userId,
       status,
       currentAdminId: req.user.id,
+    });
+
+    // ========================================================
+    // AUDIT LOG
+    // ========================================================
+
+    const isCustomer = existingUser.role === "customer";
+
+    await createAuditLog({
+      req,
+      action: isCustomer ? "CUSTOMER_STATUS_CHANGED" : "USER_STATUS_CHANGED",
+      resource: {
+        type: isCustomer ? "customer" : "user",
+        id: existingUser._id,
+      },
+      description: isCustomer
+        ? `Changed customer "${existingUser.name}" status from "${previousStatus}" to "${status}"`
+        : `Changed user "${existingUser.name}" status from "${previousStatus}" to "${status}"`,
+      metadata: {
+        userId: existingUser._id,
+        userName: existingUser.name,
+        userEmail: existingUser.email,
+        role: existingUser.role,
+        previousStatus,
+        newStatus: status,
+      },
     });
 
     return res.status(200).json({
@@ -170,9 +273,49 @@ export const deleteUser = async (req, res) => {
       });
     }
 
+    // ========================================================
+    // GET USER BEFORE DELETE
+    // ========================================================
+
+    const existingUser = await User.findById(userId).select(
+      "_id name email role status",
+    );
+
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
     const deletedUser = await deleteAdminUser({
       userId,
       currentAdminId: req.user.id,
+    });
+
+    // ========================================================
+    // AUDIT LOG
+    // ========================================================
+
+    const isCustomer = existingUser.role === "customer";
+
+    await createAuditLog({
+      req,
+      action: isCustomer ? "CUSTOMER_DELETED" : "USER_DELETED",
+      resource: {
+        type: isCustomer ? "customer" : "user",
+        id: existingUser._id,
+      },
+      description: isCustomer
+        ? `Deleted customer "${existingUser.name}"`
+        : `Deleted user "${existingUser.name}"`,
+      metadata: {
+        userId: existingUser._id,
+        name: existingUser.name,
+        email: existingUser.email,
+        role: existingUser.role,
+        status: existingUser.status,
+      },
     });
 
     return res.status(200).json({
@@ -212,7 +355,9 @@ export const getUserStats = async (req, res) => {
   }
 };
 
-//CreateAdminUser Function
+// ============================================================
+// CREATE ADMIN USER
+// ============================================================
 
 export const createAdminUser = async (req, res) => {
   try {
@@ -315,6 +460,31 @@ export const createAdminUser = async (req, res) => {
       password: hashedPassword,
       role,
       status,
+    });
+
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    const isCustomer = role === "customer";
+
+    await createAuditLog({
+      req,
+      action: isCustomer ? "CUSTOMER_CREATED" : "USER_CREATED",
+      resource: {
+        type: isCustomer ? "customer" : "user",
+        id: user._id,
+      },
+      description: isCustomer
+        ? `Created customer "${user.name}"`
+        : `Created ${role} user "${user.name}"`,
+      metadata: {
+        userId: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+      },
     });
 
     // ==========================================
@@ -487,7 +657,7 @@ export const getAdminCustomerActivityController = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid user ID.",
+        message: error.message || "Failed to load customer activity.",
       });
     }
 

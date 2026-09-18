@@ -10,6 +10,8 @@ import {
   updateAdminAgentAvailability,
 } from "../services/adminAgentService.js";
 
+import { createAuditLog } from "../services/auditLogService.js";
+
 // ============================================================
 // GET ALL AGENTS
 // ============================================================
@@ -164,6 +166,30 @@ export const createAdminAgent = async (req, res) => {
 
     delete agentResponse.password;
 
+    // ============================================================
+    // AUDIT LOG
+    // ============================================================
+
+    await createAuditLog({
+      req,
+      action: "AGENT_CREATED",
+
+      resource: {
+        type: "agent",
+        id: agent._id,
+      },
+
+      description: `Created agent "${agent.name}"`,
+
+      metadata: {
+        agentId: agent._id,
+        name: agent.name,
+        email: agent.email,
+        status: agent.status,
+        availability: agent.availability,
+      },
+    });
+
     return res.status(201).json({
       success: true,
       message: "Agent created successfully.",
@@ -246,6 +272,21 @@ export const updateAgent = async (req, res) => {
       }
     }
 
+    // ============================================================
+    // GET CURRENT AGENT BEFORE UPDATE
+    // ============================================================
+
+    const existingAgent = await User.findById(agentId).select(
+      "name email phone company timezone language status availability role",
+    );
+
+    if (!existingAgent) {
+      return res.status(404).json({
+        success: false,
+        message: "Agent not found.",
+      });
+    }
+
     const updatedAgent = await updateAdminAgent(agentId, {
       name,
       email: email?.trim().toLowerCase(),
@@ -263,6 +304,53 @@ export const updateAgent = async (req, res) => {
         message: "Agent not found.",
       });
     }
+
+    // ============================================================
+    // DETECT CHANGED FIELDS
+    // ============================================================
+
+    const changedFields = [];
+
+    const fieldsToCheck = [
+      "name",
+      "email",
+      "phone",
+      "company",
+      "timezone",
+      "language",
+      "status",
+      "availability",
+    ];
+
+    for (const field of fieldsToCheck) {
+      if (
+        req.body[field] !== undefined &&
+        String(existingAgent[field] ?? "") !== String(updatedAgent[field] ?? "")
+      ) {
+        changedFields.push(field);
+      }
+    }
+
+    // ============================================================
+    // AUDIT LOG
+    // ============================================================
+
+    await createAuditLog({
+      req,
+      action: "AGENT_UPDATED",
+
+      resource: {
+        type: "agent",
+        id: updatedAgent._id,
+      },
+
+      description: `Updated agent "${updatedAgent.name}"`,
+
+      metadata: {
+        agentId: updatedAgent._id,
+        changedFields,
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -304,6 +392,21 @@ export const updateAgentStatus = async (req, res) => {
       });
     }
 
+    // ============================================================
+    // GET CURRENT STATUS
+    // ============================================================
+
+    const existingAgent = await User.findById(agentId).select("name status");
+
+    if (!existingAgent) {
+      return res.status(404).json({
+        success: false,
+        message: "Agent not found.",
+      });
+    }
+
+    const previousStatus = existingAgent.status;
+
     const agent = await updateAdminAgentStatus(agentId, status);
 
     if (!agent) {
@@ -312,6 +415,28 @@ export const updateAgentStatus = async (req, res) => {
         message: "Agent not found.",
       });
     }
+
+    // ============================================================
+    // AUDIT LOG
+    // ============================================================
+
+    await createAuditLog({
+      req,
+      action: "AGENT_STATUS_CHANGED",
+
+      resource: {
+        type: "agent",
+        id: agent._id,
+      },
+
+      description: `Changed agent "${agent.name}" status from "${previousStatus}" to "${status}"`,
+
+      metadata: {
+        agentId: agent._id,
+        previousStatus,
+        newStatus: status,
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -353,6 +478,22 @@ export const updateAgentAvailability = async (req, res) => {
       });
     }
 
+    // ============================================================
+    // GET CURRENT AVAILABILITY
+    // ============================================================
+
+    const existingAgent =
+      await User.findById(agentId).select("name availability");
+
+    if (!existingAgent) {
+      return res.status(404).json({
+        success: false,
+        message: "Agent not found.",
+      });
+    }
+
+    const previousAvailability = existingAgent.availability;
+
     const agent = await updateAdminAgentAvailability(agentId, availability);
 
     if (!agent) {
@@ -361,6 +502,28 @@ export const updateAgentAvailability = async (req, res) => {
         message: "Agent not found.",
       });
     }
+
+    // ============================================================
+    // AUDIT LOG
+    // ============================================================
+
+    await createAuditLog({
+      req,
+      action: "AGENT_AVAILABILITY_CHANGED",
+
+      resource: {
+        type: "agent",
+        id: agent._id,
+      },
+
+      description: `Changed agent "${agent.name}" availability from "${previousAvailability}" to "${availability}"`,
+
+      metadata: {
+        agentId: agent._id,
+        previousAvailability,
+        newAvailability: availability,
+      },
+    });
 
     return res.status(200).json({
       success: true,

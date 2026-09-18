@@ -3,6 +3,7 @@ import Ticket from "../models/Ticket.js";
 import User from "../models/User.js";
 
 import { notifyAgentTicketAssigned } from "../services/notificationService.js";
+import { createAuditLog } from "../services/auditLogService.js";
 
 // ============================================================
 // GET ALL TICKETS - ADMIN
@@ -311,6 +312,26 @@ export const updateAdminTicketStatus = async (req, res) => {
     await ticket.save();
 
     // ========================================================
+    // AUDIT LOG
+    // ========================================================
+
+    await createAuditLog({
+      req,
+      action: "TICKET_STATUS_CHANGED",
+      resource: {
+        type: "ticket",
+        id: ticket._id,
+      },
+      description: `Changed ticket "${ticket.ticketNumber}" status from "${oldStatus}" to "${status}"`,
+      metadata: {
+        ticketId: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        previousStatus: oldStatus,
+        newStatus: status,
+      },
+    });
+
+    // ========================================================
     // RESPONSE
     // ========================================================
 
@@ -401,6 +422,26 @@ export const updateAdminTicketPriority = async (req, res) => {
     // ========================================================
 
     await ticket.save();
+
+    // ========================================================
+    // AUDIT LOG
+    // ========================================================
+
+    await createAuditLog({
+      req,
+      action: "TICKET_PRIORITY_CHANGED",
+      resource: {
+        type: "ticket",
+        id: ticket._id,
+      },
+      description: `Changed ticket "${ticket.ticketNumber}" priority from "${oldPriority}" to "${priority}"`,
+      metadata: {
+        ticketId: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        previousPriority: oldPriority,
+        newPriority: priority,
+      },
+    });
 
     // ========================================================
     // RESPONSE
@@ -554,6 +595,30 @@ export const assignAdminTicket = async (req, res) => {
     // ==========================================
 
     await ticket.save();
+
+    // ==========================================
+    // AUDIT LOG
+    // ==========================================
+
+    await createAuditLog({
+      req,
+      action: previousAgentId ? "TICKET_REASSIGNED" : "TICKET_ASSIGNED",
+      resource: {
+        type: "ticket",
+        id: ticket._id,
+      },
+      description: previousAgentId
+        ? `Reassigned ticket "${ticket.ticketNumber}" to agent "${agent.name}"`
+        : `Assigned ticket "${ticket.ticketNumber}" to agent "${agent.name}"`,
+      metadata: {
+        ticketId: ticket._id,
+        ticketNumber: ticket.ticketNumber,
+        previousAgentId,
+        newAgentId: agent._id,
+        newAgentName: agent.name,
+        newAgentEmail: agent.email,
+      },
+    });
 
     // ==========================================
     // NOTIFY ASSIGNED AGENT
